@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE action_executions SET\n                status = ?,\n                completed_at = ?\n            WHERE id = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "00c37e45af74e15440f55ce84e3c90aed6de854bfdb20385bf4ae87b2ffc787b"
+}

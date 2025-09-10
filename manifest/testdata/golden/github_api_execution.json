@@ -1,0 +1,19 @@
+{
+  "auth_info": {
+    "provider": "github",
+    "scopes": [
+      "user:email"
+    ],
+    "token_type": "Bearer"
+  },
+  "duration_ms": 150,
+  "execution_trn": "trn:manifest:tenant123:execution/exec_456",
+  "response_data": {
+    "email": "test@example.com",
+    "id": 12345,
+    "login": "testuser",
+    "name": "Test User"
+  },
+  "status": "Success",
+  "status_code": 200
+}

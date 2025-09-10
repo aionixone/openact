@@ -1,0 +1,7 @@
+{
+  "access_token": "ghp_mock_token_12345",
+  "expires_at": "2025-09-08T23:04:03.100627Z",
+  "headers": {},
+  "provider": "github",
+  "token_type": "Bearer"
+}

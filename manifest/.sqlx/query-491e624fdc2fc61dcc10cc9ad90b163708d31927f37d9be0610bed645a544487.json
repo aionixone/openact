@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT CAST(AVG(duration_ms) AS REAL) FROM action_executions WHERE action_trn = ? AND duration_ms IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "CAST(AVG(duration_ms) AS REAL)",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "491e624fdc2fc61dcc10cc9ad90b163708d31927f37d9be0610bed645a544487"
+}

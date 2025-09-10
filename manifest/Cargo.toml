@@ -1,0 +1,57 @@
+[package]
+name = "manifest"
+version = "0.1.0"
+edition = "2021"
+authors = ["TRS Team"]
+description = "OpenAPI document parser and TRS tool generator"
+license = "MIT"
+readme = "README.md"
+
+
+[dependencies]
+# Core functionality
+clap = { version = "4.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+
+# HTTP client for API calls
+reqwest = { version = "0.12", features = ["json", "stream"] }
+url = "2.5"
+
+# Database and storage
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+sha2 = "0.10"
+md5 = "0.7"
+
+# Time and date handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging and configuration
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "0.8"
+
+# TRN validation
+trn-rust = { path = "../../trn-rust" }
+
+# YAML processing for OpenAPI
+yaml-rust = "0.4"
+
+# Tree-sitter for CST parsing
+tree-sitter = "0.25"
+tree-sitter-json = "0.24"
+tree-sitter-yaml = "0.7.1"
+
+# HTTP API dependencies
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.0"

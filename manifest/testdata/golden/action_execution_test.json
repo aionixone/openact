@@ -1,0 +1,21 @@
+{
+  "duration_ms": 0,
+  "error_message": null,
+  "execution_trn": "trn:manifest:test_tenant:execution/exec123",
+  "response_data": {
+    "auth_provider": "github",
+    "auth_type": "oauth2",
+    "headers": {
+      "Authorization": "Bearer ghp_mock_token_12345"
+    },
+    "method": "GET",
+    "parameters": {},
+    "path": "/user",
+    "status": "executed",
+    "timestamp": "2025-09-08T22:04:03.100440Z"
+  },
+  "response_headers": {},
+  "status": "Running",
+  "status_code": 200,
+  "timestamp": "2025-09-08T22:04:03.100442Z"
+}

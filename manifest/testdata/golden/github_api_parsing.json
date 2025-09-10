@@ -1,0 +1,43 @@
+{
+  "actions": [
+    {
+      "auth_config": {
+        "auth_type": "oauth2",
+        "provider": "github",
+        "scopes": [
+          "user:email"
+        ]
+      },
+      "extensions": {
+        "x-action-type": "read",
+        "x-rate-limit": 5000
+      },
+      "method": "GET",
+      "name": "getUser",
+      "path": "/user",
+      "provider": "github"
+    },
+    {
+      "auth_config": {
+        "auth_type": "oauth2",
+        "provider": "github",
+        "scopes": [
+          "repo"
+        ]
+      },
+      "extensions": {
+        "x-action-type": "create",
+        "x-rate-limit": 100
+      },
+      "method": "POST",
+      "name": "createRepo",
+      "path": "/user/repos",
+      "provider": "github"
+    }
+  ],
+  "stats": {
+    "failed_operations": 0,
+    "successful_actions": 2,
+    "total_operations": 2
+  }
+}

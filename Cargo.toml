@@ -1,0 +1,111 @@
+[workspace]
+resolver = "2"
+members = [
+    "authflow",
+    "manifest",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["TRS Team"]
+license = "MIT"
+repository = "https://github.com/aionixone/openact"
+description = "OpenAct - API authentication flow and manifest management system"
+
+[workspace.dependencies]
+# Core dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+anyhow = "1.0"
+thiserror = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP and networking
+reqwest = { version = "0.12", features = ["json", "stream"] }
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+
+# Time and utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+sha2 = "0.10"
+md5 = "0.7"
+
+# CLI
+clap = { version = "4.0", features = ["derive"] }
+
+# Configuration
+toml = "0.8"
+
+# Tree-sitter for parsing
+tree-sitter = "0.25"
+tree-sitter-json = "0.24"
+tree-sitter-yaml = "0.7.1"
+
+# YAML processing
+yaml-rust = "0.4"
+
+# URL handling
+url = "2.5"
+
+# TRN validation
+trn-rust = { path = "../trn-rust" }
+
+# StepFlow DSL
+stepflow-dsl = { package = "stepflow-dsl", path = "../stepflow-dsl" }
+
+# OAuth2
+oauth2 = { version = "4", default-features = false, features = ["reqwest"] }
+
+# Crypto
+hmac = "0.12.1"
+hex = "0.4.3"
+jsonwebtoken = "9.3.1"
+time = "0.3.41"
+base64 = "0.22"
+
+# AWS
+aws-sigv4 = "1.3.4"
+aws-types = "1.3.8"
+aws-credential-types = "1.2.5"
+
+# HTTP types
+http = "1.3.1"
+idna = "1.0.6"
+
+# Async utilities
+futures = "0.3"
+async-trait = "0.1"
+
+# Random and encoding
+rand = "0.8"
+urlencoding = "2.1"
+
+# Collections
+indexmap = { version = "2.2", features = ["serde"] }
+
+# Optional features (moved to individual crates)
+# vaultrs = { version = "0.7" }
+# aes-gcm = { version = "0.10" }
+
+# Development dependencies
+tokio-test = "0.4"
+httpmock = "0.7"
+
+[workspace.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[workspace.metadata.release]
+# Release configuration
+pre-release-commit-message = "chore: release {{version}}"
+tag-message = "Release {{version}}"
+tag-prefix = "v"

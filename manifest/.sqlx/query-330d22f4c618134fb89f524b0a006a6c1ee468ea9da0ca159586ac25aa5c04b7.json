@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO action_executions (\n                execution_trn, action_trn, tenant, input_data, \n                status, retry_count, created_at\n            ) VALUES (?, ?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "330d22f4c618134fb89f524b0a006a6c1ee468ea9da0ca159586ac25aa5c04b7"
+}
