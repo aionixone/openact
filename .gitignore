@@ -1,0 +1,31 @@
+# Rust build
+/target/
+**/*.rs.bk
+
+# Logs
+/server.log
+*.log
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
+
+# Environment
+.env
+.env.*
+
+# Databases
+authflow/data/*.db
+authflow/data/*.sqlite
+authflow/data/*.sqlite3
+
+# Node / JS (if any)
+node_modules/
+dist/
+build/
+coverage/
+
+# Swap / temp
+*.swp
+*.swo
