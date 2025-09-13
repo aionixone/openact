@@ -167,7 +167,7 @@ impl ActionRunner {
             "path": action.path,
             "headers": headers,
             "auth_provider": auth_context.as_ref().map(|a| &a.provider),
-            "auth_type": action.auth_config.as_ref().map(|a| &a.auth_type),
+            "auth_scheme": action.auth_config.as_ref().and_then(|a| a.scheme.as_ref()),
             "parameters": context.parameters,
             "timestamp": context.timestamp,
             "status": "executed"

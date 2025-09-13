@@ -17,7 +17,7 @@
 - Provider 指 API 域或服务（如 `slack.com`、`api.github.com`、`googleapis.com`）。
 - Provider 级默认配置按"**主域名**"匹配（见 §2），用于统一鉴权与执行规则。
 
-### 1.3 TRN（Tenant Resource Name）
+### 1.3 TRN（Tool Resource Name）
 - `connection_trn` 是跨模块引用认证连接的标识字符串。格式不强制，**但** SHOULD 全局唯一且可被 AuthFlow 解析。
 
 ---

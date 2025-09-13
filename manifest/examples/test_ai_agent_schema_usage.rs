@@ -76,10 +76,7 @@ fn analyze_action_capability(action: &manifest::action::models::Action) {
     
     // 分析认证要求
     if let Some(auth_config) = &action.auth_config {
-        println!("      - 认证: {:?} ({})", auth_config.auth_type, auth_config.provider);
-        if !auth_config.scopes.is_empty() {
-            println!("        * 权限范围: {:?}", auth_config.scopes);
-        }
+        println!("      - 认证: TRN={} Scheme={:?}", auth_config.connection_trn, auth_config.scheme);
     }
 }
 

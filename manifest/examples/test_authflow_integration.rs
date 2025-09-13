@@ -31,46 +31,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn test_auth_config_parsing() {
     println!("\n📋 Testing Authentication Configuration Parsing");
     
-    // Test OAuth2 configuration
+    // Test AuthConfig (spec-compliant)
     let oauth2_config = json!({
-        "type": "oauth2",
-        "provider": "github",
-        "scopes": ["user:email", "repo:read"]
+        "connection_trn": "trn:authflow:tenant123:connection/github-user123",
+        "injection": {
+            "type": "jsonada",
+            "mapping": "{% {\\\"headers\\\": {\\\"Authorization\\\": \\\"Bearer \\\" & $access_token } } %}"
+        }
     });
-    
     let auth_config = manifest::action::AuthConfig::from_extension(&oauth2_config).unwrap();
-    assert_eq!(auth_config.auth_type, "oauth2");
-    assert_eq!(auth_config.provider, "github");
-    assert_eq!(auth_config.scopes, vec!["user:email", "repo:read"]);
+    assert_eq!(auth_config.connection_trn, "trn:authflow:tenant123:connection/github-user123");
     println!("   ✅ OAuth2 config parsed successfully");
     
-    // Test API Key configuration
-    let api_key_config = json!({
-        "type": "api_key",
-        "provider": "custom",
-        "api_key": "sk-1234567890",
-        "header_name": "X-API-Key"
-    });
-    
-    let auth_config = manifest::action::AuthConfig::from_extension(&api_key_config).unwrap();
-    assert_eq!(auth_config.auth_type, "api_key");
-    assert_eq!(auth_config.provider, "custom");
-    assert_eq!(auth_config.parameters.get("api_key").unwrap(), &json!("sk-1234567890"));
-    println!("   ✅ API Key config parsed successfully");
-    
-    // Test Basic Auth configuration
-    let basic_config = json!({
-        "type": "basic",
-        "provider": "custom",
-        "username": "user123",
-        "password": "pass456"
-    });
-    
-    let auth_config = manifest::action::AuthConfig::from_extension(&basic_config).unwrap();
-    assert_eq!(auth_config.auth_type, "basic");
-    assert_eq!(auth_config.provider, "custom");
-    assert_eq!(auth_config.parameters.get("username").unwrap(), &json!("user123"));
-    println!("   ✅ Basic Auth config parsed successfully");
+    // Legacy tests removed; TRN-based retrieval is the new path
 }
 
 async fn test_auth_adapter() -> Result<(), Box<dyn std::error::Error>> {
@@ -78,38 +51,22 @@ async fn test_auth_adapter() -> Result<(), Box<dyn std::error::Error>> {
     
     let adapter = AuthAdapter::new("test_tenant".to_string());
     
-    // Test OAuth2 authentication
+    // Test TRN-based authentication
     let oauth2_config = manifest::action::AuthConfig {
-        auth_type: "oauth2".to_string(),
-        provider: "github".to_string(),
-        scopes: vec!["user:email".to_string()],
-        parameters: HashMap::new(),
+        connection_trn: "trn:authflow:test_tenant:connection/github-user123".to_string(),
+        scheme: Some("oauth2".to_string()),
+        injection: manifest::action::InjectionConfig { r#type: "jsonada".to_string(), mapping: "{% {} %}".to_string() },
+        expiry: None,
+        refresh: None,
+        failure: None,
     };
-    
     let auth_context = adapter.get_auth_for_action(&oauth2_config).await?;
     assert_eq!(auth_context.provider, "github");
     assert_eq!(auth_context.token_type, "Bearer");
     assert!(auth_context.access_token.starts_with("ghp_"));
     println!("   ✅ OAuth2 authentication context created");
     
-    // Test API Key authentication
-    let mut api_key_params = HashMap::new();
-    api_key_params.insert("api_key".to_string(), json!("sk-1234567890"));
-    api_key_params.insert("header_name".to_string(), json!("X-API-Key"));
-    
-    let api_key_config = manifest::action::AuthConfig {
-        auth_type: "api_key".to_string(),
-        provider: "custom".to_string(),
-        scopes: vec![],
-        parameters: api_key_params,
-    };
-    
-    let auth_context = adapter.get_auth_for_action(&api_key_config).await?;
-    assert_eq!(auth_context.provider, "custom");
-    assert_eq!(auth_context.token_type, "ApiKey");
-    assert_eq!(auth_context.access_token, "sk-1234567890");
-    assert_eq!(auth_context.headers.get("X-API-Key").unwrap(), "sk-1234567890");
-    println!("   ✅ API Key authentication context created");
+    // API Key legacy test removed
     
     Ok(())
 }
@@ -142,9 +99,8 @@ async fn test_action_parser_with_auth() -> Result<(), Box<dyn std::error::Error>
         println!("      - Path: {}", action.path);
         
         if let Some(auth_config) = &action.auth_config {
-            println!("      - Auth Type: {}", auth_config.auth_type);
-            println!("      - Provider: {}", auth_config.provider);
-            println!("      - Scopes: {:?}", auth_config.scopes);
+            println!("      - Connection TRN: {}", auth_config.connection_trn);
+            println!("      - Scheme: {:?}", auth_config.scheme);
         } else {
             println!("      - No authentication required");
         }
@@ -173,12 +129,14 @@ async fn test_action_runner_with_auth() -> Result<(), Box<dyn std::error::Error>
         "trn:manifest:test_tenant:action/github-getUser".to_string(),
     );
     
-    // Set authentication configuration
+    // Set authentication configuration (spec-compliant)
     action.auth_config = Some(manifest::action::AuthConfig {
-        auth_type: "oauth2".to_string(),
-        provider: "github".to_string(),
-        scopes: vec!["user:email".to_string()],
-        parameters: HashMap::new(),
+        connection_trn: "trn:authflow:test_tenant:connection/github-user123".to_string(),
+        scheme: Some("oauth2".to_string()),
+        injection: manifest::action::InjectionConfig { r#type: "jsonada".to_string(), mapping: "{% {} %}".to_string() },
+        expiry: None,
+        refresh: None,
+        failure: None,
     });
     
     // Create execution context
@@ -223,7 +181,7 @@ fn create_openapi_spec_with_auth() -> OpenApi30Spec {
             paths: {
                 let mut paths = HashMap::new();
                 
-                // GET /user with OAuth2 authentication
+                // GET /user with TRN-based authentication
                 paths.insert("/user".to_string(), PathItem {
                     reference: None,
                     summary: None,
@@ -258,9 +216,8 @@ fn create_openapi_spec_with_auth() -> OpenApi30Spec {
                         extensions: {
                             let mut extensions = HashMap::new();
                             extensions.insert("x-auth".to_string(), json!({
-                                "type": "oauth2",
-                                "provider": "github",
-                                "scopes": ["user:email"]
+                                "connection_trn": "trn:authflow:test_tenant:connection/github-user123",
+                                "injection": {"type": "jsonada", "mapping": "{% {} %}"}
                             }));
                             extensions
                         },

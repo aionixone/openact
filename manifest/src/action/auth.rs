@@ -6,68 +6,68 @@ use serde_json::Value;
 use std::collections::HashMap;
 use crate::utils::error::{OpenApiToolError, Result};
 
-/// Authentication configuration parsed from x-auth extension
+/// Authentication configuration parsed from x-auth extension (spec compliant)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AuthConfig {
-    /// Authentication type (oauth2, api_key, bearer, basic, none)
-    pub auth_type: String,
-    /// Provider name (github, google, slack, etc.)
-    pub provider: String,
-    /// Required scopes for OAuth2
-    pub scopes: Vec<String>,
-    /// Additional authentication parameters
-    pub parameters: HashMap<String, Value>,
+    pub connection_trn: String,
+    #[serde(default)]
+    pub scheme: Option<String>,
+    pub injection: InjectionConfig,
+    #[serde(default)]
+    pub expiry: Option<ExpiryConfig>,
+    #[serde(default)]
+    pub refresh: Option<RefreshConfig>,
+    #[serde(default)]
+    pub failure: Option<FailureConfig>,
 }
 
-impl Default for AuthConfig {
-    fn default() -> Self {
-        Self {
-            auth_type: "none".to_string(),
-            provider: "default".to_string(),
-            scopes: vec![],
-            parameters: HashMap::new(),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InjectionConfig {
+    #[serde(default = "default_jsonada_type")] pub r#type: String,
+    pub mapping: String,
 }
+fn default_jsonada_type() -> String { "jsonada".to_string() }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExpirySource { Field, Header, None }
+impl Default for ExpirySource { fn default() -> Self { ExpirySource::Field } }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExpiryConfig {
+    #[serde(default)] pub source: ExpirySource,
+    #[serde(default)] pub field: Option<String>,
+    #[serde(default)] pub header: Option<String>,
+    #[serde(default = "default_clock_skew_ms")] pub clock_skew_ms: u64,
+    #[serde(default)] pub min_ttl_ms: u64,
+}
+fn default_clock_skew_ms() -> u64 { 30_000 }
+impl Default for ExpiryConfig {
+    fn default() -> Self { Self { source: ExpirySource::Field, field: None, header: None, clock_skew_ms: 30_000, min_ttl_ms: 0 } }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefreshWhen { Proactive, #[serde(alias = "on_401")] On401, #[serde(alias = "proactive_or_401")] ProactiveOr401 }
+impl Default for RefreshWhen { fn default() -> Self { RefreshWhen::ProactiveOr401 } }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RefreshConfig { #[serde(default)] pub when: RefreshWhen, #[serde(default = "default_refresh_retries")] pub max_retries: u32, #[serde(default)] pub cooldown_ms: u64 }
+fn default_refresh_retries() -> u32 { 1 }
+impl Default for RefreshConfig { fn default() -> Self { Self { when: RefreshWhen::ProactiveOr401, max_retries: 1, cooldown_ms: 0 } } }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FailureConfig { #[serde(default = "default_reauth_error_code")] pub reauth_error_code: String, #[serde(default = "default_bubble_provider_message")] pub bubble_provider_message: bool }
+fn default_reauth_error_code() -> String { "E_AUTH".to_string() }
+fn default_bubble_provider_message() -> bool { true }
+impl Default for FailureConfig { fn default() -> Self { Self { reauth_error_code: default_reauth_error_code(), bubble_provider_message: true } } }
 
 impl AuthConfig {
-    /// Parse authentication configuration from x-auth extension
+    /// Parse authentication configuration from x-auth extension (serde-based)
     pub fn from_extension(extension_value: &Value) -> Result<Self> {
-        if let Some(obj) = extension_value.as_object() {
-            let auth_type = obj.get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("none")
-                .to_string();
-            
-            let provider = obj.get("provider")
-                .and_then(|v| v.as_str())
-                .unwrap_or("default")
-                .to_string();
-            
-            let scopes = obj.get("scopes")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter()
-                    .filter_map(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .collect())
-                .unwrap_or_default();
-            
-            let mut parameters = HashMap::new();
-            for (key, value) in obj {
-                if !["type", "provider", "scopes"].contains(&key.as_str()) {
-                    parameters.insert(key.clone(), value.clone());
-                }
-            }
-            
-            Ok(Self {
-                auth_type,
-                provider,
-                scopes,
-                parameters,
-            })
-        } else {
-            Ok(Self::default())
-        }
+        let cfg: AuthConfig = serde_json::from_value(extension_value.clone())
+            .map_err(|e| OpenApiToolError::parse(format!("x-auth parse error: {}", e)))?;
+        Ok(cfg)
     }
 }
 
@@ -160,90 +160,17 @@ impl AuthAdapter {
         }
     }
     
-    /// Get authentication context for a provider
-    pub async fn get_auth_context(&self, provider: &str) -> Result<AuthContext> {
-        // TODO: Replace with real AuthFlow connection store query
-        // For now, use mock data
-        self.mock_connections
-            .get(provider)
-            .cloned()
-            .ok_or_else(|| OpenApiToolError::ValidationError(
-                format!("No authentication found for provider: {}", provider)
-            ))
+    /// Get authentication context by TRN (stub implementation)
+    pub async fn get_auth_context_by_trn(&self, connection_trn: &str) -> Result<AuthContext> {
+        let provider = if connection_trn.contains("github") { "github" } else { "default" };
+        let token = if provider == "github" { "ghp_mock_token_12345" } else { "mock_token" };
+        Ok(AuthContext::new(token.to_string(), "Bearer".to_string(), provider.to_string())
+            .with_expires_at(chrono::Utc::now() + chrono::Duration::hours(1)))
     }
     
-    /// Get authentication context for an action
+    /// Get authentication context for an action (by TRN)
     pub async fn get_auth_for_action(&self, auth_config: &AuthConfig) -> Result<AuthContext> {
-        match auth_config.auth_type.as_str() {
-            "oauth2" | "bearer" => {
-                let mut context = self.get_auth_context(&auth_config.provider).await?;
-                
-                // Add any additional headers from parameters
-                for (key, value) in &auth_config.parameters {
-                    if let Some(header_value) = value.as_str() {
-                        context = context.with_header(key.clone(), header_value.to_string());
-                    }
-                }
-                
-                Ok(context)
-            }
-            "api_key" => {
-                // Handle API key authentication
-                let api_key = auth_config.parameters
-                    .get("api_key")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| OpenApiToolError::ValidationError(
-                        "API key not found in auth parameters".to_string()
-                    ))?;
-                
-                let header_name = auth_config.parameters
-                    .get("header_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("X-API-Key");
-                
-                Ok(AuthContext::new(
-                    api_key.to_string(),
-                    "ApiKey".to_string(),
-                    auth_config.provider.clone(),
-                ).with_header(header_name.to_string(), api_key.to_string()))
-            }
-            "basic" => {
-                // Handle basic authentication
-                let username = auth_config.parameters
-                    .get("username")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| OpenApiToolError::ValidationError(
-                        "Username not found in auth parameters".to_string()
-                    ))?;
-                
-                let password = auth_config.parameters
-                    .get("password")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| OpenApiToolError::ValidationError(
-                        "Password not found in auth parameters".to_string()
-                    ))?;
-                
-                // For now, use a simple base64 encoding (in production, use proper base64 crate)
-                let credentials = format!("{}:{}", username, password);
-                
-                Ok(AuthContext::new(
-                    credentials,
-                    "Basic".to_string(),
-                    auth_config.provider.clone(),
-                ))
-            }
-            "none" => {
-                // No authentication required
-                Ok(AuthContext::new(
-                    "".to_string(),
-                    "None".to_string(),
-                    "none".to_string(),
-                ))
-            }
-            _ => Err(OpenApiToolError::ValidationError(
-                format!("Unsupported authentication type: {}", auth_config.auth_type)
-            )),
-        }
+        self.get_auth_context_by_trn(&auth_config.connection_trn).await
     }
     
     /// Refresh authentication context if needed
@@ -265,28 +192,15 @@ impl AuthAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
     #[test]
     fn test_auth_config_from_extension() {
-        let extension = json!({
-            "type": "oauth2",
-            "provider": "github",
-            "scopes": ["user:email", "repo:read"]
+        let extension = serde_json::json!({
+            "connection_trn": "trn:authflow:tenant:connection/github",
+            "injection": { "type": "jsonada", "mapping": "{% $access_token %}" }
         });
-        
         let config = AuthConfig::from_extension(&extension).unwrap();
-        assert_eq!(config.auth_type, "oauth2");
-        assert_eq!(config.provider, "github");
-        assert_eq!(config.scopes, vec!["user:email", "repo:read"]);
-    }
-
-    #[test]
-    fn test_auth_config_default() {
-        let config = AuthConfig::default();
-        assert_eq!(config.auth_type, "none");
-        assert_eq!(config.provider, "default");
-        assert!(config.scopes.is_empty());
+        assert_eq!(config.connection_trn, "trn:authflow:tenant:connection/github");
+        assert_eq!(config.injection.r#type, "jsonada");
     }
 
     #[test]
@@ -304,12 +218,8 @@ mod tests {
     #[tokio::test]
     async fn test_auth_adapter() {
         let adapter = AuthAdapter::new("test_tenant".to_string());
-        
-        let context = adapter.get_auth_context("github").await.unwrap();
+        let context = adapter.get_auth_context_by_trn("trn:authflow:tenant:connection/github").await.unwrap();
         assert_eq!(context.provider, "github");
         assert_eq!(context.token_type, "Bearer");
-        
-        let result = adapter.get_auth_context("unknown").await;
-        assert!(result.is_err());
     }
 }

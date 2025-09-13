@@ -389,23 +389,8 @@ impl ExtensionHandler for AuthHandler {
     }
     
     fn validate(&self, value: &Value) -> Result<()> {
-        if let Some(obj) = value.as_object() {
-            // Validate auth configuration structure
-            if let Some(auth_type) = obj.get("type") {
-                if let Some(auth_type_str) = auth_type.as_str() {
-                    match auth_type_str {
-                        "oauth2" | "api_key" | "bearer" | "basic" | "none" => {},
-                        _ => return Err(OpenApiToolError::ValidationError(
-                            format!("Invalid auth type: {}. Must be one of: oauth2, api_key, bearer, basic, none", auth_type_str)
-                        )),
-                    }
-                } else {
-                    return Err(OpenApiToolError::ValidationError(
-                        "x-auth.type must be a string".to_string()
-                    ));
-                }
-            }
-            
+        if value.is_object() {
+            // Accept spec-compliant structure; detailed validation will be done during parsing into AuthConfig
             Ok(())
         } else {
             Err(OpenApiToolError::ValidationError(

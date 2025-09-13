@@ -1,0 +1,16 @@
+{
+  "data": {
+    "message": "Hello, World!"
+  },
+  "metadata": {
+    "created_at": "2025-09-13T12:25:01.702600Z",
+    "version": "0.1.0",
+    "environment": {
+      "target": "unknown",
+      "rust_version": "unknown",
+      "cargo_version": "0.1.0",
+      "host": "unknown"
+    },
+    "description": null
+  }
+}

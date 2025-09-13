@@ -165,10 +165,12 @@ async fn test_auth_flow_golden_playback() -> Result<(), Box<dyn std::error::Erro
     
     // Test OAuth2 authentication
     let oauth2_config = manifest::action::AuthConfig {
-        auth_type: "oauth2".to_string(),
-        provider: "github".to_string(),
-        scopes: vec!["user:email".to_string()],
-        parameters: HashMap::new(),
+        connection_trn: "trn:authflow:test_tenant:connection/github-user123".to_string(),
+        scheme: Some("oauth2".to_string()),
+        injection: manifest::action::InjectionConfig { r#type: "jsonada".to_string(), mapping: "{% {} %}".to_string() },
+        expiry: None,
+        refresh: None,
+        failure: None,
     };
     
     let result = runner.test_auth_flow("oauth2_auth_test", &oauth2_config).await?;
@@ -342,10 +344,12 @@ fn create_test_action() -> manifest::action::Action {
     
     // Set authentication configuration
     action.auth_config = Some(manifest::action::AuthConfig {
-        auth_type: "oauth2".to_string(),
-        provider: "github".to_string(),
-        scopes: vec!["user:email".to_string()],
-        parameters: HashMap::new(),
+        connection_trn: "trn:authflow:test_tenant:connection/github-user123".to_string(),
+        scheme: Some("oauth2".to_string()),
+        injection: manifest::action::InjectionConfig { r#type: "jsonada".to_string(), mapping: "{% {} %}".to_string() },
+        expiry: None,
+        refresh: None,
+        failure: None,
     });
     
     action

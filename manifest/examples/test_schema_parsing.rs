@@ -94,11 +94,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 分析认证配置
         if let Some(auth_config) = &action.auth_config {
             println!("   🔐 Auth Config:");
-            println!("      Type: {:?}", auth_config.auth_type);
-            println!("      Provider: {}", auth_config.provider);
-            if !auth_config.scopes.is_empty() {
-                println!("      Scopes: {:?}", auth_config.scopes);
-            }
+            println!("      Connection TRN: {}", auth_config.connection_trn);
+            println!("      Scheme: {:?}", auth_config.scheme);
         }
     }
     
