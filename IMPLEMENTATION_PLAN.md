@@ -50,7 +50,7 @@
   - Test: serde (round-trip), defaulting rules
   - Done when: compiles and unit tests pass
 
-- [ ] Parse x-auth from Action YAML — 未实现
+- [x] Parse x-auth from Action YAML — 已完成
   - Files: `manifest/src/action/parser.rs`
   - Test: minimal action with only `connection_trn`
   - Done when: parsed into `AuthConfig`
@@ -59,7 +59,7 @@
   - Test: each field parsed; defaults applied
   - Done when: validated and surfaced in action model
 
-- [ ] Implement deep-merge provider → action → sidecar — 未实现
+- [x] Implement deep-merge provider → action → sidecar — 已完成
   - Files: `manifest/src/config/merger.rs`
   - Test: object fields deep-merge; arrays replace; precedence respected
   - Done when: deterministic merged snapshot printed for debug
@@ -125,7 +125,7 @@
 
 ## 6) 测试与样例 (Tests & Samples)
 
-- [ ] Unit tests: parser and config merger — 未实现
+- [x] Unit tests: parser and config merger — 已完成
   - Test: cover edge cases (missing fields, overrides)
 
 - [ ] Unit tests: expression engine and injector — 未实现
