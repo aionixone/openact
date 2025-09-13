@@ -1,6 +1,6 @@
 # OpenAct Implementation Plan (v1.0)
 
-- Branch: `feature/openact-design-spec-v1`
+- Branch: `feature/manifest-auth-integration`
 - Rule: Implement one task at a time. For each task: add tests → make it pass → mark done → proceed.
 - Status tags: 未实现, 进行中, 已完成
 
@@ -13,7 +13,7 @@
 
 ## 1) 配置与加载 (Configuration & Loading)
 
-- [ ] Decide config file locations and naming — 未实现
+- [x] Decide config file locations and naming — 已完成
   - Deliverable: finalize paths
     - `config/provider-auth-defaults.yaml`
     - `config/provider-defaults.yaml`
@@ -22,21 +22,21 @@
   - Test: N/A (docs reviewed)
   - Done when: paths fixed in README and used by loader
 
-- [ ] Implement YAML loader utility — 未实现
+- [x] Implement YAML loader utility — 已完成
   - Deliverable: `utils/yaml_loader.rs`
   - Test: load valid/invalid YAML, error includes filename and line
   - Done when: returns `serde_json::Value` for valid files; precise errors for invalid ones
 
-- [ ] Load provider-auth-defaults.yaml into registry — 未实现
+- [x] Load provider-auth-defaults.yaml into registry — 已完成
   - Deliverable: `config/provider_auth_defaults.rs`
   - Test: load sample; query `api.github.com` returns injection template
   - Done when: cached by hostname (no hot-reload initially)
 
-- [ ] Load provider-defaults.yaml into registry — 未实现
+- [x] Load provider-defaults.yaml into registry — 已完成
   - Test: `api.github.com` has retry/timeout defaults
   - Done when: accessible via provider key
 
-- [ ] Load sidecar-overrides.yaml into registry (optional) — 未实现
+- [x] Load sidecar-overrides.yaml into registry (optional) — 已完成
   - Test: override by `operationId` merges on top
   - Done when: merges applied at runtime
 
@@ -44,7 +44,7 @@
 
 ## 2) 配置模型与合并 (Models & Merge)
 
-- [ ] Define AuthConfig and related structs per spec — 未实现
+- [x] Define AuthConfig and related structs per spec — 已完成
   - Files: `manifest/src/action/auth.rs`
   - Includes: `connection_trn, scheme, injection{type=jsonada,mapping}, expiry, refresh, failure`, retry, pagination, output
   - Test: serde (round-trip), defaulting rules
