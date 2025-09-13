@@ -354,3 +354,28 @@ error:
 *文档版本：v1.0*  
 *最后更新：2025年09月*  
 *作者：OpenAct Team*
+
+---
+
+## 附录 D：实现说明（当前进度）
+
+- 配置文件路径（YAML）
+  - `config/provider-auth-defaults.yaml`
+  - `config/provider-defaults.yaml`
+  - `config/sidecar-overrides.yaml`（可选）
+
+- 注册器与合并
+  - Provider Auth Defaults：按主机名缓存 `x-auth` 模板（`scheme/injection/expiry/refresh/failure`）。
+  - Provider Defaults：按主机名缓存 `x-retry/x-timeout-ms/x-ok-path/x-error-path/x-pagination`。
+  - Sidecar Overrides：按 `operationId` 缓存覆盖片段（对象）。
+  - 合并顺序（低→高）：Provider Auth Defaults → Provider Defaults → Action `extensions` → Sidecar Overrides。
+  - 合并策略：对象深合并；数组整体替换；标量直接覆盖。
+
+- Parser 接入
+  - 解析时加载 `config/` 下注册器；若文件缺失则降级为空并给出告警，不影响解析。
+  - Provider Host 解析优先级：`ActionParsingOptions.provider_host` → `servers[0].url` 的 host → `default_provider`。
+  - 对每个 operation，基于 host/operationId 与 action `extensions` 计算合并结果并写回 `action.extensions`；随后按合并后的 `x-auth` 解析 `AuthConfig`。
+
+- Runner 说明（占位实现）
+  - 现阶段 Runner 构建请求信息并返回成功结果；后续将按合并结果执行 `injection.mapping` 生成 headers/query，并接入超时/重试/分页等策略。
+
