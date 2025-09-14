@@ -84,6 +84,40 @@ impl AuthManager {
             .await
             .map_err(|e| CoreError::InvalidInput(e.to_string()))
     }
+
+    /// Refresh connection tokens
+    pub async fn refresh_connection(
+        &self,
+        trn: &str,
+        access_token: &str,
+        refresh_token: Option<&str>,
+        expires_in: Option<i64>,
+    ) -> Result<()> {
+        // Get current connection
+        let mut connection = self
+            .store
+            .get(trn)
+            .await
+            .map_err(|e| CoreError::InvalidInput(e.to_string()))?
+            .ok_or_else(|| CoreError::InvalidInput("connection not found".to_string()))?;
+
+        // Update tokens
+        connection.update_access_token(access_token);
+        if let Some(rt) = refresh_token {
+            connection.update_refresh_token(Some(rt.to_string()));
+        }
+        if let Some(exp) = expires_in {
+            connection = connection.with_expires_in(exp);
+        }
+
+        // Save updated connection
+        self.store
+            .put(trn, &connection)
+            .await
+            .map_err(|e| CoreError::InvalidInput(e.to_string()))?;
+        
+        Ok(())
+    }
 }
 
 #[cfg(test)]

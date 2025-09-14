@@ -5,6 +5,7 @@ members = [
     "manifest",
     "openact-core",
     "openact-cli",
+    "openact-server",
 ]
 
 [workspace.package]

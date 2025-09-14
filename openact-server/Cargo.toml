@@ -1,0 +1,27 @@
+[package]
+name = "openact-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+openact-core = { path = "../openact-core" }
+manifest = { path = "../manifest" }
+authflow = { path = "../authflow" }
+uuid = { workspace = true }
+tempfile = { workspace = true }
+utoipa = { version = "4", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "6", features = ["axum"] }
+chrono = { workspace = true }
+serde_yaml = { workspace = true }
+sqlx = { workspace = true }
+
+

@@ -13,6 +13,32 @@ impl ExecutionRepository {
         Self { pool }
     }
 
+    /// 确保执行表存在（用于初始化）
+    pub async fn ensure_table_exists(&self) -> Result<()> {
+        sqlx::query(
+            r#"CREATE TABLE IF NOT EXISTS action_executions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                execution_trn TEXT NOT NULL,
+                action_trn TEXT NOT NULL,
+                tenant TEXT NOT NULL,
+                input_data TEXT,
+                output_data TEXT,
+                status TEXT NOT NULL,
+                status_code INTEGER,
+                error_message TEXT,
+                duration_ms INTEGER,
+                retry_count INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                completed_at DATETIME
+            )"#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| OpenApiToolError::database(format!("Failed to create executions table: {}", e)))?;
+        
+        Ok(())
+    }
+
     /// 创建执行记录
     pub async fn create_execution(&self, request: CreateExecutionRequest) -> Result<ActionExecution> {
         let now = chrono::Utc::now().naive_utc();
