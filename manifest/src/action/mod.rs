@@ -7,9 +7,13 @@ pub mod models;
 pub mod runner;
 pub mod extensions;
 pub mod auth;
+pub mod expression_engine;
+pub mod expression_context;
 
 pub use parser::ActionParser;
 pub use models::*;
 pub use runner::ActionRunner;
 pub use extensions::*;
 pub use auth::*;
+pub use expression_engine::*;
+pub use expression_context::*;

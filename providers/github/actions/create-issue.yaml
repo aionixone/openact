@@ -1,0 +1,53 @@
+name: "createIssue"
+display_name: "Create Issue"
+method: "POST"
+path: "/repos/{owner}/{repo}/issues"
+description: "Create a new issue in a repository"
+parameters:
+  - name: "owner"
+    type: "path"
+    description: "Repository owner (username or organization)"
+    required: true
+  - name: "repo"
+    type: "path"
+    description: "Repository name"
+    required: true
+  - name: "title"
+    type: "body"
+    description: "Issue title"
+    required: true
+  - name: "body"
+    type: "body"
+    description: "Issue body content"
+    required: false
+  - name: "labels"
+    type: "body"
+    description: "Array of label names"
+    required: false
+  - name: "assignees"
+    type: "body"
+    description: "Array of usernames to assign"
+    required: false
+  - name: "milestone"
+    type: "body"
+    description: "Milestone number"
+    required: false
+response_mapping: "$body"
+timeout_ms: 5000
+retry:
+  max_retries: 3
+  retry_on: ["5xx", "429"]
+headers:
+  Authorization: "{% 'Bearer ' & $access_token %}"
+  Accept: "application/vnd.github+json"
+  User-Agent: "openact/1.0"
+  Content-Type: "application/json"
+examples:
+  - name: "Create simple issue"
+    description: "Create a basic issue with title and body"
+    parameters:
+      owner: "octocat"
+      repo: "Hello-World"
+      title: "Bug report"
+      body: "Something is not working correctly"
+      labels: ["bug", "help wanted"]

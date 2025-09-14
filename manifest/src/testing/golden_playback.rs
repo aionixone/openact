@@ -333,7 +333,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_golden_playback_new_test() {
-        let golden = GoldenPlayback::with_defaults();
+        let tmp = tempfile::tempdir().unwrap();
+        let golden = GoldenPlayback::new(GoldenPlaybackConfig { golden_dir: tmp.path().to_path_buf(), ..Default::default() });
         
         let result = golden.run_test("test_new", || async {
             Ok(json!({
@@ -348,7 +349,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_golden_playback_passing_test() {
-        let golden = GoldenPlayback::with_defaults();
+        let tmp = tempfile::tempdir().unwrap();
+        let golden = GoldenPlayback::new(GoldenPlaybackConfig { golden_dir: tmp.path().to_path_buf(), ..Default::default() });
         
         // First run - creates golden file
         let _ = golden.run_test("test_passing", || async {
@@ -371,7 +373,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_golden_playback_failing_test() {
-        let golden = GoldenPlayback::with_defaults();
+        let tmp = tempfile::tempdir().unwrap();
+        let golden = GoldenPlayback::new(GoldenPlaybackConfig { golden_dir: tmp.path().to_path_buf(), ..Default::default() });
         
         // First run - creates golden file
         let _ = golden.run_test("test_failing", || async {

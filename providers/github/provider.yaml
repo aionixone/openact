@@ -1,0 +1,20 @@
+name: "github"
+display_name: "GitHub"
+version: "1.0.0"
+description: "GitHub API integration for repositories, issues, pull requests, and user management"
+base_url: "https://api.github.com"
+documentation_url: "https://docs.github.com/en/rest"
+supported_auth: ["oauth2", "pat"]
+default_timeout: 5000
+retry_policy:
+  max_retries: 3
+  base_delay_ms: 500
+  max_delay_ms: 10000
+  retry_on: ["5xx", "429"]
+  respect_retry_after: true
+rate_limits:
+  authenticated: 5000  # requests per hour
+  unauthenticated: 60  # requests per hour
+compatibility:
+  openact-core: ">=1.0.0"
+  openact-manifest: ">=1.0.0"

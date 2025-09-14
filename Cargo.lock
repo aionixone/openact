@@ -418,6 +418,7 @@ dependencies = [
  "sha2",
  "sqlx",
  "stepflow-dsl",
+ "tempfile",
  "thiserror 1.0.69",
  "time",
  "tokio",
@@ -2221,10 +2222,14 @@ name = "manifest"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "authflow",
  "axum 0.7.9",
+ "bumpalo",
  "chrono",
  "clap",
+ "jsonata-rs",
  "md5",
+ "rand 0.8.5",
  "reqwest 0.12.23",
  "serde",
  "serde_json",

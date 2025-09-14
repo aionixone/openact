@@ -1,0 +1,20 @@
+name: "{provider_name}"
+display_name: "{Provider Display Name}"
+version: "1.0.0"
+description: "{Provider description}"
+base_url: "{https://api.example.com}"
+documentation_url: "{https://docs.example.com}"
+supported_auth: ["oauth2", "api_key", "bearer"]
+default_timeout: 5000
+retry_policy:
+  max_retries: 3
+  base_delay_ms: 500
+  max_delay_ms: 10000
+  retry_on: ["5xx", "429"]
+  respect_retry_after: true
+rate_limits:
+  authenticated: 5000  # requests per hour
+  unauthenticated: 60  # requests per hour
+compatibility:
+  openact-core: ">=1.0.0"
+  openact-manifest: ">=1.0.0"

@@ -42,6 +42,8 @@ impl ActionTestRunner {
                 include_deprecated: false,
                 validate_schemas: true,
                 extension_handlers: HashMap::new(),
+                config_dir: Some("config".to_string()),
+                provider_host: Some("api.github.com".to_string()),
             };
             
             let mut parser = ActionParser::new(options);
@@ -220,7 +222,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_action_test_runner() {
-        let runner = ActionTestRunner::with_defaults();
+        // Use temp golden dir to ensure New on first run
+        let mut cfg = GoldenPlaybackConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        cfg.golden_dir = tmp.keep();
+        let runner = ActionTestRunner::new(cfg);
         
         // Create a simple test spec
         let spec = create_test_spec();

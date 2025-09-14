@@ -6,3 +6,4 @@ pub mod utils;
 pub mod storage;
 pub mod action;
 pub mod testing;
+pub mod config;

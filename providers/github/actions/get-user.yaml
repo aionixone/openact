@@ -1,0 +1,23 @@
+name: "getUser"
+display_name: "Get User"
+method: "GET"
+path: "/user"
+description: "Get authenticated user information"
+parameters: []
+response_mapping: "$body"
+timeout_ms: 5000
+retry:
+  max_retries: 3
+  retry_on: ["5xx", "429"]
+headers:
+  Authorization: "{% 'Bearer ' & $access_token %}"
+  Accept: "application/vnd.github+json"
+  User-Agent: "openact-test/1.0"
+examples:
+  - name: "Get current user"
+    description: "Get information about the authenticated user"
+    response:
+      login: "octocat"
+      id: 1
+      name: "The Octocat"
+      email: "octocat@github.com"

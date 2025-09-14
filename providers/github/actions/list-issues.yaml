@@ -1,0 +1,63 @@
+name: "listIssues"
+display_name: "List Issues"
+method: "GET"
+path: "/repos/{owner}/{repo}/issues"
+description: "List issues in a repository"
+parameters:
+  - name: "owner"
+    type: "path"
+    description: "Repository owner (username or organization)"
+    required: true
+  - name: "repo"
+    type: "path"
+    description: "Repository name"
+    required: true
+  - name: "state"
+    type: "query"
+    description: "Issue state (open, closed, all)"
+    default: "open"
+    required: false
+  - name: "labels"
+    type: "query"
+    description: "Comma-separated list of label names"
+    required: false
+  - name: "sort"
+    type: "query"
+    description: "Sort by created, updated, comments"
+    default: "created"
+    required: false
+  - name: "direction"
+    type: "query"
+    description: "Sort direction (asc or desc)"
+    default: "desc"
+    required: false
+  - name: "per_page"
+    type: "query"
+    description: "Number of results per page (max 100)"
+    default: 30
+    required: false
+  - name: "page"
+    type: "query"
+    description: "Page number of results to fetch"
+    default: 1
+    required: false
+response_mapping: "$body"
+timeout_ms: 5000
+retry:
+  max_retries: 3
+  retry_on: ["5xx", "429"]
+headers:
+  Authorization: "{% 'Bearer ' & $access_token %}"
+  Accept: "application/vnd.github+json"
+  User-Agent: "openact/1.0"
+pagination:
+  type: "link"
+  link_expr: "{% $response.headers.Link %}"
+examples:
+  - name: "List open issues"
+    description: "Get all open issues in a repository"
+    parameters:
+      owner: "octocat"
+      repo: "Hello-World"
+      state: "open"
+      per_page: 10

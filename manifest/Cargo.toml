@@ -7,6 +7,9 @@ description = "OpenAPI document parser and TRS tool generator"
 license = "MIT"
 readme = "README.md"
 
+[lib]
+doctest = false
+
 
 [dependencies]
 # Core functionality
@@ -17,10 +20,14 @@ serde_yaml = "0.9"
 tokio = { version = "1.0", features = ["full"] }
 anyhow = "1.0"
 thiserror = "1.0"
+jsonata-rs = { path = "../../jsonata-rs" }
+bumpalo = "3"
+authflow = { path = "../authflow", features = ["sqlite", "encryption"] }
 
 # HTTP client for API calls
 reqwest = { version = "0.12", features = ["json", "stream"] }
 url = "2.5"
+rand = "0.8"
 
 # Database and storage
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }

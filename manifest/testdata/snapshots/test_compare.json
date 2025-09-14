@@ -3,12 +3,12 @@
     "message": "Hello, World!"
   },
   "metadata": {
-    "created_at": "2025-09-13T12:25:01.702600Z",
+    "created_at": "2025-09-14T02:19:09.710728Z",
     "version": "0.1.0",
     "environment": {
+      "cargo_version": "0.1.0",
       "target": "unknown",
       "rust_version": "unknown",
-      "cargo_version": "0.1.0",
       "host": "unknown"
     },
     "description": null

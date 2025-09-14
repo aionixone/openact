@@ -54,3 +54,4 @@ encryption = ["dep:aes-gcm"]
 [dev-dependencies]
 httpmock = "0.7"
 tracing-subscriber = "0.3"
+tempfile = "3"

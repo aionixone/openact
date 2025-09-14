@@ -1,11 +1,35 @@
 // Action data models and structures
 // Defines the core Action types used throughout the system
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use serde_json::Value;
-use chrono::{DateTime, Utc};
 use super::auth::AuthConfig;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RetryPolicy {
+    pub max_retries: u32,
+    pub base_delay_ms: u64,
+    pub max_delay_ms: u64,
+    pub retry_on: Vec<String>,
+    pub respect_retry_after: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaginationConfig {
+    pub mode: String,  // cursor | pageToken | link
+    pub param: String, // param name for cursor/pageToken
+    pub limit: u64,    // max pages
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_expr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_expr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items_expr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link_expr: Option<String>, // for mode=link, expression producing next URL
+}
 
 /// Represents an Action extracted from OpenAPI specification
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,6 +66,22 @@ pub struct Action {
     pub extensions: HashMap<String, Value>,
     /// Authentication configuration
     pub auth_config: Option<AuthConfig>,
+    /// Typed: timeout override (ms)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    /// Typed: retry policy
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry: Option<RetryPolicy>,
+    /// Typed: ok/error/output expressions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ok_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_pick: Option<String>,
+    /// Typed: pagination config
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<PaginationConfig>,
     /// Creation timestamp
     pub created_at: Option<DateTime<Utc>>,
     /// Last update timestamp
@@ -159,16 +199,12 @@ pub struct ActionExecutionResult {
     pub status: ExecutionStatus,
     /// Response data
     pub response_data: Option<Value>,
-    /// Response status code
-    pub status_code: Option<u16>,
-    /// Response headers
-    pub response_headers: HashMap<String, String>,
-    /// Error message (if failed)
+    /// Status code
+    pub status_code: Option<i32>,
+    /// Error message if any
     pub error_message: Option<String>,
     /// Execution duration in milliseconds
     pub duration_ms: Option<u64>,
-    /// Execution timestamp
-    pub timestamp: DateTime<Utc>,
 }
 
 /// Execution status enum
@@ -208,6 +244,12 @@ pub struct ActionParsingOptions {
     pub validate_schemas: bool,
     /// Custom extension handlers
     pub extension_handlers: HashMap<String, String>,
+    /// Config directory for provider defaults (e.g., "config/")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
+    /// Provider host for defaults resolution (e.g., "api.github.com")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_host: Option<String>,
 }
 
 impl Default for ActionParsingOptions {
@@ -218,6 +260,8 @@ impl Default for ActionParsingOptions {
             include_deprecated: false,
             validate_schemas: true,
             extension_handlers: HashMap::new(),
+            config_dir: Some("config".to_string()),
+            provider_host: None,
         }
     }
 }
@@ -316,6 +360,12 @@ impl Action {
             tags: Vec::new(),
             extensions: HashMap::new(),
             auth_config: None,
+            timeout_ms: None,
+            retry: None,
+            ok_path: None,
+            error_path: None,
+            output_pick: None,
+            pagination: None,
             created_at: Some(Utc::now()),
             updated_at: Some(Utc::now()),
         }
@@ -531,28 +581,28 @@ impl ActionExecutionResult {
             status,
             response_data: None,
             status_code: None,
-            response_headers: HashMap::new(),
             error_message: None,
             duration_ms: None,
-            timestamp: Utc::now(),
         }
     }
 
     /// Set response data
     pub fn set_response_data(mut self, data: Value) -> Self {
         self.response_data = Some(data);
+        self.status = ExecutionStatus::Success;
         self
     }
 
     /// Set status code
     pub fn set_status_code(mut self, code: u16) -> Self {
-        self.status_code = Some(code);
+        self.status_code = Some(i32::from(code));
         self
     }
 
     /// Set error message
     pub fn set_error_message(mut self, message: String) -> Self {
         self.error_message = Some(message);
+        self.status = ExecutionStatus::Failed;
         self
     }
 
@@ -562,10 +612,13 @@ impl ActionExecutionResult {
         self
     }
 
-    /// Add response header
-    pub fn add_response_header(&mut self, name: String, value: String) {
-        self.response_headers.insert(name, value);
+    /// Mark result as success
+    pub fn mark_success(mut self) -> Self {
+        self.status = ExecutionStatus::Success;
+        self
     }
+
+    // response header storage removed in this minimal model
 }
 
 #[cfg(test)]
@@ -603,10 +656,9 @@ mod tests {
         );
 
         // Add path parameter
-        action.add_parameter(ActionParameter::new(
-            "id".to_string(),
-            ParameterLocation::Path,
-        ).required());
+        action.add_parameter(
+            ActionParameter::new("id".to_string(), ParameterLocation::Path).required(),
+        );
 
         // Should validate successfully
         assert!(action.validate().is_ok());

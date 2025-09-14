@@ -127,8 +127,19 @@ impl FieldEncryption {
         let nonce_bytes = STANDARD.decode(&encrypted.nonce)
             .map_err(|e| anyhow!("Failed to decode nonce: {}", e))?;
 
+        // Backward compatibility: data written without encryption feature enabled stores
+        // Base64("no-encryption") as the nonce and Base64(plaintext) as data.
+        // In that case, treat it as plaintext instead of AES-GCM.
         if nonce_bytes.len() != 12 {
-            return Err(anyhow!("Invalid nonce length"));
+            if nonce_bytes.as_slice() == b"no-encryption" {
+                // Backward compatibility: handle unencrypted data
+                let plaintext = STANDARD
+                    .decode(&encrypted.data)
+                    .map_err(|e| anyhow!("Failed to decode data: {}", e))?;
+                return String::from_utf8(plaintext)
+                    .map_err(|e| anyhow!("Invalid UTF-8 in data: {}", e));
+            }
+            return Err(anyhow!("Invalid nonce length: expected 12 bytes, got {}", nonce_bytes.len()));
         }
 
         let nonce = Nonce::from_slice(&nonce_bytes);
@@ -204,6 +215,9 @@ mod tests {
 
         // Encrypt (returns Base64 encoded data when encryption feature is not enabled)
         let encrypted = encryption.encrypt_field(plaintext).unwrap();
+        #[cfg(feature = "encryption")]
+        assert_eq!(encrypted.key_version, 1);
+        #[cfg(not(feature = "encryption"))]
         assert_eq!(encrypted.key_version, 0);
 
         // Decrypt

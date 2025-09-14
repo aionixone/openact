@@ -1,0 +1,31 @@
+operationId: getGithubUser
+method: GET
+path: /user
+tags: [github]
+x-auth:
+  connection_trn: "trn:authflow:tenant:connection/github-user123"
+  scheme: oauth2
+  injection:
+    type: jsonada
+    mapping: |
+      {
+        "headers": {
+          "Authorization": "{% 'Bearer ' & $access_token %}",
+          "Accept": "{% 'application/vnd.github+json' %}"
+        }
+      }
+x-timeout-ms: 5000
+x-retry:
+  max_retries: 3
+  base_delay_ms: 300
+  max_delay_ms: 5000
+  retry_on: ["5xx", "429"]
+  respect_retry_after: true
+x-ok-path: "{% $status >= 200 and $status < 300 %}"
+x-error-path: "{% {'code': 'GITHUB_ERROR', 'status': $status, 'message': $body.message} %}"
+x-output-pick: "{% $body %}"
+# Enable real HTTP request
+x-real-http: true
+# Base URL for GitHub API
+x-base-url: "https://api.github.com"
+

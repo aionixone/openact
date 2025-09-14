@@ -59,6 +59,10 @@ url = "2.5"
 # TRN validation
 trn-rust = { path = "../trn-rust" }
 
+# # JSONADA
+# jsonada-rs = { path = "../jsonada-rs" }
+
+
 # StepFlow DSL
 stepflow-dsl = { package = "stepflow-dsl", path = "../stepflow-dsl" }
 

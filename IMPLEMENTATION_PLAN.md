@@ -68,15 +68,15 @@
 
 ## 3) 表达式与注入 (Expressions & Injection)
 
-- [ ] Add jsonada engine dependency / integration — 未实现
+- [x] Add jsonada engine dependency / integration — 已完成
   - Files: `Cargo.toml` (manifest crate)
   - Test: trivial evaluation `{% 'x' %}` → "x"
 
-- [ ] Implement ExpressionEngine for `{% %}` — 未实现
+- [x] Implement ExpressionEngine for `{% %}` — 已完成
   - Files: `manifest/src/action/expression_engine.rs`
   - Test: mapping string → headers map; invalid expr → readable error
 
-- [ ] Build expression context ($access_token, $expires_at, $ctx) — 未实现
+- [ ] Build expression context ($access_token, $expires_at, $ctx) — 进行中
   - Files: `manifest/src/utils/expression_context.rs`
   - Test: all expected keys present; timestamps as ISO8601
 
@@ -84,7 +84,7 @@
 
 ## 4) AuthFlow 集成 (AuthFlow Integration)
 
-- [ ] Create AuthFlowIntegration to fetch by connection TRN — 未实现
+- [x] Create AuthFlowIntegration to fetch by connection TRN — 已完成（以 `AuthAdapter` 形式，支持 memory/sqlite 初始化）
   - Files: `manifest/src/action/authflow_integration.rs`
   - Test: given `connection_trn`, returns `{access_token, token_type, expires_at, provider}`
 
@@ -96,29 +96,29 @@
 
 ## 5) Action Runner 执行 (Execution)
 
-- [ ] Wire ActionRunner auth injection using mapping — 未实现
+- [x] Wire ActionRunner auth injection using mapping — 已完成
   - Files: `manifest/src/action/runner.rs`
   - Test: merged config → fetch auth → evaluate mapping → set headers
 
-- [ ] Inject headers and query from mapping result — 未实现
+- [x] Inject headers and query from mapping result — 已完成
   - Test: headers present on HTTP request; query params applied if provided
 
-- [ ] Apply x-timeout-ms to HTTP client — 未实现
+- [x] Apply x-timeout-ms to HTTP client — 已完成（解析并透传至请求对象）
   - Test: short timeout triggers timeout error
 
-- [ ] Implement x-retry with backoff and Retry-After — 未实现
+- [x] Implement x-retry with backoff and Retry-After — 已完成（可控开关 `x-real-http`）
   - Test: 500/503 retried; 429 respects Retry-After; jitter applied
 
 - [ ] Implement pagination: cursor, pageToken, link — 未实现
   - Test: aggregates items until stop_when; respects cursor_param
 
-- [ ] Evaluate x-ok-path and map success — 未实现
-  - Test: ok-path true → success; null → 2xx treated as success
+- [x] Evaluate x-ok-path and map success — 已完成
+  - Test: ok-path true → success; 空/缺省 → 默认 2xx 为成功
 
-- [ ] Evaluate x-error-path and map errors — 未实现
+- [x] Evaluate x-error-path and map errors — 已完成
   - Test: provider error extracted to standardized error
 
-- [ ] Apply x-output-pick projection — 未实现
+- [x] Apply x-output-pick projection — 已完成
   - Test: projection applied to final payload
 
 ---

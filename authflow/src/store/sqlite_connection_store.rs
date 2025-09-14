@@ -6,9 +6,9 @@
 use sqlx::{SqlitePool, Row, sqlite::SqliteRow};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::time::Duration;
+use base64::{engine::general_purpose, Engine as _};
 
 use crate::store::{
     ConnectionStore, Connection, AuthConnectionTrn,
@@ -79,7 +79,7 @@ impl SqliteConnectionStore {
         let encryption = if config.enable_encryption {
             Some(FieldEncryption::from_env()
                 .unwrap_or_else(|_| {
-                    eprintln!("Warning: Failed to load encryption config from env, using default");
+                    tracing::warn!("Failed to load encryption config from environment, using default (no encryption)");
                     FieldEncryption::new(Default::default())
                 }))
         } else {
@@ -100,7 +100,7 @@ impl SqliteConnectionStore {
 
     /// Initialize database table structure
     async fn initialize_database(&self) -> Result<()> {
-        println!("[sqlite] initializing database at {}", self.config.database_url);
+        tracing::info!("Initializing SQLite database at {}", self.config.database_url);
         // Create connections table
         sqlx::query(
             r#"
@@ -152,7 +152,7 @@ impl SqliteConnectionStore {
                     new_data_nonce TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     reason TEXT,
-                    FOREIGN KEY (trn) REFERENCES connections(trn)
+                    FOREIGN KEY (trn) REFERENCES connections(trn) ON DELETE CASCADE
                 )
                 "#,
             )
@@ -161,7 +161,7 @@ impl SqliteConnectionStore {
             .map_err(|e| anyhow!("Failed to create connection_history table: {}", e))?;
         }
 
-        println!("[sqlite] database initialized (tables ready)");
+        tracing::info!("SQLite database initialized (tables ready)");
         Ok(())
     }
 
@@ -172,22 +172,22 @@ impl SqliteConnectionStore {
             Ok((encrypted.data, encrypted.nonce))
         } else {
             // Store directly without encryption (for development only)
-            Ok((base64::encode(data), "no-encryption".to_string()))
+            Ok((general_purpose::STANDARD.encode(data), "no-encryption".to_string()))
         }
     }
 
     /// Decrypt sensitive fields
-    fn decrypt_field(&self, data: &str, nonce: &str) -> Result<String> {
+    fn decrypt_field(&self, data: &str, nonce: &str, key_version: Option<u32>) -> Result<String> {
         if let Some(ref encryption) = self.encryption {
             let encrypted = EncryptedField {
                 data: data.to_string(),
                 nonce: nonce.to_string(),
-                key_version: 1, // TODO: Read from database
+                key_version: key_version.unwrap_or(1),
             };
             encryption.decrypt_field(&encrypted)
         } else {
             // Decode directly without encryption
-            let decoded = base64::decode(data)
+            let decoded = general_purpose::STANDARD.decode(data)
                 .map_err(|e| anyhow!("Failed to decode data: {}", e))?;
             String::from_utf8(decoded)
                 .map_err(|e| anyhow!("Invalid UTF-8 in data: {}", e))
@@ -199,14 +199,19 @@ impl SqliteConnectionStore {
         // Decrypt access token
         let access_token_encrypted: String = row.get("access_token_encrypted");
         let access_token_nonce: String = row.get("access_token_nonce");
-        let access_token = self.decrypt_field(&access_token_encrypted, &access_token_nonce)?;
+        let key_version: Option<u32> = row.try_get("key_version").ok();
+        let access_token = self.decrypt_field(&access_token_encrypted, &access_token_nonce, key_version)?;
 
         // Decrypt refresh token (if exists)
         let refresh_token = if let (Ok(encrypted), Ok(nonce)) = (
             row.try_get::<String, _>("refresh_token_encrypted"),
             row.try_get::<String, _>("refresh_token_nonce")
         ) {
-            Some(self.decrypt_field(&encrypted, &nonce)?)
+            if !encrypted.is_empty() && !nonce.is_empty() {
+                Some(self.decrypt_field(&encrypted, &nonce, key_version)?)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -216,8 +221,12 @@ impl SqliteConnectionStore {
             row.try_get::<String, _>("extra_data_encrypted"),
             row.try_get::<String, _>("extra_data_nonce")
         ) {
-            let decrypted = self.decrypt_field(&encrypted, &nonce)?;
-            serde_json::from_str(&decrypted).unwrap_or(Value::Null)
+            if !encrypted.is_empty() && !nonce.is_empty() {
+                let decrypted = self.decrypt_field(&encrypted, &nonce, key_version)?;
+                serde_json::from_str(&decrypted).unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            }
         } else {
             Value::Null
         };
@@ -319,7 +328,7 @@ impl SqliteConnectionStore {
 #[async_trait]
 impl ConnectionStore for SqliteConnectionStore {
     async fn get(&self, connection_ref: &str) -> Result<Option<Connection>> {
-        println!("[sqlite] get connection_ref={}", connection_ref);
+        tracing::debug!("Getting connection: {}", connection_ref);
         let row = sqlx::query("SELECT * FROM connections WHERE trn = ?")
             .bind(connection_ref)
             .fetch_optional(&self.pool)
@@ -333,8 +342,8 @@ impl ConnectionStore for SqliteConnectionStore {
     }
 
     async fn put(&self, connection_ref: &str, connection: &Connection) -> Result<()> {
-        println!(
-            "[sqlite] put connection_ref={} tenant={} provider={} user_id={}",
+        tracing::debug!(
+            "Storing connection: {} (tenant={}, provider={}, user_id={})",
             connection_ref, connection.trn.tenant, connection.trn.provider, connection.trn.user_id
         );
         // Encrypt sensitive data
@@ -385,7 +394,7 @@ impl ConnectionStore for SqliteConnectionStore {
             .execute(&self.pool)
             .await?;
 
-            println!("[sqlite] updated existing connection trn={}", connection_ref);
+            tracing::debug!("Updated existing connection: {}", connection_ref);
             // Record audit log
             self.log_audit(connection_ref, "update", existing.as_ref(), Some(connection), Some("Connection updated")).await?;
         } else {
@@ -415,7 +424,7 @@ impl ConnectionStore for SqliteConnectionStore {
             .execute(&self.pool)
             .await?;
 
-            println!("[sqlite] inserted new connection trn={}", connection_ref);
+            tracing::debug!("Inserted new connection: {}", connection_ref);
             // Record audit log
             self.log_audit(connection_ref, "create", None, Some(connection), Some("Connection created")).await?;
         }
@@ -427,18 +436,17 @@ impl ConnectionStore for SqliteConnectionStore {
         // Get existing data for audit
         let existing = self.get(connection_ref).await?;
 
+        // Record audit BEFORE delete to satisfy FK constraint
+        if existing.is_some() {
+            self.log_audit(connection_ref, "delete", existing.as_ref(), None, Some("Connection deleted")).await?;
+        }
+
         let result = sqlx::query("DELETE FROM connections WHERE trn = ?")
             .bind(connection_ref)
             .execute(&self.pool)
             .await?;
 
         let deleted = result.rows_affected() > 0;
-
-        if deleted {
-            // Record audit log
-            self.log_audit(connection_ref, "delete", existing.as_ref(), None, Some("Connection deleted")).await?;
-        }
-
         Ok(deleted)
     }
 
@@ -549,22 +557,21 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    async fn create_test_store() -> SqliteConnectionStore {
+    async fn create_test_store() -> (SqliteConnectionStore, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
-        
         let config = SqliteConfig {
             database_url: format!("sqlite:{}", db_path.display()),
             enable_encryption: false, // Disable encryption for testing
             ..Default::default()
         };
-
-        SqliteConnectionStore::new(config).await.unwrap()
+        let store = SqliteConnectionStore::new(config).await.unwrap();
+        (store, temp_dir)
     }
 
     #[tokio::test]
     async fn test_sqlite_connection_store() {
-        let store = create_test_store().await;
+        let (store, _tmpdir) = create_test_store().await; // keep TempDir alive for the test duration
         
         // Create test connection
         let connection = Connection::new("test_tenant", "github", "user123", "access_token_123").unwrap();

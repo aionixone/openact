@@ -1,5 +1,60 @@
 # OpenAct Design Spec (v1.0)
 
+## Changelog (2025-09-13)
+
+- Expression engine finalized: keep `{% %}` syntax, backed by `jsonata-rs`.
+  - Available variables: `$access_token` (string), `$expires_at` (ISO8601 string or null), `$ctx` (object with `action`, `exec`, `params`).
+  - Mapping evaluates strings wrapped by `{% %}` inside JSON values.
+- Auth injection in Manifest:
+  - Use `x-auth.injection: { type: jsonada, mapping: string }` to produce `headers` and `query` objects.
+  - Example:
+    ```json
+    {
+      "headers": {
+        "Authorization": "{% 'Bearer ' & $access_token %}",
+        "X-Static": "fixed"
+      },
+      "query": {
+        "t": "{% $access_token %}"
+      }
+    }
+    ```
+- AuthFlow integration:
+  - Manifest depends on `authflow` (with `sqlite` feature enabled) and can fetch connections by TRN.
+  - `AuthAdapter` provides `init_store_memory()` and `init_store_sqlite(database_url, enable_encryption)`.
+  - SQLite schema: `connection_history(trn)` now references `connections(trn)` with `ON DELETE CASCADE`; audit log is recorded before delete to satisfy FK constraints.
+  - When encryption is disabled, Base64 encoding/decoding uses the `base64` Engine API.
+- Config remains YAML-first with layered merge (provider-auth-defaults → provider-defaults → action → sidecar-overrides).
+
+### Timeout & Retry
+
+- `x-timeout-ms` (number): per-action timeout override (ms). Runner resolves effective timeout and surfaces it on the request object (`timeout_ms`).
+- `x-retry` (object): retry policy (parsed and surfaced, retry loop wiring next).
+  - `max_retries`: number (default 3)
+  - `base_delay_ms`: number, base backoff (default 500)
+  - `max_delay_ms`: number, max backoff cap (default 10000)
+  - `retry_on`: array of strings, supports `"5xx"`, `"429"`, `"408"`, or specific codes (e.g. `"502"`)
+  - `respect_retry_after`: boolean (default true)
+- Backoff: exponential with jitter (~±10%), helper `compute_backoff_ms()` implemented; `Retry-After` honored when wiring the loop.
+
+### Success/Error Mapping & Output Projection
+
+- `x-ok-path` (string): jsonata 表达式（允许 `{% %}` 包裹），用于判定请求是否成功。
+  - 绑定变量：`$status`（最终 HTTP 状态码），`$body`（HTTP 响应体；真实请求时为实际 body）。
+  - 示例：`"{% $status >= 200 and $status < 300 %}"` 或 `"$status in [200,201]"`。
+
+- `x-error-path` (string): jsonata 表达式（允许 `{% %}`），用于将提供方错误映射为标准错误对象。
+  - 绑定变量：`$status`、`$body`。
+  - 返回对象将出现在执行结果的 `error` 字段（`response_data.error`）。
+
+- `x-output-pick` (string): jsonata 表达式（允许 `{% %}`），用于对成功响应体做投影裁剪。
+  - 绑定变量：`$body`。
+  - 返回对象将出现在执行结果的 `output` 字段（`response_data.output`）。
+
+实现说明：
+- 表达式底层使用 `jsonata-rs` 执行；当字符串以 `{% %}` 包裹时会先去壳后再执行。
+- 运行时输出在 `response_data` 中包含：`ok`（布尔，可选）、`error`（对象，可选）、`output`（对象/数组/标量，可选）。
+
 ## 0. 目标与范围
 - **目标**：用最小的 OpenAPI 子集 + 少量 `x-*` 扩展，描述"单个 API 动作（Action）"，并通过统一 Runner 执行；鉴权与过期刷新通过集中配置（provider 级）统一管理。
 - **范围**：本规范定义配置结构、合并顺序、执行时序、失败语义、可观测性与测试基线；**不包含**具体编程语言实现。

@@ -84,6 +84,8 @@ async fn test_action_parser_with_auth() -> Result<(), Box<dyn std::error::Error>
         include_deprecated: false,
         validate_schemas: true,
         extension_handlers: HashMap::new(),
+        config_dir: Some("config".to_string()),
+        provider_host: Some("api.github.com".to_string()),
     };
     
     let mut parser = ActionParser::new(options);
