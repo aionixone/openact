@@ -7,3 +7,5 @@ cd /Users/sryu/projects/aionixone/openact/authflow && WORKFLOW_RESPONSE=$(curl -
 EXECUTION_ID="d75f77da-be49-4de8-a700-7a552d87b16d" && sleep 3 && STATUS_RESPONSE=$(curl -s "http://localhost:8080/api/v1/executions/$EXECUTION_ID") && AUTHORIZE_URL=$(echo "$STATUS_RESPONSE" | jq -r '.context.states.StartAuth.result.authorize_url // empty') && if [ -n "$AUTHORIZE_URL" ]; then echo "🔗 授权URL: $AUTHORIZE_URL" && open "$AUTHORIZE_URL"; else echo "未找到授权URL"; fi
 
 EXECUTION_ID="d75f77da-be49-4de8-a700-7a552d87b16d" && echo "监控执行状态..." && for i in {1..30}; do sleep 2; STATUS=$(curl -s "http://localhost:8080/api/v1/executions/$EXECUTION_ID" | jq -r '.status'); echo "[$i] 状态: $STATUS"; if [ "$STATUS" = "completed" ]; then echo "🎉 执行完成！"; break; elif [ "$STATUS" = "failed" ]; then echo "❌ 执行失败"; break; fi; done
+
+cargo run -p openact-cli -- auth-begin default authflow/templates/providers/github/oauth2.json --open-browser --wait

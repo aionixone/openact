@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "authflow",
     "manifest",
+    "openact-core",
+    "openact-cli",
 ]
 
 [workspace.package]
@@ -103,6 +105,7 @@ indexmap = { version = "2.2", features = ["serde"] }
 # Development dependencies
 tokio-test = "0.4"
 httpmock = "0.7"
+tempfile = "3.0"
 
 [workspace.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

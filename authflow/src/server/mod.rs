@@ -212,7 +212,8 @@ impl ServerState {
             ..Default::default()
         };
         #[cfg(feature = "sqlite")]
-        if let Ok(db_url) = std::env::var("AUTHFLOW_SQLITE_URL") {
+        if let Ok(db_url) = std::env::var("OPENACT_DATABASE_URL")
+            .or_else(|_| std::env::var("AUTHFLOW_SQLITE_URL")) {
             use crate::store::sqlite_connection_store::SqliteConfig;
             cfg.sqlite = Some(SqliteConfig {
                 database_url: db_url,

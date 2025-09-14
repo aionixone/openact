@@ -18,15 +18,18 @@ echo "=================================================="
 # 设置环境变量
 export GITHUB_CLIENT_ID="Ov23lihVkExosE0hR0Bh"
 export GITHUB_CLIENT_SECRET="9c704ca863eb45c8175d5d6bd9f367b1d17d8afc"
-export AUTHFLOW_MASTER_KEY="test-master-key-32-bytes-long!!"
-export AUTHFLOW_SQLITE_URL="sqlite:authflow/data/authflow.db"
+export OPENACT_MASTER_KEY="test-master-key-32-bytes-long!!"
+export AUTHFLOW_MASTER_KEY="$OPENACT_MASTER_KEY"  # 兼容
+export OPENACT_DATABASE_URL="sqlite:/Users/sryu/projects/aionixone/openact/manifest/data/openact.db"
+export AUTHFLOW_SQLITE_URL="$OPENACT_DATABASE_URL"  # 兼容
 export CONNECTION_TRN="trn:authflow:test-tenant:connection/github-mock"
 export GITHUB_BASE_URL="https://api.github.com"
 
 echo -e "${CYAN}📋 环境变量设置:${NC}"
 echo "GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:0:16}..."
 echo "GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:0:16}..."
-echo "AUTHFLOW_MASTER_KEY: ${AUTHFLOW_MASTER_KEY:0:16}..."
+echo "OPENACT_MASTER_KEY: ${OPENACT_MASTER_KEY:0:16}..."
+echo "OPENACT_DATABASE_URL: $OPENACT_DATABASE_URL"
 echo "AUTHFLOW_SQLITE_URL: $AUTHFLOW_SQLITE_URL"
 echo "CONNECTION_TRN: $CONNECTION_TRN"
 echo "GITHUB_BASE_URL: $GITHUB_BASE_URL"

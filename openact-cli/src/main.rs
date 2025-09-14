@@ -1,0 +1,1074 @@
+use anyhow::Result;
+use clap::{Args, Parser, Subcommand};
+use openact_core::action_registry::ActionRegistry;
+use openact_core::{
+    AuthManager, AuthOrchestrator, BindingManager, CoreConfig, CoreContext, ExecutionEngine,
+};
+
+#[derive(Parser)]
+#[command(name = "openact")]
+#[command(about = "OpenAct CLI", version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Show health and stats
+    Status,
+    /// OAuth2 login from DSL config
+    AuthLogin(AuthLoginArgs),
+    /// List auth connections
+    AuthList,
+    /// Delete an auth connection
+    AuthDelete { trn: String },
+    /// Create a PAT-based auth connection
+    AuthCreatePat {
+        tenant: String,
+        provider: String,
+        user_id: String,
+        token_env: Option<String>,
+    },
+    /// Create a PAT-based auth connection from config file
+    AuthPat { tenant: String, config: String },
+    /// Inspect an auth connection by TRN (mask sensitive fields)
+    AuthInspect { trn: String },
+    /// Refresh an auth connection by TRN (if provider supports refresh)
+    AuthRefresh { trn: String },
+    /// Begin OAuth and output authorize URL; save session to file
+    AuthBegin {
+        tenant: String,
+        config: String,
+        #[arg(help = "Flow name", default_value = "OAuth")]
+        flow: String,
+        #[arg(help = "Redirect URI", required = false)]
+        redirect: Option<String>,
+        #[arg(help = "Scope", required = false)]
+        scope: Option<String>,
+        #[arg(long, help = "Wait for callback and auto-complete (no manual copy)")]
+        wait: bool,
+        #[arg(long, help = "Do not delete session file after success when --wait is used")]
+        keep_session: bool,
+        #[arg(long, help = "Open browser after printing URL")]
+        open_browser: bool,
+    },
+    /// Complete OAuth using saved session and callback URL
+    AuthComplete {
+        tenant: String,
+        config: String,
+        #[arg(help = "Path to session file created by auth-begin")]
+        session: String,
+        #[arg(help = "Callback URL containing code/state")]
+        callback_url: String,
+    },
+    /// List saved OAuth sessions (~/.openact/sessions)
+    AuthSessionList,
+    /// Clean saved OAuth sessions by id or all
+    AuthSessionClean {
+        /// Delete all sessions
+        #[arg(long, default_value_t = false)]
+        all: bool,
+        /// Session ids (uuid without extension) or paths to delete
+        ids: Vec<String>,
+    },
+    /// Repair historical auth key versions (set NULL/0 to 1 or 0)
+    AuthRepairKeys {
+        /// tenant filter (optional)
+        #[arg(long)]
+        tenant: Option<String>,
+        /// provider filter (optional)
+        #[arg(long)]
+        provider: Option<String>,
+        /// target key version (0 for no-encryption, 1 for encrypted)
+        #[arg(long, default_value_t = 1)]
+        to_version: i32,
+        /// dry run only
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
+    /// Bind auth to action
+    BindingBind {
+        tenant: String,
+        auth_trn: String,
+        action_trn: String,
+    },
+    /// Unbind auth and action
+    BindingUnbind {
+        tenant: String,
+        auth_trn: String,
+        action_trn: String,
+    },
+    /// List bindings by tenant
+    BindingList {
+        tenant: String,
+        #[arg(long)]
+        auth_trn: Option<String>,
+        #[arg(long)]
+        action_trn: Option<String>,
+        #[arg(long, default_value_t = false)]
+        verbose: bool,
+    },
+    /// Run an action with an execution TRN
+    Run {
+        tenant: String,
+        action_trn: String,
+        exec_trn: String,
+        #[arg(long, value_parser = ["text","json"], default_value = "text")]
+        output: String,
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        #[arg(long, default_value_t = false)]
+        trace: bool,
+        #[arg(long)]
+        save: Option<String>,
+    },
+    /// Register an action from a YAML file into DB
+    ActionRegister {
+        tenant: String,
+        provider: String,
+        name: String,
+        trn: String,
+        yaml_path: String,
+    },
+    /// Delete an action by TRN
+    ActionDelete { trn: String },
+    /// Inspect an action by TRN
+    ActionInspect { trn: String },
+    /// List actions by tenant
+    ActionList { tenant: String },
+    /// Update an action's YAML by TRN
+    ActionUpdate { trn: String, yaml_path: String },
+    /// Export an action's YAML by TRN to stdout
+    ActionExport { trn: String },
+    /// Diagnose environment and configuration
+    Doctor {
+        #[arg(long, help = "Optional DSL path to validate secrets mapping")]
+        dsl: Option<String>,
+        #[arg(long, default_value_t = 8080)]
+        port_start: u16,
+        #[arg(long, default_value_t = 8099)]
+        port_end: u16,
+    },
+    /// Inspect a saved OAuth session file and print details
+    AuthSessionInspect { session: String },
+}
+
+#[derive(Args)]
+struct AuthLoginArgs {
+    #[arg(help = "Tenant to login to")]
+    tenant: String,
+    #[arg(help = "Path to DSL config file")]
+    config: String,
+    #[arg(help = "Flow to use (e.g., 'code')")]
+    flow: Option<String>,
+    #[arg(help = "Redirect URI to use")]
+    redirect: Option<String>,
+    #[arg(help = "Scope to request")]
+    scope: Option<String>,
+    #[arg(long, help = "Wait for callback (default: false)")]
+    wait: bool,
+    #[arg(long = "open-browser", help = "Open browser (default: false)")]
+    open_browser: bool,
+    #[arg(help = "Callback URL to use (overrides wait)")]
+    callback_url: Option<String>,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt().with_env_filter("info").init();
+    let cli = Cli::parse();
+    let cfg = CoreConfig::from_env();
+    let ctx = CoreContext::initialize(&cfg).await?;
+
+    match cli.command {
+        Commands::Status => {
+            ctx.health().await?;
+            let s = ctx.stats().await?;
+            // Encryption/env diagnostics
+            let master_from = if std::env::var("AUTHFLOW_MASTER_KEY").is_ok() {
+                Some("AUTHFLOW_MASTER_KEY")
+            } else if std::env::var("OPENACT_MASTER_KEY").is_ok() {
+                Some("OPENACT_MASTER_KEY")
+            } else {
+                None
+            };
+            let key_version_env = std::env::var("AUTHFLOW_KEY_VERSION").ok();
+            // Database diagnostics (key_version histogram and legacy nonce)
+            use sqlx::Row;
+            let pool = ctx.db.pool().clone();
+            let kv_rows = sqlx::query("SELECT COALESCE(key_version, -1) AS kv, COUNT(*) AS cnt FROM auth_connections GROUP BY kv ORDER BY kv")
+                .fetch_all(&pool)
+                .await
+                .unwrap_or_default();
+            let mut kv_parts: Vec<String> = Vec::new();
+            for r in kv_rows {
+                kv_parts.push(format!(
+                    "{}:{}",
+                    r.get::<i64, _>("kv"),
+                    r.get::<i64, _>("cnt")
+                ));
+            }
+            let legacy_nonce_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM auth_connections WHERE access_token_nonce = 'bm8tZW5jcnlwdGlvbg=='"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0);
+
+            println!("ok");
+            println!(
+                "bindings={} actions={} auth_connections={}",
+                s.bindings, s.actions, s.auth_connections
+            );
+            println!(
+                "encryption.master_key={}",
+                master_from.unwrap_or("(not set)")
+            );
+            println!(
+                "encryption.key_version_env={}",
+                key_version_env.unwrap_or_else(|| "(default)".to_string())
+            );
+            println!("auth.key_version_hist=[{}]", kv_parts.join(","));
+            println!("auth.legacy_no_encryption_nonces={}", legacy_nonce_count);
+        }
+        Commands::AuthLogin(args) => {
+            let orch = AuthOrchestrator::new(ctx.db.pool().clone());
+            let config_path = std::path::Path::new(&args.config);
+            // Determine redirect URI: use provided one, otherwise auto-pick an available port when waiting
+            fn find_available_port(start: u16, end: u16) -> Option<u16> {
+                // Prefer common callback ports first
+                let preferred = [8080u16, 8081, 8082, 8083, 8084, 8085];
+                for &p in &preferred {
+                    if p >= start
+                        && p <= end
+                        && std::net::TcpListener::bind(("127.0.0.1", p)).is_ok()
+                    {
+                        return Some(p);
+                    }
+                }
+                // Fallback to full range scan
+                for port in start..=end {
+                    if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                        return Some(port);
+                    }
+                }
+                None
+            }
+            let chosen_redirect: Option<String> = if let Some(r) = args.redirect.clone() {
+                Some(r)
+            } else if args.wait {
+                let port = find_available_port(8080, 8099).unwrap_or(8080);
+                let uri = format!("http://localhost:{}/oauth/callback", port);
+                println!("🔧 自动选择端口: {} -> {}", port, uri);
+                Some(uri)
+            } else {
+                None
+            };
+            if let Some(ref r) = chosen_redirect {
+                println!("redirect_uri={}", r);
+            }
+            let (auth_url, pending) = orch
+                .begin_oauth_from_config(
+                    &args.tenant,
+                    config_path,
+                    args.flow.as_deref(),
+                    chosen_redirect.as_deref(),
+                    args.scope.as_deref(),
+                )
+                .await?;
+            println!("🔗 授权链接: {}", auth_url);
+            if args.open_browser {
+                print!("🌐 正在打开浏览器...");
+                let result = if cfg!(target_os = "macos") {
+                    std::process::Command::new("open").arg(&auth_url).status()
+                } else if cfg!(target_os = "linux") {
+                    std::process::Command::new("xdg-open")
+                        .arg(&auth_url)
+                        .status()
+                } else {
+                    Ok(Default::default())
+                };
+                if result.is_ok() {
+                    println!(" ✅");
+                } else {
+                    println!(" ❌ 自动打开失败，请手动复制上面的链接");
+                }
+            }
+            let callback_url = if args.wait {
+                let redirect = chosen_redirect
+                    .clone()
+                    .unwrap_or_else(|| "http://localhost:8080/oauth/callback".to_string());
+                let url = url::Url::parse(&redirect)
+                    .map_err(|e| anyhow::anyhow!(format!("bad redirect: {}", e)))?;
+                let host = url.host_str().unwrap_or("127.0.0.1");
+                let port = url.port().unwrap_or(8085);
+                let path = url.path().to_string();
+                println!("⏳ 等待授权回调: http://{}:{}{}", host, port, path);
+                println!("📝 请在浏览器中完成授权...");
+                let listener = std::net::TcpListener::bind((host, port))?;
+                listener.set_nonblocking(false)?;
+                let (mut stream, _addr) = listener.accept()?;
+                use std::io::{Read, Write};
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf)?;
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let first = req.lines().next().unwrap_or("");
+                let mut got = String::new();
+                if let Some(rest) = first.strip_prefix("GET ") {
+                    if let Some(p) = rest.strip_suffix(" HTTP/1.1") {
+                        got = format!("http://{}:{}{}", host, port, p);
+                    }
+                }
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK",
+                );
+                got
+            } else if let Some(cb) = args.callback_url {
+                cb
+            } else {
+                println!("paste_callback_url_and_press_enter:");
+                let mut s = String::new();
+                use std::io::Read;
+                std::io::stdin().read_to_string(&mut s)?;
+                s.trim().to_string()
+            };
+            let trn = orch.complete_oauth_with_callback(pending, &callback_url)?;
+            println!("🎉 认证成功! TRN: {}", trn);
+        }
+        Commands::AuthList => {
+            let am = AuthManager::from_database_url(cfg.database_url.clone()).await?;
+            for r in am.list().await? {
+                println!("{}", r);
+            }
+        }
+        Commands::AuthDelete { trn } => {
+            let am = AuthManager::from_database_url(cfg.database_url.clone()).await?;
+            let ok = am.delete(&trn).await?;
+            println!("{}", if ok { "deleted" } else { "not found" });
+        }
+        Commands::AuthCreatePat {
+            tenant,
+            provider,
+            user_id,
+            token_env,
+        } => {
+            let am = AuthManager::from_database_url(cfg.database_url.clone()).await?;
+            let env_key = token_env.unwrap_or_else(|| "GITHUB_PAT".to_string());
+            let token = std::env::var(&env_key)
+                .or_else(|_| std::env::var("GITHUB_TOKEN"))
+                .map_err(|_| anyhow::anyhow!(format!("{} or GITHUB_TOKEN not set", env_key)))?;
+            let trn = am
+                .create_pat_connection(&tenant, &provider, &user_id, &token)
+                .await?;
+            println!("created: {}", trn);
+        }
+        Commands::AuthPat { tenant, config } => {
+            #[derive(serde::Deserialize)]
+            struct PatCfg {
+                provider: String,
+                user_id: String,
+                #[serde(default)]
+                token_from: Option<TokenFrom>,
+                #[serde(default)]
+                token: Option<String>,
+            }
+            #[derive(serde::Deserialize)]
+            struct TokenFrom {
+                #[serde(default)]
+                env: Option<String>,
+                #[serde(default)]
+                token: Option<String>,
+            }
+            let text = std::fs::read_to_string(&config)?;
+            let cfgf: PatCfg = if config.ends_with(".json") {
+                serde_json::from_str(&text)?
+            } else {
+                serde_yaml::from_str(&text)?
+            };
+            let token = if let Some(tf) = cfgf.token_from {
+                if let Some(e) = tf.env {
+                    std::env::var(&e)?
+                } else if let Some(t) = tf.token {
+                    t
+                } else {
+                    anyhow::bail!("tokenFrom invalid")
+                }
+            } else if let Some(t) = cfgf.token {
+                t
+            } else {
+                anyhow::bail!("no token provided (tokenFrom/token)")
+            };
+            let am = AuthManager::from_database_url(cfg.database_url.clone()).await?;
+            let trn = am
+                .create_pat_connection(&tenant, &cfgf.provider, &cfgf.user_id, &token)
+                .await?;
+            println!("created: {}", trn);
+        }
+        Commands::AuthInspect { trn } => {
+            let am = AuthManager::from_database_url(cfg.database_url.clone()).await?;
+            if let Some(conn) = am.get(&trn).await? {
+                let mut extra_masked = conn.extra.clone();
+                if let serde_json::Value::Object(ref mut obj) = extra_masked {
+                    if obj.contains_key("access_token") { obj.insert("access_token".to_string(), serde_json::json!("***")); }
+                    if obj.contains_key("refresh_token") { obj.insert("refresh_token".to_string(), serde_json::json!("***")); }
+                }
+                println!("tenant={} provider={} user_id={} token_type={} scope={} trn={} extra={}",
+                    conn.trn.tenant, conn.trn.provider, conn.trn.user_id, conn.token_type, conn.scope.unwrap_or_default(), conn.trn.to_trn_string().unwrap_or_default(), extra_masked);
+            } else {
+                anyhow::bail!(format!("auth not found: {}", trn));
+            }
+        }
+        Commands::AuthRefresh { trn } => {
+            // TODO: if provider supports refresh, invoke orchestrator/flow to refresh
+            // For now, report not supported
+            println!("refresh not supported yet for: {}", trn);
+        }
+        Commands::AuthBegin {
+            tenant,
+            config,
+            flow,
+            redirect,
+            scope,
+            wait,
+            keep_session,
+            open_browser,
+        } => {
+            use std::fs;
+            let orch = AuthOrchestrator::new(ctx.db.pool().clone());
+            let config_path = std::path::Path::new(&config);
+            // Reuse auto-port logic: if no redirect provided, pick a free one
+            fn find_available_port(start: u16, end: u16) -> Option<u16> {
+                let preferred = [8080u16, 8081, 8082, 8083, 8084, 8085];
+                for &p in &preferred {
+                    if p >= start
+                        && p <= end
+                        && std::net::TcpListener::bind(("127.0.0.1", p)).is_ok()
+                    {
+                        return Some(p);
+                    }
+                }
+                for port in start..=end {
+                    if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                        return Some(port);
+                    }
+                }
+                None
+            }
+            let redirect_final = if let Some(r) = redirect.clone() {
+                Some(r)
+            } else {
+                find_available_port(8080, 8099).map(|p| {
+                    let uri = format!("http://localhost:{}/oauth/callback", p);
+                    println!("🔧 自动选择端口: {} -> {}", p, uri);
+                    uri
+                })
+            };
+            if let Some(ref r) = redirect_final {
+                println!("redirect_uri={}", r);
+            }
+            let (auth_url, pending) = orch
+                .begin_oauth_from_config(
+                    &tenant,
+                    config_path,
+                    Some(&flow),
+                    redirect_final.as_deref(),
+                    scope.as_deref(),
+                )
+                .await?;
+            println!("🔗 授权链接: {}", auth_url);
+            if open_browser {
+                let _ = if cfg!(target_os = "macos") {
+                    std::process::Command::new("open").arg(&auth_url).status()
+                } else if cfg!(target_os = "linux") {
+                    std::process::Command::new("xdg-open")
+                        .arg(&auth_url)
+                        .status()
+                } else {
+                    Ok(Default::default())
+                };
+            }
+            // Save session (flow/next_state/context) to ~/.openact/sessions/<uuid>.json
+            let sid = uuid::Uuid::new_v4().to_string();
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let dir = format!("{}/.openact/sessions", home);
+            fs::create_dir_all(&dir)?;
+            let session_path = format!("{}/{}.json", dir, sid);
+            let session_json = serde_json::json!({
+                "flow_name": pending.flow_name,
+                "next_state": pending.next_state,
+                "context": pending.context,
+                "redirect_uri": redirect_final,
+                "auth_url": auth_url,
+            });
+            fs::write(&session_path, serde_json::to_string_pretty(&session_json)?)?;
+            println!("session_file={}", session_path);
+
+            // Optional: wait for callback and auto-complete
+            if wait {
+                // Pick host/port/path from redirect
+                let redirect = session_json
+                    .get("redirect_uri")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let url = url::Url::parse(&redirect)
+                    .map_err(|e| anyhow::anyhow!(format!("bad redirect: {}", e)))?;
+                let host = url.host_str().unwrap_or("127.0.0.1");
+                let port = url.port().unwrap_or(8080);
+                let path = url.path().to_string();
+                println!("⏳ 等待授权回调: http://{}:{}{}", host, port, path);
+                let listener = std::net::TcpListener::bind((host, port))?;
+                let (mut stream, _addr) = listener.accept()?;
+                use std::io::{Read, Write};
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf)?;
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let first = req.lines().next().unwrap_or("");
+                let mut callback_url = String::new();
+                if let Some(rest) = first.strip_prefix("GET ") {
+                    if let Some(p) = rest.strip_suffix(" HTTP/1.1") {
+                        callback_url = format!("http://{}:{}{}", host, port, p);
+                    }
+                }
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nOK",
+                );
+                // Complete in-process using orchestrator
+                let trn = orch.complete_oauth_with_callback(pending, &callback_url)?;
+                println!("\u{1F389} 认证成功! TRN: {}", trn);
+                // Cleanup session file after success unless keep_session
+                if !keep_session {
+                    let _ = std::fs::remove_file(&session_path);
+                    println!("session_file_deleted={}", session_path);
+                }
+            }
+        }
+        Commands::AuthComplete {
+            tenant: _,
+            config,
+            session,
+            callback_url,
+        } => {
+            use serde_json::Value;
+            let orch = AuthOrchestrator::new(ctx.db.pool().clone());
+            let config_path = std::path::Path::new(&config);
+            // Load saved session
+            let text = std::fs::read_to_string(&session)?;
+            let v: Value = serde_json::from_str(&text)?;
+            let flow_name = v
+                .get("flow_name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("invalid session: flow_name"))?;
+            let next_state = v
+                .get("next_state")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("invalid session: next_state"))?;
+            let mut context = v
+                .get("context")
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("invalid session: context"))?;
+            let expected_state = v
+                .get("context")
+                .and_then(|c| c.get("state"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("");
+            // Parse code/state from callback_url and inject into context
+            let parsed = url::Url::parse(&callback_url)?;
+            let mut code = String::new();
+            let mut state = String::new();
+            for (k, val) in parsed.query_pairs() {
+                if k == "code" {
+                    code = val.to_string();
+                }
+                if k == "state" {
+                    state = val.to_string();
+                }
+            }
+            if code.is_empty() {
+                anyhow::bail!("missing code in callback url");
+            }
+            if !expected_state.is_empty() && !state.is_empty() && expected_state != state {
+                anyhow::bail!(format!(
+                    "state mismatch: expected={}, got={}",
+                    expected_state, state
+                ));
+            }
+            if let Value::Object(ref mut obj) = context {
+                obj.insert("code".into(), Value::String(code));
+                if !state.is_empty() {
+                    obj.insert("state".into(), Value::String(state));
+                }
+            }
+            let trn = orch
+                .resume_with_context(config_path, flow_name, next_state, context)
+                .await?;
+            println!("🎉 认证成功! TRN: {}", trn);
+        }
+        Commands::AuthRepairKeys {
+            tenant,
+            provider,
+            to_version,
+            dry_run,
+        } => {
+            use sqlx::Row;
+            let pool = ctx.db.pool().clone();
+            let mut where_clauses: Vec<&str> = Vec::new();
+            if tenant.is_some() {
+                where_clauses.push("tenant = ?");
+            }
+            if provider.is_some() {
+                where_clauses.push("provider = ?");
+            }
+            where_clauses.push("(key_version IS NULL OR key_version = 0)");
+            let where_sql = if where_clauses.is_empty() {
+                String::new()
+            } else {
+                format!(" WHERE {}", where_clauses.join(" AND "))
+            };
+            let sql_list = format!("SELECT trn, tenant, provider, key_version, access_token_nonce FROM auth_connections{}", where_sql);
+            let mut q = sqlx::query(&sql_list);
+            if let Some(t) = &tenant {
+                q = q.bind(t);
+            }
+            if let Some(p) = &provider {
+                q = q.bind(p);
+            }
+            let rows = q.fetch_all(&pool).await?;
+            println!("found {} rows to repair", rows.len());
+            if dry_run {
+                return Ok(());
+            }
+            let sql_upd = format!("UPDATE auth_connections SET key_version = ? WHERE trn = ?");
+            for r in rows {
+                let trn: String = r.get("trn");
+                sqlx::query(&sql_upd)
+                    .bind(to_version)
+                    .bind(&trn)
+                    .execute(&pool)
+                    .await?;
+                println!("repaired: {} -> key_version={} ", trn, to_version);
+            }
+        }
+        Commands::AuthSessionList => {
+            use serde_json::Value;
+            use std::fs;
+            use std::time::UNIX_EPOCH;
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let dir = format!("{}/.openact/sessions", home);
+            let rd = fs::read_dir(&dir);
+            match rd {
+                Ok(entries) => {
+                    for e in entries.flatten() {
+                        let path = e.path();
+                        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                            continue;
+                        }
+                        let meta = e.metadata().ok();
+                        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                        let mtime = meta
+                            .as_ref()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let fname = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                        let id = fname.strip_suffix(".json").unwrap_or(fname);
+                        let flow = std::fs::read_to_string(&path)
+                            .ok()
+                            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                            .and_then(|v| {
+                                v.get("flow_name")
+                                    .and_then(|x| x.as_str())
+                                    .map(|s| s.to_string())
+                            })
+                            .unwrap_or_else(|| "".to_string());
+                        println!(
+                            "id={} size={}B mtime={} flow={} path={}",
+                            id,
+                            size,
+                            mtime,
+                            flow,
+                            path.display()
+                        );
+                    }
+                }
+                Err(_) => println!("no sessions found"),
+            }
+        }
+        Commands::AuthSessionClean { all, ids } => {
+            use std::fs;
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let dir = format!("{}/.openact/sessions", home);
+            if all && ids.is_empty() {
+                if let Ok(entries) = fs::read_dir(&dir) {
+                    for e in entries.flatten() {
+                        let p = e.path();
+                        if p.extension().and_then(|s| s.to_str()) == Some("json") {
+                            let _ = fs::remove_file(&p);
+                        }
+                    }
+                }
+                println!("sessions cleaned: all");
+            } else if !ids.is_empty() {
+                for id in ids {
+                    let path = if id.ends_with(".json") {
+                        id.clone()
+                    } else {
+                        format!("{}/{}.json", dir, id)
+                    };
+                    match fs::remove_file(&path) {
+                        Ok(_) => println!("deleted: {}", path),
+                        Err(e) => println!("skip: {} ({})", path, e),
+                    }
+                }
+            } else {
+                println!("nothing to do: provide --all or session ids");
+            }
+        }
+        Commands::AuthSessionInspect { session } => {
+            let text = std::fs::read_to_string(&session)?;
+            let v: serde_json::Value = serde_json::from_str(&text)?;
+            let flow = v.get("flow_name").and_then(|x| x.as_str()).unwrap_or("");
+            let next = v.get("next_state").and_then(|x| x.as_str()).unwrap_or("");
+            let redirect = v.get("redirect_uri").and_then(|x| x.as_str()).unwrap_or("");
+            let auth_url = v.get("auth_url").and_then(|x| x.as_str()).unwrap_or("");
+            println!("flow={} next_state={} redirect_uri={} auth_url={}", flow, next, redirect, auth_url);
+            if let Some(state) = v.pointer("/context/state").and_then(|x| x.as_str()) {
+                println!("state={}", state);
+            }
+        }
+        Commands::BindingBind {
+            tenant,
+            auth_trn,
+            action_trn,
+        } => {
+            // Pre-checks: action exists
+            let registry = ActionRegistry::new(ctx.db.pool().clone());
+            if let Err(e) = registry.get_by_trn(&action_trn).await {
+                let msg = format!("{}", e);
+                if msg.contains("no rows returned") || msg.contains("not found") {
+                    anyhow::bail!(format!("action not found: {}", action_trn));
+                } else {
+                    anyhow::bail!(e);
+                }
+            }
+            // Pre-checks: auth exists
+            let am = AuthManager::from_database_url(cfg.database_url.clone()).await?;
+            let exists = am.get(&auth_trn).await?.is_some();
+            if !exists {
+                anyhow::bail!(format!("auth not found: {}", auth_trn));
+            }
+
+            let bm = BindingManager::new(ctx.db.pool().clone());
+            let b = bm
+                .bind(&tenant, &auth_trn, &action_trn, Some("cli"))
+                .await?;
+            println!("bound: {} -> {}", b.auth_trn, b.action_trn);
+        }
+        Commands::BindingUnbind {
+            tenant,
+            auth_trn,
+            action_trn,
+        } => {
+            // Pre-checks with friendly errors
+            let registry = ActionRegistry::new(ctx.db.pool().clone());
+            if let Err(e) = registry.get_by_trn(&action_trn).await {
+                let msg = format!("{}", e);
+                if msg.contains("no rows returned") || msg.contains("not found") {
+                    anyhow::bail!(format!("action not found: {}", action_trn));
+                } else {
+                    anyhow::bail!(e);
+                }
+            }
+            let am = AuthManager::from_database_url(cfg.database_url.clone()).await?;
+            if am.get(&auth_trn).await?.is_none() {
+                anyhow::bail!(format!("auth not found: {}", auth_trn));
+            }
+            let bm = BindingManager::new(ctx.db.pool().clone());
+            let ok = bm.unbind(&tenant, &auth_trn, &action_trn).await?;
+            println!("{}", if ok { "unbound" } else { "not found" });
+        }
+        Commands::BindingList {
+            tenant,
+            auth_trn,
+            action_trn,
+            verbose,
+        } => {
+            let bm = BindingManager::new(ctx.db.pool().clone());
+            let rows = bm.list_by_tenant(&tenant).await?;
+            let rows = rows
+                .into_iter()
+                .filter(|b| {
+                    (auth_trn.as_ref().map(|x| &b.auth_trn == x).unwrap_or(true))
+                        && (action_trn
+                            .as_ref()
+                            .map(|x| &b.action_trn == x)
+                            .unwrap_or(true))
+                })
+                .collect::<Vec<_>>();
+            for b in rows {
+                if verbose {
+                    println!(
+                        "tenant={} auth={} action={} created_by={:?} created_at={:?}",
+                        b.tenant, b.auth_trn, b.action_trn, b.created_by, b.created_at
+                    );
+                } else {
+                    println!("{} -> {}", b.auth_trn, b.action_trn);
+                }
+            }
+        }
+        Commands::Run {
+            tenant,
+            action_trn,
+            exec_trn,
+            output,
+            dry_run,
+            trace,
+            save,
+        } => {
+            // Load Action (storage model) from DB via ActionRegistry
+            let registry = ActionRegistry::new(ctx.db.pool().clone());
+            let stored = match registry.get_by_trn(&action_trn).await {
+                Ok(a) => a,
+                Err(e) => {
+                    let msg = format!("{}", e);
+                    if msg.contains("no rows returned") || msg.contains("not found") {
+                        anyhow::bail!(format!("action not found: {}", action_trn));
+                    } else {
+                        anyhow::bail!(e);
+                    }
+                }
+            };
+
+            // Parse YAML spec to get method/path/headers/base_url (no hardcode)
+            #[derive(serde::Deserialize)]
+            struct Spec {
+                method: String,
+                path: String,
+                #[serde(default)]
+                headers: Option<std::collections::HashMap<String, String>>,
+                #[serde(default)]
+                base_url: Option<String>,
+            }
+            let spec: Spec = serde_yaml::from_str(&stored.openapi_spec)
+                .map_err(|e| anyhow::anyhow!("invalid action yaml in DB: {}", e))?;
+
+            let mut action = manifest::action::Action::new(
+                stored.name,
+                spec.method,
+                spec.path,
+                stored.provider,
+                stored.tenant,
+                stored.trn,
+            );
+            action
+                .extensions
+                .insert("x-real-http".to_string(), serde_json::json!(true));
+            if let Some(base) = spec
+                .base_url
+                .or_else(|| std::env::var("OPENACT_BASE_URL").ok())
+            {
+                action
+                    .extensions
+                    .insert("x-base-url".to_string(), serde_json::json!(base));
+            }
+
+            let engine = ExecutionEngine::new(ctx.db.clone());
+            let mut headers = spec.headers.unwrap_or_default();
+            headers.entry("User-Agent".to_string()).or_insert_with(|| {
+                std::env::var("OPENACT_DEFAULT_USER_AGENT")
+                    .unwrap_or_else(|_| "openact-cli/1.0".to_string())
+            });
+            if trace {
+                headers.insert("X-OpenAct-Trace".to_string(), "true".to_string());
+            }
+
+            if output == "text" {
+                println!("🚀 执行 action: {}", action_trn);
+                println!("📋 执行 TRN: {}", exec_trn);
+                println!(
+                    "🔗 Base URL: {}",
+                    action
+                        .extensions
+                        .get("x-base-url")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("未设置")
+                );
+            }
+
+            if dry_run {
+                let preview = serde_json::json!({
+                    "tenant": tenant,
+                    "action_trn": action_trn,
+                    "exec_trn": exec_trn,
+                    "method": action.method,
+                    "path": action.path,
+                    "base_url": action.extensions.get("x-base-url").cloned(),
+                    "headers": headers,
+                });
+                if output == "json" {
+                    println!("{}", serde_json::to_string_pretty(&preview)?);
+                } else {
+                    println!("[dry-run] 即将执行请求: {}", preview);
+                }
+                if let Some(file) = save {
+                    std::fs::write(file, serde_json::to_string_pretty(&preview)?)?;
+                }
+                return Ok(());
+            }
+
+            let res = engine
+                .run_action_with_overrides(&tenant, action, &exec_trn, None, Some(headers))
+                .await?;
+
+            // Prepare copies for multi-use
+            let resp_copy = res.response_data.clone();
+            let err_copy = res.error_message.clone();
+            let status_code_copy = res.status_code.clone();
+            let duration_copy = res.duration_ms.clone();
+
+            if output == "json" {
+                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                    "status": res.status,
+                    "response": resp_copy,
+                    "error": err_copy,
+                    "status_code": status_code_copy,
+                    "duration_ms": duration_copy,
+                    "exec_trn": exec_trn,
+                    "action_trn": action_trn,
+                }))?);
+            } else {
+                println!("📊 执行状态: {:?}", res.status);
+                if let Some(ref data) = res.response_data { println!("📄 响应数据: {}", data); }
+                if let Some(ref error) = res.error_message { println!("❌ 错误信息: {}", error); }
+                println!("⏱️  执行时长: {}ms", res.duration_ms.unwrap_or(0));
+                if let Some(code) = res.status_code { println!("🔢 状态码: {}", code); }
+            }
+            if let Some(file) = save { std::fs::write(file, serde_json::to_string_pretty(&serde_json::json!({
+                "status": res.status,
+                "response": resp_copy,
+                "error": err_copy,
+                "status_code": status_code_copy,
+                "duration_ms": duration_copy,
+                "exec_trn": exec_trn,
+                "action_trn": action_trn,
+            }))?)?; }
+        }
+        Commands::ActionRegister {
+            tenant,
+            provider,
+            name,
+            trn,
+            yaml_path,
+        } => {
+            let registry = ActionRegistry::new(ctx.db.pool().clone());
+            let p = std::path::Path::new(&yaml_path);
+            let action = registry
+                .register_from_yaml(&tenant, &provider, &name, &trn, p)
+                .await?;
+            println!(
+                "registered: {} -> {} {} {}",
+                action.trn, tenant, provider, name
+            );
+        }
+        Commands::ActionDelete { trn } => {
+            let registry = ActionRegistry::new(ctx.db.pool().clone());
+            let ok = registry.delete_by_trn(&trn).await?;
+            println!("{}", if ok { "deleted" } else { "not found" });
+        }
+        Commands::ActionInspect { trn } => {
+            let registry = ActionRegistry::new(ctx.db.pool().clone());
+            let a = registry.get_by_trn(&trn).await?;
+            println!(
+                "trn={} tenant={} provider={} name={} active={}",
+                a.trn, a.tenant, a.provider, a.name, a.is_active
+            );
+        }
+        Commands::ActionList { tenant } => {
+            let registry = ActionRegistry::new(ctx.db.pool().clone());
+            for a in registry.list_by_tenant(&tenant).await? {
+                println!("{} {} {} {}", a.trn, a.tenant, a.provider, a.name);
+            }
+        }
+        Commands::ActionUpdate { trn, yaml_path } => {
+            let registry = ActionRegistry::new(ctx.db.pool().clone());
+            let p = std::path::Path::new(&yaml_path);
+            let a = registry.update_from_yaml(&trn, p).await?;
+            println!("updated: {}", a.trn);
+        }
+        Commands::ActionExport { trn } => {
+            let registry = ActionRegistry::new(ctx.db.pool().clone());
+            let spec = registry.export_spec_by_trn(&trn).await?;
+            println!("{}", spec);
+        }
+        Commands::Doctor { dsl, port_start, port_end } => {
+            println!("== OpenAct Doctor ==");
+            // Env checks
+            let db_url_res = std::env::var("OPENACT_DATABASE_URL").or_else(|_| std::env::var("AUTHFLOW_SQLITE_URL"));
+            let db_url_str = db_url_res.clone().unwrap_or_else(|_| "(missing)".to_string());
+            println!("DB URL: {}", db_url_str);
+            if db_url_res.is_err() {
+                let cwd = std::env::current_dir().ok();
+                if let Some(p) = cwd { println!("Suggestion: export OPENACT_DATABASE_URL=sqlite:{}/manifest/data/openact.db", p.display()); }
+            }
+            let master = std::env::var("OPENACT_MASTER_KEY").or_else(|_| std::env::var("AUTHFLOW_MASTER_KEY"));
+            println!("Master Key: {}", if master.is_ok() { "(set)" } else { "(not set)" });
+            if master.is_err() { println!("Suggestion: export OPENACT_MASTER_KEY=your-32-bytes-key"); }
+
+            // DB connectivity
+            let pool = ctx.db.pool().clone();
+            match sqlx::query("SELECT 1").fetch_one(&pool).await {
+                Ok(_) => println!("DB connectivity: OK"),
+                Err(e) => println!("DB connectivity: FAIL ({})", e),
+            }
+
+            // Port availability
+            let mut avail = Vec::new();
+            for p in port_start..=port_end {
+                if std::net::TcpListener::bind(("127.0.0.1", p)).is_ok() { avail.push(p); }
+                if avail.len() >= 3 { break; }
+            }
+            if avail.is_empty() {
+                println!("Ports {}-{}: no free ports", port_start, port_end);
+                println!("Suggestion: choose a different range via --port-start/--port-end, or pass --redirect to auth-begin/auth-login");
+            } else { println!("Free ports (sample): {:?}", avail); }
+
+            // Secrets mapping (optional DSL)
+            if let Some(path) = dsl {
+                use openact_core::AuthOrchestrator; use std::path::Path;
+                let orch = AuthOrchestrator::new(ctx.db.pool().clone());
+                let p = Path::new(&path);
+                // reuse orchestrator's secret extractor via temp functions by calling begin and catching error
+                let res = orch.begin_oauth_from_config("doctor", p, Some("OAuth"), Some("http://localhost:8080/oauth/callback"), Some("user:email")).await;
+                match res {
+                    Ok((url, _)) => { println!("DSL parse: OK (authorize_url sample: {})", url); }
+                    Err(e) => {
+                        let msg = format!("{}", e);
+                        if msg.contains("missing required secrets") {
+                            println!("Secrets: MISSING -> {}", msg);
+                            // derive keys from message: missing required secrets: [k1, k2]
+                            if let (Some(s), Some(eidx)) = (msg.find('['), msg.find(']')) {
+                                if eidx > s { let keys_str = &msg[s+1..eidx];
+                                    let keys: Vec<String> = keys_str.split(',').map(|t| t.trim().trim_matches('"').to_string()).filter(|k| !k.is_empty()).collect();
+                                    if !keys.is_empty() {
+                                        println!("Suggestions (env):");
+                                        for k in &keys { println!("  export {}=<value>", k.replace('-', "_").to_uppercase()); }
+                                        println!("Suggestion (file): set OPENACT_SECRETS_FILE to a json/yaml containing:");
+                                        let sample: serde_json::Value = serde_json::json!(
+                                            keys.iter().map(|k| (k.clone(), "<value>".into())).collect::<serde_json::Map<_, _>>()
+                                        );
+                                        println!("{}", serde_json::to_string_pretty(&sample).unwrap_or("{}".to_string()));
+                                    }
+                                }
+                            }
+                        } else {
+                            println!("DSL check: FAIL -> {}", msg);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}

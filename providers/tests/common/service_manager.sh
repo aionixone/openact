@@ -12,21 +12,28 @@ MANIFEST_PORT=8081
 setup_environment_variables() {
     log_info "设置环境变量..."
     
-    # 设置固定的加密主密钥 (确保数据一致性)
-    if [ -z "$AUTHFLOW_MASTER_KEY" ]; then
-        export AUTHFLOW_MASTER_KEY="test-master-key-32-bytes-long!!"
+    # 设置统一的OpenAct环境变量
+    if [ -z "$OPENACT_MASTER_KEY" ]; then
+        export OPENACT_MASTER_KEY="test-master-key-32-bytes-long!!"
     fi
     
-    # 设置AuthFlow配置
+    if [ -z "$OPENACT_DATABASE_URL" ]; then
+        export OPENACT_DATABASE_URL="sqlite:/Users/sryu/projects/aionixone/openact/manifest/data/openact.db"
+    fi
+    
+    # 兼容旧的AuthFlow环境变量
+    export AUTHFLOW_MASTER_KEY="$OPENACT_MASTER_KEY"
+    export AUTHFLOW_SQLITE_URL="$OPENACT_DATABASE_URL"
     export AUTHFLOW_STORE=sqlite
-    export AUTHFLOW_SQLITE_URL="sqlite:$PROJECT_ROOT/authflow/data/authflow.db"
     export REDIRECT_URI="http://localhost:$AUTHFLOW_PORT/oauth/callback"
     
     # 设置Provider特定环境变量
     setup_provider_environment_variables
     
-    log_debug "AUTHFLOW_MASTER_KEY: ${AUTHFLOW_MASTER_KEY:0:16}..."
-    log_debug "AUTHFLOW_SQLITE_URL: $AUTHFLOW_SQLITE_URL"
+    log_debug "OPENACT_MASTER_KEY: ${OPENACT_MASTER_KEY:0:16}..."
+    log_debug "OPENACT_DATABASE_URL: $OPENACT_DATABASE_URL"
+    log_debug "AUTHFLOW_MASTER_KEY: ${AUTHFLOW_MASTER_KEY:0:16}... (兼容)"
+    log_debug "AUTHFLOW_SQLITE_URL: $AUTHFLOW_SQLITE_URL (兼容)"
     log_debug "REDIRECT_URI: $REDIRECT_URI"
 }
 
@@ -112,10 +119,13 @@ start_manifest_service() {
     # 切换到manifest目录
     cd "$PROJECT_ROOT/manifest"
     
-    # 设置Manifest环境变量
+    # 设置Manifest环境变量  
     export CONNECTION_TRN="$CONNECTION_TRN"
     export PROVIDER_BASE_URL="$PROVIDER_BASE_URL"
-    export AUTHFLOW_MASTER_KEY="$AUTHFLOW_MASTER_KEY"
+    export OPENACT_MASTER_KEY="$OPENACT_MASTER_KEY"
+    export OPENACT_DATABASE_URL="$OPENACT_DATABASE_URL"
+    # 兼容变量
+    export AUTHFLOW_MASTER_KEY="$AUTHFLOW_MASTER_KEY"  
     export AUTHFLOW_SQLITE_URL="$AUTHFLOW_SQLITE_URL"
     
     log_success "Manifest服务环境准备完成"

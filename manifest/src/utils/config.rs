@@ -46,7 +46,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             database: DatabaseConfig {
-                url: "sqlite:openapi_tools.db".to_string(),
+                url: std::env::var("OPENACT_DATABASE_URL")
+                    .unwrap_or_else(|_| "sqlite:data/openact.db".to_string()),
                 max_connections: 10,
                 enable_logging: false,
             },

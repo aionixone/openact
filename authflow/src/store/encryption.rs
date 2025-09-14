@@ -113,26 +113,16 @@ impl FieldEncryption {
     /// Decrypt field data
     #[cfg(feature = "encryption")]
     pub fn decrypt_field(&self, encrypted: &EncryptedField) -> Result<String> {
-        // Get the key for the corresponding version
-        let key = if encrypted.key_version == self.config.current_key_version {
-            &self.config.master_key
-        } else {
-            self.config.historical_keys.get(&encrypted.key_version)
-                .ok_or_else(|| anyhow!("Key version {} not found", encrypted.key_version))?
-        };
-
-        // Decode data
-        let ciphertext = STANDARD.decode(&encrypted.data)
-            .map_err(|e| anyhow!("Failed to decode ciphertext: {}", e))?;
-        let nonce_bytes = STANDARD.decode(&encrypted.nonce)
+        // Decode nonce first to detect legacy "no-encryption" format BEFORE key selection
+        let nonce_bytes = STANDARD
+            .decode(&encrypted.nonce)
             .map_err(|e| anyhow!("Failed to decode nonce: {}", e))?;
 
         // Backward compatibility: data written without encryption feature enabled stores
         // Base64("no-encryption") as the nonce and Base64(plaintext) as data.
-        // In that case, treat it as plaintext instead of AES-GCM.
+        // In that case, treat it as plaintext instead of AES-GCM, regardless of key_version.
         if nonce_bytes.len() != 12 {
             if nonce_bytes.as_slice() == b"no-encryption" {
-                // Backward compatibility: handle unencrypted data
                 let plaintext = STANDARD
                     .decode(&encrypted.data)
                     .map_err(|e| anyhow!("Failed to decode data: {}", e))?;
@@ -142,6 +132,20 @@ impl FieldEncryption {
             return Err(anyhow!("Invalid nonce length: expected 12 bytes, got {}", nonce_bytes.len()));
         }
 
+        // Select key only for real AES-GCM payloads
+        let key = if encrypted.key_version == self.config.current_key_version {
+            &self.config.master_key
+        } else {
+            self.config
+                .historical_keys
+                .get(&encrypted.key_version)
+                .ok_or_else(|| anyhow!("Key version {} not found", encrypted.key_version))?
+        };
+
+        // Decode ciphertext after confirming AES-GCM path
+        let ciphertext = STANDARD
+            .decode(&encrypted.data)
+            .map_err(|e| anyhow!("Failed to decode ciphertext: {}", e))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         // Create cipher
@@ -149,11 +153,11 @@ impl FieldEncryption {
             .map_err(|e| anyhow!("Failed to create cipher: {}", e))?;
 
         // Decrypt data
-        let plaintext = cipher.decrypt(nonce, ciphertext.as_slice())
+        let plaintext = cipher
+            .decrypt(nonce, ciphertext.as_slice())
             .map_err(|e| anyhow!("Decryption failed: {}", e))?;
 
-        String::from_utf8(plaintext)
-            .map_err(|e| anyhow!("Invalid UTF-8 in decrypted data: {}", e))
+        String::from_utf8(plaintext).map_err(|e| anyhow!("Invalid UTF-8 in decrypted data: {}", e))
     }
 
     /// Decrypt field data (placeholder when encryption feature is not enabled)

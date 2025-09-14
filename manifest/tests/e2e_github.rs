@@ -40,7 +40,9 @@ fn build_action(connection_trn: &str, base_url: &str) -> Action {
 #[tokio::test]
 #[ignore]
 async fn e2e_github_get_user() {
-    let db_url = std::env::var("AUTHFLOW_SQLITE_URL").expect("set AUTHFLOW_SQLITE_URL");
+    let db_url = std::env::var("OPENACT_DATABASE_URL")
+        .or_else(|_| std::env::var("AUTHFLOW_SQLITE_URL"))
+        .expect("set OPENACT_DATABASE_URL or AUTHFLOW_SQLITE_URL");
     let trn = std::env::var("CONNECTION_TRN").expect("set CONNECTION_TRN");
     let base_url =
         std::env::var("GITHUB_BASE_URL").unwrap_or_else(|_| "https://api.github.com".to_string());

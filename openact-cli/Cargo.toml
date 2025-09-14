@@ -1,0 +1,25 @@
+[package]
+name = "openact-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+serde = { workspace = true }
+openact-core = { path = "../openact-core" }
+manifest = { path = "../manifest" }
+url = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite", "macros"] }
+uuid = { version = "1.8", features = ["v4"] }
+
+[[bin]]
+name = "openact"
+path = "src/main.rs"
+
+

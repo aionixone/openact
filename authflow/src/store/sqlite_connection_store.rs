@@ -104,7 +104,7 @@ impl SqliteConnectionStore {
         // Create connections table
         sqlx::query(
             r#"
-            CREATE TABLE IF NOT EXISTS connections (
+            CREATE TABLE IF NOT EXISTS auth_connections (
                 trn TEXT PRIMARY KEY,
                 tenant TEXT NOT NULL,
                 provider TEXT NOT NULL,
@@ -130,11 +130,11 @@ impl SqliteConnectionStore {
         .map_err(|e| anyhow!("Failed to create connections table: {}", e))?;
 
         // Create indexes
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_connections_tenant_provider ON connections(tenant, provider)")
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_auth_connections_tenant_provider ON auth_connections(tenant, provider)")
             .execute(&self.pool)
             .await?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_connections_expires_at ON connections(expires_at)")
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_auth_connections_expires_at ON auth_connections(expires_at)")
             .execute(&self.pool)
             .await?;
 
@@ -142,7 +142,7 @@ impl SqliteConnectionStore {
         if self.config.enable_audit_log {
             sqlx::query(
                 r#"
-                CREATE TABLE IF NOT EXISTS connection_history (
+                CREATE TABLE IF NOT EXISTS auth_connection_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     trn TEXT NOT NULL,
                     operation TEXT NOT NULL,
@@ -152,7 +152,7 @@ impl SqliteConnectionStore {
                     new_data_nonce TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     reason TEXT,
-                    FOREIGN KEY (trn) REFERENCES connections(trn) ON DELETE CASCADE
+                    FOREIGN KEY (trn) REFERENCES auth_connections(trn) ON DELETE CASCADE
                 )
                 "#,
             )
@@ -274,7 +274,7 @@ impl SqliteConnectionStore {
 
         sqlx::query(
             r#"
-            INSERT INTO connection_history 
+            INSERT INTO auth_connection_history 
             (trn, operation, old_data_encrypted, old_data_nonce, new_data_encrypted, new_data_nonce, reason)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
@@ -294,7 +294,7 @@ impl SqliteConnectionStore {
 
     /// List connections by tenant (helper method, not part of trait)
     pub async fn list_by_tenant(&self, tenant: &str) -> Result<Vec<Connection>> {
-        let rows = sqlx::query("SELECT * FROM connections WHERE tenant = ? ORDER BY created_at DESC")
+        let rows = sqlx::query("SELECT * FROM auth_connections WHERE tenant = ? ORDER BY created_at DESC")
             .bind(tenant)
             .fetch_all(&self.pool)
             .await?;
@@ -309,7 +309,7 @@ impl SqliteConnectionStore {
 
     /// List connections by provider (helper method, not part of trait)
     pub async fn list_by_provider(&self, tenant: &str, provider: &str) -> Result<Vec<Connection>> {
-        let rows = sqlx::query("SELECT * FROM connections WHERE tenant = ? AND provider = ? ORDER BY created_at DESC")
+        let rows = sqlx::query("SELECT * FROM auth_connections WHERE tenant = ? AND provider = ? ORDER BY created_at DESC")
             .bind(tenant)
             .bind(provider)
             .fetch_all(&self.pool)
@@ -329,7 +329,7 @@ impl SqliteConnectionStore {
 impl ConnectionStore for SqliteConnectionStore {
     async fn get(&self, connection_ref: &str) -> Result<Option<Connection>> {
         tracing::debug!("Getting connection: {}", connection_ref);
-        let row = sqlx::query("SELECT * FROM connections WHERE trn = ?")
+        let row = sqlx::query("SELECT * FROM auth_connections WHERE trn = ?")
             .bind(connection_ref)
             .fetch_optional(&self.pool)
             .await?;
@@ -371,7 +371,7 @@ impl ConnectionStore for SqliteConnectionStore {
             // Update existing record
             sqlx::query(
                 r#"
-                UPDATE connections SET
+                UPDATE auth_connections SET
                     access_token_encrypted = ?, access_token_nonce = ?,
                     refresh_token_encrypted = ?, refresh_token_nonce = ?,
                     expires_at = ?, token_type = ?, scope = ?,
@@ -401,7 +401,7 @@ impl ConnectionStore for SqliteConnectionStore {
             // Insert new record
             sqlx::query(
                 r#"
-                INSERT INTO connections 
+                INSERT INTO auth_connections 
                 (trn, tenant, provider, user_id, access_token_encrypted, access_token_nonce,
                  refresh_token_encrypted, refresh_token_nonce, expires_at, token_type, scope,
                  extra_data_encrypted, extra_data_nonce, created_at, updated_at)
@@ -441,7 +441,7 @@ impl ConnectionStore for SqliteConnectionStore {
             self.log_audit(connection_ref, "delete", existing.as_ref(), None, Some("Connection deleted")).await?;
         }
 
-        let result = sqlx::query("DELETE FROM connections WHERE trn = ?")
+        let result = sqlx::query("DELETE FROM auth_connections WHERE trn = ?")
             .bind(connection_ref)
             .execute(&self.pool)
             .await?;
@@ -460,7 +460,7 @@ impl ConnectionStore for SqliteConnectionStore {
         let mut tx = self.pool.begin().await?;
 
         // Get current value
-        let current = sqlx::query("SELECT * FROM connections WHERE trn = ?")
+        let current = sqlx::query("SELECT * FROM auth_connections WHERE trn = ?")
             .bind(connection_ref)
             .fetch_optional(&mut *tx)
             .await?;
@@ -489,13 +489,13 @@ impl ConnectionStore for SqliteConnectionStore {
                 // Update or insert
                 if current_connection.is_some() {
                     // Update existing record (simplified here, should encrypt in practice)
-                    sqlx::query("UPDATE connections SET updated_at = CURRENT_TIMESTAMP, version = version + 1 WHERE trn = ?")
+                    sqlx::query("UPDATE auth_connections SET updated_at = CURRENT_TIMESTAMP, version = version + 1 WHERE trn = ?")
                         .bind(connection_ref)
                         .execute(&mut *tx)
                         .await?;
                 } else {
                     // Insert new record (simplified here, should encrypt in practice)
-                    sqlx::query("INSERT INTO connections (trn, tenant, provider, user_id, access_token_encrypted, access_token_nonce, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+                    sqlx::query("INSERT INTO auth_connections (trn, tenant, provider, user_id, access_token_encrypted, access_token_nonce, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
                         .bind(connection_ref)
                         .bind(&new_conn.trn.tenant)
                         .bind(&new_conn.trn.provider)
@@ -508,7 +508,7 @@ impl ConnectionStore for SqliteConnectionStore {
             }
             None => {
                 // Delete
-                sqlx::query("DELETE FROM connections WHERE trn = ?")
+                sqlx::query("DELETE FROM auth_connections WHERE trn = ?")
                     .bind(connection_ref)
                     .execute(&mut *tx)
                     .await?;
@@ -520,21 +520,21 @@ impl ConnectionStore for SqliteConnectionStore {
     }
 
     async fn list_refs(&self) -> Result<Vec<String>> {
-        let refs = sqlx::query_scalar::<_, String>("SELECT trn FROM connections ORDER BY created_at DESC")
+        let refs = sqlx::query_scalar::<_, String>("SELECT trn FROM auth_connections ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await?;
         Ok(refs)
     }
 
     async fn cleanup_expired(&self) -> Result<usize> {
-        let result = sqlx::query("DELETE FROM connections WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP")
+        let result = sqlx::query("DELETE FROM auth_connections WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP")
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected() as usize)
     }
 
     async fn count(&self) -> Result<usize> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM connections")
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auth_connections")
             .fetch_one(&self.pool)
             .await?;
         Ok(count as usize)
