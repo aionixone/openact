@@ -48,17 +48,29 @@ impl AuthOrchestrator {
         let needle = "vars.secrets.";
         let bytes = text.as_bytes();
         let mut i = 0usize;
+        
+        // Look for vars.secrets. pattern in text (could be in {% %} or {{ }} templates)
         while let Some(pos) = text[i..].find(needle) {
             let start = i + pos + needle.len();
             let mut end = start;
+            
+            // Extract the key name after vars.secrets.
             while end < bytes.len() {
                 let c = bytes[end] as char;
-                if c.is_ascii_alphanumeric() || c == '_' || c == '-' { end += 1; } else { break; }
+                if c.is_ascii_alphanumeric() || c == '_' || c == '-' { 
+                    end += 1; 
+                } else { 
+                    break; 
+                }
             }
+            
             if end > start {
                 let key = &text[start..end];
-                if !keys.iter().any(|k| k == key) { keys.push(key.to_string()); }
+                if !keys.iter().any(|k| k == key) { 
+                    keys.push(key.to_string()); 
+                }
             }
+            
             i = end;
             if i >= bytes.len() { break; }
         }
@@ -318,3 +330,33 @@ pub struct OAuthPending {
 }
 
 // Helper to convert DSL back to json to pick vars
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_secret_keys_from_text() {
+        let text = r#"
+        client_id: "{% vars.secrets.github_client_id %}"
+        client_secret: "{% vars.secrets.github_client_secret %}"
+        some_other: "{{ vars.secrets.other_secret }}"
+        duplicate: "{% vars.secrets.github_client_id %}"
+        "#;
+        
+        let keys = AuthOrchestrator::extract_secret_keys_from_text(text);
+        
+        // Should extract unique keys
+        assert_eq!(keys.len(), 3);
+        assert!(keys.contains(&"github_client_id".to_string()));
+        assert!(keys.contains(&"github_client_secret".to_string()));
+        assert!(keys.contains(&"other_secret".to_string()));
+    }
+    
+    #[test]
+    fn test_extract_secret_keys_empty() {
+        let text = "no secrets here";
+        let keys = AuthOrchestrator::extract_secret_keys_from_text(text);
+        assert!(keys.is_empty());
+    }
+}
