@@ -1,0 +1,20 @@
+openapi: 3.0.0
+info:
+  title: Mock HTTP
+  version: 1.0.0
+paths:
+  /stream:
+    get:
+      operationId: ndjson
+      summary: NDJSON stream
+      responses:
+        "200":
+          description: OK
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+      x-real-http: true
+      x-output-pick: "$body"
+      x-ok-path: "$status >= 200 and $status < 300"
+      x-url: "http://127.0.0.1:8091/stream"

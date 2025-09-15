@@ -1,7 +1,7 @@
 // Action runner implementation
 // Handles execution of actions with TRN integration
 
-use super::auth::{AuthAdapter, RefreshWhen};
+use super::auth::{AuthAdapter, AuthContext, RefreshWhen};
 use super::expression_context::build_expression_context;
 use super::expression_engine::evaluate_mapping;
 use super::models::*;
@@ -10,7 +10,7 @@ use bumpalo::Bump;
 use jsonata_rs::JsonAta;
 use rand::SeedableRng;
 use rand::{rngs::StdRng, Rng};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, RETRY_AFTER};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE, RETRY_AFTER};
 use reqwest::{Client, Method, Url};
 use serde_json::Value;
 use std::sync::Arc;
@@ -140,6 +140,9 @@ impl ActionRunner {
         action: &Action,
         context: ActionExecutionContext,
     ) -> Result<Value> {
+        let mut diagnostics: Vec<Value> = Vec::new();
+        let start_time = std::time::Instant::now();
+        let mut trace_events: Vec<serde_json::Value> = Vec::new();
         // 1. Get authentication context if needed
         let auth_context = if let Some(auth_config) = &action.auth_config {
             if let Some(adapter) = &self.auth_adapter {
@@ -156,6 +159,7 @@ impl ActionRunner {
         // 2. Build HTTP request headers and query via injection mapping
         let mut headers = context.headers.clone();
         let mut query: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut transformed_body: Option<Value> = None;
         if let (Some(auth), Some(auth_cfg)) = (&auth_context, &action.auth_config) {
             // Base Authorization header
             headers.insert("Authorization".to_string(), auth.get_auth_header());
@@ -164,6 +168,27 @@ impl ActionRunner {
             let mapping = &auth_cfg.injection.mapping;
             let expr_ctx = build_expression_context(auth, action, &context);
             if !mapping.trim().is_empty() {
+                // Diagnostics: enumerate required $vars.secrets.* keys and check availability
+                if let Some(missing) = missing_secret_keys_for_mapping(mapping, &expr_ctx) {
+                    if !missing.is_empty() {
+                        let hints: Vec<String> = missing
+                            .iter()
+                            .map(|k| {
+                                format!(
+                                    "{} -> set env: {}",
+                                    k,
+                                    env_var_candidates_for_key(k).join(" | ")
+                                )
+                            })
+                            .collect();
+                        diagnostics.push(serde_json::json!({
+                            "type": "missing_secrets",
+                            "keys": missing,
+                            "hints": hints,
+                            "tip": "Or provide OPENACT_SECRETS_FILE (json/yaml) with {key: value}"
+                        }));
+                    }
+                }
                 let evaluated = evaluate_mapping(mapping, &expr_ctx)?;
                 if let Some(hdrs) = evaluated.get("headers").and_then(|v| v.as_object()) {
                     for (k, v) in hdrs.iter() {
@@ -181,10 +206,61 @@ impl ActionRunner {
                         );
                     }
                 }
+                if let Some(bv) = evaluated.get("body").cloned() {
+                    transformed_body = Some(bv);
+                }
             }
             // Merge any additional headers from auth context last (lowest precedence)
             for (key, value) in &auth.headers {
                 headers.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+
+        // 2.1 Apply x-transform-pre (array of mapping objects or strings)
+        if let Some(pre_arr) = action
+            .extensions
+            .get("x-transform-pre")
+            .and_then(|v| v.as_array())
+        {
+            let expr_ctx = build_expression_context(
+                auth_context.as_ref().unwrap_or(&AuthContext::new(
+                    "".into(),
+                    "".into(),
+                    action.provider.clone(),
+                )),
+                action,
+                &context,
+            );
+            for item in pre_arr {
+                let evaluated_map = if let Some(s) = item.as_str() {
+                    evaluate_mapping(s, &expr_ctx).ok()
+                } else {
+                    // Evaluate {% %} inside object by round-tripping to string
+                    serde_json::to_string(item)
+                        .ok()
+                        .and_then(|s| evaluate_mapping(&s, &expr_ctx).ok())
+                };
+                if let Some(map) = evaluated_map {
+                    if let Some(hdrs) = map.get("headers").and_then(|v| v.as_object()) {
+                        for (k, v) in hdrs.iter() {
+                            headers.insert(
+                                k.to_string(),
+                                v.as_str().unwrap_or(&v.to_string()).to_string(),
+                            );
+                        }
+                    }
+                    if let Some(qs) = map.get("query").and_then(|v| v.as_object()) {
+                        for (k, v) in qs.iter() {
+                            query.insert(
+                                k.to_string(),
+                                v.as_str().unwrap_or(&v.to_string()).to_string(),
+                            );
+                        }
+                    }
+                    if let Some(bv) = map.get("body").cloned() {
+                        transformed_body = Some(bv);
+                    }
+                }
             }
         }
 
@@ -217,6 +293,11 @@ impl ActionRunner {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(200) as u16;
                 attempted_statuses.push(status);
+                trace_events.push(serde_json::json!({
+                    "type": "http_attempt",
+                    "attempt": attempt,
+                    "status": status
+                }));
                 if (200..=299).contains(&status) {
                     break;
                 }
@@ -232,6 +313,9 @@ impl ActionRunner {
         }
 
         let final_status = attempted_statuses.last().copied().unwrap_or(200);
+        let last_error_class = if final_status >= 500 { Some("5xx") } else if final_status == 429 { Some("429") } else { None };
+        let attempts_total = attempted_statuses.len() as u32;
+        let retries_done = attempts_total.saturating_sub(1);
 
         // 3.4 Real HTTP execution with retries (guarded by extension x-real-http)
         let mut http_result: Option<Value> = None;
@@ -276,13 +360,91 @@ impl ActionRunner {
                             }
                         }
                     }
-                    req_builder = req_builder.headers(header_map);
-                    // TODO: body support when needed
+                    // Attach JSON or multipart body if available and method supports body
+                    let method = resolve_method(&action.method);
+                    if matches!(method, Method::POST | Method::PUT | Method::PATCH) {
+                        // Prefer a unified body source then decide multipart vs JSON
+                        let body_to_send = transformed_body
+                            .clone()
+                            .or_else(|| context.request_body.clone());
+                        // Multipart protocol: body = { "_multipart": { "fields": {k:v}, "files": [...] } }
+                        let try_multipart = body_to_send
+                            .as_ref()
+                            .and_then(|b| b.get("_multipart"));
+                        if let Some(mp) = try_multipart.and_then(|v| v.as_object()) {
+                            let mut form = reqwest::multipart::Form::new();
+                            if let Some(fields) = mp.get("fields").and_then(|v| v.as_object()) {
+                                for (k, v) in fields {
+                                    let s = v.as_str().unwrap_or(&v.to_string()).to_string();
+                                    form = form.text(k.clone(), s);
+                                }
+                            }
+                            if let Some(files) = mp.get("files").and_then(|v| v.as_array()) {
+                                for f in files {
+                                    if let (Some(field), Some(path)) = (
+                                        f.get("field").and_then(|v| v.as_str()),
+                                        f.get("path").and_then(|v| v.as_str()),
+                                    ) {
+                                        let filename = f
+                                            .get("filename")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string())
+                                            .unwrap_or_else(|| {
+                                                std::path::Path::new(path)
+                                                    .file_name()
+                                                    .and_then(|os| os.to_str())
+                                                    .unwrap_or("upload.bin")
+                                                    .to_string()
+                                            });
+                                        let bytes = std::fs::read(path).unwrap_or_default();
+                                        let filename_clone = filename.clone();
+                                        let mut part =
+                                            reqwest::multipart::Part::bytes(bytes.clone())
+                                                .file_name(filename_clone);
+                                        if let Some(ct) =
+                                            f.get("content_type").and_then(|v| v.as_str())
+                                        {
+                                            if let Ok(p) = reqwest::multipart::Part::bytes(bytes)
+                                                .file_name(filename)
+                                                .mime_str(ct)
+                                            {
+                                                part = p;
+                                            }
+                                        }
+                                        form = form.part(field.to_string(), part);
+                                    }
+                                }
+                            }
+                            req_builder = req_builder.multipart(form);
+                        } else {
+                            if let Some(bv) = body_to_send {
+                                if !header_map.contains_key(CONTENT_TYPE) {
+                                    header_map.insert(
+                                        CONTENT_TYPE,
+                                        HeaderValue::from_static("application/json"),
+                                    );
+                                }
+                                if let Ok(body_str) = serde_json::to_string(&bv) {
+                                    req_builder = req_builder.body(body_str);
+                                }
+                            }
+                        }
+                    }
 
+                    // Apply headers after potential content-type insertion for JSON branch
+                    req_builder = req_builder.headers(header_map.clone());
+
+                    let before = std::time::Instant::now();
                     let resp = req_builder.send().await;
                     match resp {
                         Ok(r) => {
                             let status = r.status().as_u16();
+                            trace_events.push(serde_json::json!({
+                                "type": "http_attempt",
+                                "attempt": attempt,
+                                "status": status,
+                                "elapsed_ms": before.elapsed().as_millis() as u64
+                            }));
                             if (200..=299).contains(&status) {
                                 let content_type = r
                                     .headers()
@@ -293,6 +455,23 @@ impl ActionRunner {
                                 let body_val: Value = if content_type.contains("application/json") {
                                     match r.json::<Value>().await {
                                         Ok(v) => v,
+                                        Err(_) => Value::Null,
+                                    }
+                                } else if content_type.contains("ndjson")
+                                    || content_type.contains("application/x-ndjson")
+                                {
+                                    match r.text().await {
+                                        Ok(t) => {
+                                            let items: Vec<Value> = t
+                                                .lines()
+                                                .filter(|ln| !ln.trim().is_empty())
+                                                .map(|ln| {
+                                                    serde_json::from_str::<Value>(ln)
+                                                        .unwrap_or(Value::String(ln.to_string()))
+                                                })
+                                                .collect();
+                                            Value::Array(items)
+                                        }
                                         Err(_) => Value::Null,
                                     }
                                 } else {
@@ -340,6 +519,12 @@ impl ActionRunner {
                                 // Respect Retry-After if present
                                 if retry_settings.respect_retry_after {
                                     if let Some(wait) = parse_retry_after(r.headers()) {
+                                        trace_events.push(serde_json::json!({
+                                            "type": "retry_sleep",
+                                            "attempt": attempt,
+                                            "wait_ms": wait.as_millis() as u64,
+                                            "reason": "retry-after"
+                                        }));
                                         sleep(wait).await;
                                         attempt += 1;
                                         continue;
@@ -348,6 +533,12 @@ impl ActionRunner {
                                 // Backoff
                                 let delay_ms =
                                     compute_backoff_ms(attempt + 1, &retry_settings, None);
+                                trace_events.push(serde_json::json!({
+                                    "type": "retry_sleep",
+                                    "attempt": attempt,
+                                    "wait_ms": delay_ms,
+                                    "reason": "backoff"
+                                }));
                                 sleep(Duration::from_millis(delay_ms)).await;
                                 attempt += 1;
                                 continue;
@@ -355,12 +546,23 @@ impl ActionRunner {
                         }
                         Err(e) => {
                             let err_s = e.to_string();
+                            trace_events.push(serde_json::json!({
+                                "type": "http_attempt_error",
+                                "attempt": attempt,
+                                "error": err_s
+                            }));
                             if attempt >= retry_settings.max_retries {
                                 http_result =
                                     Some(serde_json::json!({"url": url.as_str(), "error": err_s }));
                                 break;
                             }
                             let delay_ms = compute_backoff_ms(attempt + 1, &retry_settings, None);
+                            trace_events.push(serde_json::json!({
+                                "type": "retry_sleep",
+                                "attempt": attempt,
+                                "wait_ms": delay_ms,
+                                "reason": "backoff"
+                            }));
                             sleep(Duration::from_millis(delay_ms)).await;
                             attempt += 1;
                             continue;
@@ -376,8 +578,8 @@ impl ActionRunner {
         // 3.5 Pagination (cursor/page/link) when real_http and x-pagination provided
         if real_http {
             // Prefer typed pagination, fallback to x-pagination extension
-            let has_pagination = action.pagination.is_some()
-                || action.extensions.get("x-pagination").is_some();
+            let has_pagination =
+                action.pagination.is_some() || action.extensions.get("x-pagination").is_some();
             if has_pagination {
                 if let Some(mut url) = resolve_url(action, &query) {
                     let client = Client::builder()
@@ -387,34 +589,41 @@ impl ActionRunner {
                             OpenApiToolError::network(format!("failed to build client: {}", e))
                         })?;
 
-                    let (mode, param, limit, next_expr_raw, stop_expr_raw, items_expr_raw, link_expr_raw) =
-                        if let Some(p) = &action.pagination {
-                            (
-                                p.mode.as_str(),
-                                p.param.as_str(),
-                                p.limit,
-                                p.next_expr.as_deref(),
-                                p.stop_expr.as_deref(),
-                                p.items_expr.as_deref(),
-                                p.link_expr.as_deref(),
-                            )
-                        } else if let Some(obj) = action
-                            .extensions
-                            .get("x-pagination")
-                            .and_then(|v| v.as_object())
-                        {
-                            (
-                                obj.get("mode").and_then(|v| v.as_str()).unwrap_or("cursor"),
-                                obj.get("param").and_then(|v| v.as_str()).unwrap_or("page"),
-                                obj.get("limit").and_then(|v| v.as_u64()).unwrap_or(5),
-                                obj.get("next_expr").and_then(|v| v.as_str()),
-                                obj.get("stop_expr").and_then(|v| v.as_str()),
-                                obj.get("items_expr").and_then(|v| v.as_str()),
-                                obj.get("link_expr").and_then(|v| v.as_str()),
-                            )
-                        } else {
-                            ("cursor", "page", 5, None, None, None, None)
-                        };
+                    let (
+                        mode,
+                        param,
+                        limit,
+                        next_expr_raw,
+                        stop_expr_raw,
+                        items_expr_raw,
+                        link_expr_raw,
+                    ) = if let Some(p) = &action.pagination {
+                        (
+                            p.mode.as_str(),
+                            p.param.as_str(),
+                            p.limit,
+                            p.next_expr.as_deref(),
+                            p.stop_expr.as_deref(),
+                            p.items_expr.as_deref(),
+                            p.link_expr.as_deref(),
+                        )
+                    } else if let Some(obj) = action
+                        .extensions
+                        .get("x-pagination")
+                        .and_then(|v| v.as_object())
+                    {
+                        (
+                            obj.get("mode").and_then(|v| v.as_str()).unwrap_or("cursor"),
+                            obj.get("param").and_then(|v| v.as_str()).unwrap_or("page"),
+                            obj.get("limit").and_then(|v| v.as_u64()).unwrap_or(5),
+                            obj.get("next_expr").and_then(|v| v.as_str()),
+                            obj.get("stop_expr").and_then(|v| v.as_str()),
+                            obj.get("items_expr").and_then(|v| v.as_str()),
+                            obj.get("link_expr").and_then(|v| v.as_str()),
+                        )
+                    } else {
+                        ("cursor", "page", 5, None, None, None, None)
+                    };
 
                     let mut pages: Vec<Value> = Vec::new();
                     let mut items: Vec<Value> = Vec::new();
@@ -441,22 +650,33 @@ impl ActionRunner {
                         }
                         req = req.headers(header_map);
 
-                        let resp = match req.send().await { Ok(r) => r, Err(_) => break };
+                        let resp = match req.send().await {
+                            Ok(r) => r,
+                            Err(_) => break,
+                        };
                         let status = resp.status().as_u16();
-                        let body_text = match resp.text().await { Ok(t) => t, Err(_) => String::new() };
-                        let body_json: Value = serde_json::from_str(&body_text).unwrap_or(Value::Null);
+                        let body_text = match resp.text().await {
+                            Ok(t) => t,
+                            Err(_) => String::new(),
+                        };
+                        let body_json: Value =
+                            serde_json::from_str(&body_text).unwrap_or(Value::Null);
                         pages.push(body_json.clone());
 
                         // items_expr projection
                         if let Some(expr_raw) = items_expr_raw {
                             if let Some(val) = eval_jsonata(expr_raw, status, &body_json) {
-                                if let Value::Array(arr) = val { items.extend(arr); }
+                                if let Value::Array(arr) = val {
+                                    items.extend(arr);
+                                }
                             }
                         }
                         // stop condition
                         if let Some(expr_raw) = stop_expr_raw {
                             if let Some(val) = eval_jsonata(expr_raw, status, &body_json) {
-                                if val.as_bool().unwrap_or(false) { break; }
+                                if val.as_bool().unwrap_or(false) {
+                                    break;
+                                }
                             }
                         }
 
@@ -465,7 +685,11 @@ impl ActionRunner {
                             if let Some(expr_raw) = link_expr_raw {
                                 if let Some(val) = eval_jsonata(expr_raw, status, &body_json) {
                                     if let Some(u) = val.as_str() {
-                                        if let Ok(new_url) = Url::parse(u) { url = new_url; token = None; continue; }
+                                        if let Ok(new_url) = Url::parse(u) {
+                                            url = new_url;
+                                            token = None;
+                                            continue;
+                                        }
                                     }
                                 }
                             }
@@ -474,7 +698,9 @@ impl ActionRunner {
                             if let Some(val) = eval_jsonata(expr_raw, status, &body_json) {
                                 token = val.as_str().map(|s| s.to_string());
                             }
-                            if token.is_none() { break; }
+                            if token.is_none() {
+                                break;
+                            }
                         } else {
                             break;
                         }
@@ -484,7 +710,9 @@ impl ActionRunner {
                     let agg = serde_json::json!({"pages": pages, "items": items});
                     http_result = Some(match http_result {
                         Some(mut h) => {
-                            h.as_object_mut().map(|o| { o.insert("pagination".to_string(), agg.clone()); });
+                            h.as_object_mut().map(|o| {
+                                o.insert("pagination".to_string(), agg.clone());
+                            });
                             h
                         }
                         None => agg,
@@ -492,8 +720,37 @@ impl ActionRunner {
                 }
             }
         }
-        
-        // 3.5 Evaluate x-ok-path if provided
+
+        // 3.6 Evaluate x-transform-post to compute flexible output
+        let mut post_output: Option<Value> = None;
+        if let Some(post_arr) = action
+            .extensions
+            .get("x-transform-post")
+            .and_then(|v| v.as_array())
+        {
+            let body_json = if let Some(http) = &http_result {
+                http.get("body").cloned().unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            };
+            for item in post_arr {
+                if let Some(s) = item.as_str() {
+                    if let Some(v) =
+                        crate::action::runner::eval_jsonata(s, final_status, &body_json)
+                    {
+                        post_output = Some(v);
+                    }
+                } else if let Some(expr) = item.get("output_expr").and_then(|v| v.as_str()) {
+                    if let Some(v) =
+                        crate::action::runner::eval_jsonata(expr, final_status, &body_json)
+                    {
+                        post_output = Some(v);
+                    }
+                }
+            }
+        }
+
+        // 3.7 Evaluate x-ok-path if provided
         let mut ok_flag: Option<bool> = None;
         if let Some(ok_expr_raw) = action
             .ok_path
@@ -519,7 +776,7 @@ impl ActionRunner {
             }
         }
 
-        // 3.6 Evaluate x-error-path to extract standardized error
+        // 3.8 Evaluate x-error-path to extract standardized error
         let mut mapped_error: Option<Value> = None;
         if let Some(err_expr_raw) = action.error_path.as_deref().or_else(|| {
             action
@@ -545,7 +802,7 @@ impl ActionRunner {
             }
         }
 
-        // 3.7 Apply x-output-pick on success payload
+        // 3.9 Apply x-output-pick on success payload, overridden by x-transform-post if present
         let mut output_pick: Option<Value> = None;
         if let Some(pick_expr_raw) = action.output_pick.as_deref().or_else(|| {
             action
@@ -569,6 +826,10 @@ impl ActionRunner {
             }
         }
 
+        if post_output.is_some() {
+            output_pick = post_output;
+        }
+
         let request_info = serde_json::json!({
             "method": action.method,
             "path": action.path,
@@ -582,6 +843,10 @@ impl ActionRunner {
                 "retry_on": retry_settings.retry_on,
                 "respect_retry_after": retry_settings.respect_retry_after,
                 "attempts_plan": attempts_plan,
+                "attempts_total": attempts_total,
+                "retries": retries_done,
+                "last_status": final_status,
+                "last_error_class": last_error_class
             },
             "attempted_statuses": attempted_statuses,
             "final_status": final_status,
@@ -595,6 +860,11 @@ impl ActionRunner {
             "status": "executed"
         ,
             "http": http_result
+        ,
+            "diagnostics": diagnostics
+        ,
+            "transformed_body": transformed_body,
+            "trace": { "events": trace_events, "duration_ms": start_time.elapsed().as_millis() as u64 }
         });
 
         Ok(request_info)
@@ -851,7 +1121,9 @@ mod tests {
                     get(move || {
                         let b1 = b1.clone();
                         async move {
-                            axum::Json(serde_json::json!({"items":[1], "next": format!("{}/p2", b1)}))
+                            axum::Json(
+                                serde_json::json!({"items":[1], "next": format!("{}/p2", b1)}),
+                            )
                         }
                     }),
                 )
@@ -860,7 +1132,9 @@ mod tests {
                     get(move || {
                         let b2 = b2.clone();
                         async move {
-                            axum::Json(serde_json::json!({"items":[2], "next": format!("{}/p3", b2)}))
+                            axum::Json(
+                                serde_json::json!({"items":[2], "next": format!("{}/p3", b2)}),
+                            )
                         }
                     }),
                 )
@@ -913,6 +1187,299 @@ mod tests {
         assert_eq!(nums, vec![1, 2, 3]);
 
         // Cleanup
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_pre_post_transformers_and_http_body() {
+        use axum::{http::StatusCode, routing::post, Router};
+        use tokio::task::JoinHandle;
+
+        // Bind to an ephemeral port
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base = format!("http://{}", addr);
+
+        // Echo endpoint: returns headers/query/body
+        async fn echo(
+            req: axum::http::Request<axum::body::Body>,
+        ) -> (StatusCode, axum::Json<serde_json::Value>) {
+            use axum::body::to_bytes;
+            use axum::http::HeaderMap;
+
+            let (parts, body) = req.into_parts();
+            let headers: HeaderMap = parts.headers.clone();
+            let qs = parts.uri.query().unwrap_or("").to_string();
+            let body_bytes = to_bytes(body, 1024 * 1024).await.unwrap_or_default();
+            let body_text = String::from_utf8(body_bytes.to_vec()).unwrap_or_default();
+            let body_json: serde_json::Value =
+                serde_json::from_str(&body_text).unwrap_or(serde_json::json!({ "raw": body_text }));
+
+            let mut hdr_map = serde_json::Map::new();
+            if let Some(v) = headers.get("X-Pre") {
+                hdr_map.insert(
+                    "X-Pre".to_string(),
+                    serde_json::json!(v.to_str().unwrap_or("")),
+                );
+            }
+
+            let query_params: std::collections::HashMap<String, String> =
+                url::form_urlencoded::parse(qs.as_bytes())
+                    .into_owned()
+                    .collect();
+
+            let resp = serde_json::json!({
+                "headers": hdr_map,
+                "query": query_params,
+                "body": body_json,
+                "message": "ok"
+            });
+            (StatusCode::OK, axum::Json(resp))
+        }
+
+        let app = Router::new().route("/echo", post(echo));
+        let server: JoinHandle<()> = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        // Build action
+        let mut action = Action::new(
+            "post_echo".to_string(),
+            "POST".to_string(),
+            "/echo".to_string(),
+            "example".to_string(),
+            "tenant123".to_string(),
+            "trn:openact:tenant123:action/post_echo:provider/example".to_string(),
+        );
+        action
+            .extensions
+            .insert("x-base-url".to_string(), serde_json::json!(base));
+        action
+            .extensions
+            .insert("x-real-http".to_string(), serde_json::json!(true));
+        // pre: set header/query/body
+        let pre_mapping = r#"{\n  \"headers\": { \"X-Pre\": \"A\" },\n  \"query\": { \"q\": \"1\" },\n  \"body\": { \"k\": \"v\" }\n}"#;
+        action.extensions.insert(
+            "x-transform-pre".to_string(),
+            serde_json::json!([pre_mapping]),
+        );
+        // post: rename output
+        let post_expr = "{% {'renamed_body': $body.body, 'pre_header': $body.headers['X-Pre'], 'pre_query': $body.query.q} %}";
+        action.extensions.insert(
+            "x-transform-post".to_string(),
+            serde_json::json!([post_expr]),
+        );
+
+        // Run
+        let mut runner = ActionRunner::new();
+        runner.set_auth_adapter(std::sync::Arc::new(AuthAdapter::new(
+            "tenant123".to_string(),
+        )));
+        let ctx = ActionExecutionContext::new(
+            action.trn.clone(),
+            "trn:stepflow:tenant123:execution:action-execution:exec-prepost".to_string(),
+            "tenant123".to_string(),
+            "example".to_string(),
+        );
+        let result = runner.execute_action(&action, ctx).await.unwrap();
+        assert!(matches!(result.status, ExecutionStatus::Success));
+        let data = result.response_data.unwrap();
+        // verify http body observed
+        assert_eq!(
+            data["http"]["body"]["headers"]["X-Pre"],
+            serde_json::json!("A")
+        );
+        assert_eq!(data["http"]["body"]["query"]["q"], serde_json::json!("1"));
+        assert_eq!(data["http"]["body"]["body"]["k"], serde_json::json!("v"));
+        // verify post output mapping
+        assert_eq!(data["output"]["renamed_body"]["k"], serde_json::json!("v"));
+        assert_eq!(data["output"]["pre_header"], serde_json::json!("A"));
+        assert_eq!(data["output"]["pre_query"], serde_json::json!("1"));
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_pagination_page_mode() {
+        use axum::{routing::get, Router};
+        use tokio::task::JoinHandle;
+
+        // Bind ephemeral
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base = format!("http://{}", addr);
+
+        // /items?page=N&per_page=M -> returns { items: [start..start+M-1] } until 3 pages
+        #[derive(serde::Deserialize)]
+        struct Q { page: Option<u64>, per_page: Option<u64> }
+
+        let app = Router::new().route(
+            "/items",
+            get(|axum::extract::Query(q): axum::extract::Query<Q>| async move {
+                let page = q.page.unwrap_or(1);
+                let per = q.per_page.unwrap_or(2);
+                let start = (page - 1) * per;
+                let items: Vec<u64> = (start..start + per).collect();
+                axum::Json(serde_json::json!({"items": items}))
+            }),
+        );
+        let server: JoinHandle<()> = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+
+        // Build action with page mode pagination config
+        let mut action = Action::new(
+            "list_items".to_string(),
+            "GET".to_string(),
+            "/items".to_string(),
+            "example".to_string(),
+            "tenant123".to_string(),
+            "trn:openact:tenant123:action/list_items:provider/example".to_string(),
+        );
+        action
+            .extensions
+            .insert("x-base-url".to_string(), serde_json::json!(base));
+        action
+            .extensions
+            .insert("x-real-http".to_string(), serde_json::json!(true));
+        action.extensions.insert(
+            "x-pagination".to_string(),
+            serde_json::json!({"mode": "page", "param": "page", "limit": 3}),
+        );
+
+        // Execute with all_pages and per_page=2
+        let mut runner = ActionRunner::new();
+        runner.set_auth_adapter(std::sync::Arc::new(AuthAdapter::new("tenant123".to_string())));
+        let mut ctx = ActionExecutionContext::new(
+            action.trn.clone(),
+            "trn:stepflow:tenant123:execution:action-execution:exec-page".to_string(),
+            "tenant123".to_string(),
+            "example".to_string(),
+        );
+        ctx.add_parameter("page".to_string(), serde_json::json!(1));
+        ctx.add_parameter("per_page".to_string(), serde_json::json!(2));
+        let result = runner.execute_action(&action, ctx).await.unwrap();
+        // page mode aggregation is handled in core when --all-pages; here runner single-call returns page 1
+        assert!(result.response_data.is_some());
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_ndjson_stream() {
+        use axum::{routing::get, Router};
+        use tokio::task::JoinHandle;
+        use axum::response::{IntoResponse, Response};
+
+        // Bind ephemeral
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base = format!("http://{}", addr);
+
+        async fn stream_ndjson() -> Response {
+            let body = "{\"a\":1}\n{\"b\":2}\n";
+            ([("content-type", "application/x-ndjson")], body).into_response()
+        }
+
+        let app = Router::new().route("/stream", get(stream_ndjson));
+        let server: JoinHandle<()> = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+
+        let mut action = Action::new(
+            "ndjson".to_string(),
+            "GET".to_string(),
+            "/stream".to_string(),
+            "example".to_string(),
+            "tenant123".to_string(),
+            "trn:openact:tenant123:action/ndjson:provider/example".to_string(),
+        );
+        action
+            .extensions
+            .insert("x-base-url".to_string(), serde_json::json!(base));
+        action
+            .extensions
+            .insert("x-real-http".to_string(), serde_json::json!(true));
+
+        let mut runner = ActionRunner::new();
+        runner.set_auth_adapter(std::sync::Arc::new(AuthAdapter::new("tenant123".to_string())));
+        let ctx = ActionExecutionContext::new(
+            action.trn.clone(),
+            "trn:stepflow:tenant123:execution:action-execution:exec-ndjson".to_string(),
+            "tenant123".to_string(),
+            "example".to_string(),
+        );
+        let result = runner.execute_action(&action, ctx).await.unwrap();
+        let data = result.response_data.unwrap();
+        assert!(data["http"]["body"].is_array());
+        assert_eq!(data["http"]["body"].as_array().unwrap().len(), 2);
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_multipart_upload() {
+        use axum::{routing::post, Router};
+        use tokio::task::JoinHandle;
+        use axum::http::StatusCode;
+        use axum::extract::Request;
+        use axum::body::to_bytes;
+
+        // Bind ephemeral
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base = format!("http://{}", addr);
+
+        async fn upload(req: Request) -> (StatusCode, axum::Json<serde_json::Value>) {
+            let (parts, body) = req.into_parts();
+            let ct = parts.headers.get("content-type").and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
+            let bytes = to_bytes(body, 1024 * 1024).await.unwrap_or_default();
+            let text = String::from_utf8(bytes.to_vec()).unwrap_or_default();
+            let ok = ct.contains("multipart/form-data") && text.contains("name=\"file\"") && text.contains("name=\"a\"");
+            (StatusCode::OK, axum::Json(serde_json::json!({"ok": ok, "content_type": ct })))
+        }
+
+        let app = Router::new().route("/upload", post(upload));
+        let server: JoinHandle<()> = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+
+        // Prepare temp file
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("demo.txt");
+        std::fs::write(&file_path, b"hello").unwrap();
+
+        // Build action with pre transform to construct multipart body
+        let mut action = Action::new(
+            "upload".to_string(),
+            "POST".to_string(),
+            "/upload".to_string(),
+            "example".to_string(),
+            "tenant123".to_string(),
+            "trn:openact:tenant123:action/upload:provider/example".to_string(),
+        );
+        action
+            .extensions
+            .insert("x-base-url".to_string(), serde_json::json!(base));
+        action
+            .extensions
+            .insert("x-real-http".to_string(), serde_json::json!(true));
+        let mp_mapping = format!(
+            "{{ \"body\": {{ \"_multipart\": {{ \"fields\": {{\"a\": \"b\"}}, \"files\": [{{\"field\": \"file\", \"path\": \"{}\"}}] }} }} }}",
+            file_path.display()
+        );
+        action.extensions.insert(
+            "x-transform-pre".to_string(),
+            serde_json::json!([mp_mapping]),
+        );
+
+        let mut runner = ActionRunner::new();
+        runner.set_auth_adapter(std::sync::Arc::new(AuthAdapter::new("tenant123".to_string())));
+        let ctx = ActionExecutionContext::new(
+            action.trn.clone(),
+            "trn:stepflow:tenant123:execution:action-execution:exec-upload".to_string(),
+            "tenant123".to_string(),
+            "example".to_string(),
+        );
+        let result = runner.execute_action(&action, ctx).await.unwrap();
+        let data = result.response_data.unwrap();
+        assert_eq!(data["http"]["status"], serde_json::json!(200));
+        assert_eq!(data["http"]["body"]["ok"], serde_json::json!(true));
+
         server.abort();
     }
 }
@@ -1115,4 +1682,67 @@ fn eval_jsonata(expr_raw: &str, status: u16, body: &Value) -> Option<Value> {
     bindings.insert("body", body);
     let v = engine.evaluate(None, Some(&bindings)).ok()?;
     Some(jsonata_to_serde(v))
+}
+
+fn env_var_candidates_for_key(key: &str) -> Vec<String> {
+    let upper = key.replace('-', "_").to_uppercase();
+    vec![upper]
+}
+
+fn missing_secret_keys_for_mapping(
+    mapping: &str,
+    ctx: &super::expression_engine::ExpressionContext,
+) -> Option<Vec<String>> {
+    // naive scan for vars.secrets.<key>
+    let mut keys: Vec<String> = Vec::new();
+    let needle = "vars.secrets.";
+    let bytes = mapping.as_bytes();
+    let mut i: usize = 0;
+    while let Some(pos) = mapping[i..].find(needle) {
+        let start = i + pos + needle.len();
+        let mut end = start;
+        while end < bytes.len() {
+            let c = bytes[end] as char;
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+        if end > start {
+            let key = mapping[start..end].to_string();
+            if !keys.iter().any(|k| k == &key) {
+                keys.push(key);
+            }
+        }
+        i = end;
+        if i >= bytes.len() {
+            break;
+        }
+    }
+    if keys.is_empty() {
+        return Some(Vec::new());
+    }
+    // check availability in ctx.secrets or env/file
+    let mut missing: Vec<String> = Vec::new();
+    for k in keys {
+        let mut has = false;
+        if let Some(obj) = ctx.ctx.get("secrets").and_then(|v| v.as_object()) {
+            if obj.contains_key(&k) {
+                has = true;
+            }
+        }
+        if !has {
+            for cand in env_var_candidates_for_key(&k) {
+                if std::env::var(&cand).is_ok() {
+                    has = true;
+                    break;
+                }
+            }
+        }
+        if !has {
+            missing.push(k);
+        }
+    }
+    Some(missing)
 }

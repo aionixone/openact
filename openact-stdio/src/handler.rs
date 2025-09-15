@@ -9,6 +9,16 @@ use tracing::info;
 
 use crate::rpc::{JsonRpcRequest, JsonRpcResponse, JsonRpcError, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR, AUTH_ERROR};
 
+#[derive(Deserialize, Default)]
+struct PaginationParam {
+    #[serde(default)]
+    all_pages: bool,
+    #[serde(default)]
+    max_pages: Option<u64>,
+    #[serde(default)]
+    per_page: Option<u64>,
+}
+
 pub struct RpcHandler {
     auth_manager: AuthManager,
     action_registry: ActionRegistry,
@@ -447,6 +457,7 @@ impl RpcHandler {
         let action_trn: String = self.get_required_param(&params, "action_trn")?;
         let input_data: Option<Value> = self.get_optional_param(&params, "input_data")?;
         let dry_run: bool = self.get_optional_param(&params, "dry_run")?.unwrap_or(false);
+        let pagination_param: Option<PaginationParam> = self.get_optional_param(&params, "pagination")?;
 
         let execution_trn = format!("trn:openact:{}:execution:{}", tenant, uuid::Uuid::new_v4());
 
@@ -464,10 +475,32 @@ impl RpcHandler {
             }));
         }
 
-        // Execute via core engine (engine handles persistence)
+        // Build optional input and execute via core engine (engine handles persistence)
+        let mut input_opt = input_data.and_then(|v| {
+            let path_params = v.get("path_params").and_then(|x| x.as_object()).map(|m| m.clone());
+            let query = v.get("query").and_then(|x| x.as_object()).map(|m| m.clone());
+            let headers = v.get("headers").and_then(|x| x.as_object()).map(|m| m.iter().filter_map(|(k,v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect());
+            let body = v.get("body").cloned();
+            Some(openact_core::ActionInput {
+                path_params: path_params.map(|m| m.into_iter().map(|(k,v)| (k, v)).collect()),
+                query: query.map(|m| m.into_iter().map(|(k,v)| (k, v)).collect()),
+                headers,
+                body,
+                pagination: None,
+            })
+        });
+
+        if let Some(p) = pagination_param {
+            let po = openact_core::PaginationOptions { all_pages: p.all_pages, max_pages: p.max_pages, per_page: p.per_page };
+            input_opt = Some(match input_opt {
+                Some(mut i) => { i.pagination = Some(po); i }
+                None => openact_core::ActionInput { path_params: None, query: None, headers: None, body: None, pagination: Some(po) }
+            });
+        }
+
         match self
             .execution_engine
-            .run_action_by_trn(&tenant, &action_trn, &execution_trn)
+            .run_action_by_trn_with_input(&tenant, &action_trn, &execution_trn, input_opt)
             .await
         {
             Ok(exec_result) => {

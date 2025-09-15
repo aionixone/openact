@@ -94,6 +94,10 @@ fn eval_expr(expr: &str, context: &ExpressionContext) -> Result<String> {
     bindings.insert("access_token", &access_token_json);
     bindings.insert("expires_at", &expires_at_json);
     bindings.insert("ctx", ctx_json);
+    // Provide backwards-compat top-level vars.secrets.* lookup shortcut
+    if let Some(secrets) = ctx_json.get("secrets") {
+        bindings.insert("vars", secrets);
+    }
 
     let result = engine
         .evaluate(None, Some(&bindings))

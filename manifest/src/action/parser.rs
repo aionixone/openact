@@ -258,6 +258,31 @@ impl ActionParser {
 
     /// Normalize well-known x-* extensions into canonical shapes
     fn normalize_extensions(&self, action: &mut Action) {
+        // Merge provider-level auth defaults (scheme/injection/expiry/refresh/failure)
+        // into x-auth, with operation-level x-auth taking precedence.
+        let mut provider_auth_obj = serde_json::Map::new();
+        for key in ["scheme", "injection", "expiry", "refresh", "failure"] {
+            if let Some(val) = action.extensions.get(key).cloned() {
+                provider_auth_obj.insert(key.to_string(), val);
+            }
+        }
+        if !provider_auth_obj.is_empty() {
+            let mut merged_auth = serde_json::Value::Object(provider_auth_obj);
+            if let Some(existing_xauth) = action.extensions.get("x-auth").cloned() {
+                if existing_xauth.is_object() {
+                    // action x-auth overrides provider defaults
+                    crate::config::merger::deep_merge(&mut merged_auth, &existing_xauth);
+                }
+            }
+            action
+                .extensions
+                .insert("x-auth".to_string(), merged_auth);
+            // Clean up top-level auth default keys to avoid duplication
+            for key in ["scheme", "injection", "expiry", "refresh", "failure"] {
+                action.extensions.remove(key);
+            }
+        }
+
         // x-timeout-ms: coerce to number
         if let Some(v) = action.extensions.get("x-timeout-ms").cloned() {
             let num = match v {

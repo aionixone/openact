@@ -4,7 +4,9 @@ All endpoints are planned and currently Not Implemented.
 
 - Base URL: `/api/v1`
 - Content-Type: `application/json` (actions supports `text/yaml` upload)
-- Error format: `{ "error": { "code": string, "message": string, "details"?: object } }`
+- Response envelope:
+  - Success: `{ "ok": true, "data": { ... } }`
+  - Error: `{ "ok": false, "error": { "code": string, "message": string, "details"?: object }, "meta"?: object }`
 
 ### 1) Health & Status
 - [GET] `/health` — Liveness probe
@@ -72,14 +74,41 @@ All endpoints are planned and currently Not Implemented.
 - [GET] `/bindings` — List (filters: `tenant`, `auth_trn`, `action_trn`, `verbose`)
   - Status: Not Implemented
 
-### 8) Action Execution
+- ### 8) Action Execution
 - [POST] `/run`
-  - Body: `{ tenant, action_trn, exec_trn?, headers?, output?=text|json, dry_run?=false, trace?=false }`
-  - Resp (dry_run=false): `{ status, response?, error?, status_code?, duration_ms?, exec_trn, action_trn }`
-  - Resp (dry_run=true): `{ preview: { method, path, base_url, headers, ... } }`
-  - Status: Not Implemented
+  - Body:
+    ```json
+    {
+      "tenant": "string",
+      "action_trn": "string",
+      "exec_trn": "string?",
+      "output": "text|json?",
+      "dry_run": "bool?",
+      "trace": "bool?",
+      "input_data": {
+        "path_params": { "k": "v" }?,
+        "query": { "k": "v" }?,
+        "headers": { "k": "string" }?,
+        "body": { ... }?
+      }?,
+      "pagination": {
+        "all_pages": "bool",
+        "max_pages": "number?",
+        "per_page": "number?"
+      }?
+    }
+    ```
+  - Resp (dry_run=false):
+    ```json
+    { "ok": true, "data": { "status": "completed|failed|running", "status_code": 200, "duration_ms": 10, "response_data": { ... }?, "error_message": "string?", "exec_trn": "...", "action_trn": "..." } }
+    ```
+  - Resp (dry_run=true):
+    ```json
+    { "ok": true, "data": { "preview": { "tenant": "...", "action_trn": "...", "exec_trn": "...", "output": "json", "trace": false, "input_data": { ... } } } }
+    ```
+  - Status: Implemented
 - [GET] `/executions/{exec_trn}` — Inspect an execution
-  - Status: Not Implemented
+  - Status: Implemented
 
 ### 9) Session Utilities (Optional, for debugging)
 - [GET] `/sessions` — List saved sessions

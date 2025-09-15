@@ -1,16 +1,14 @@
 openapi: 3.0.0
 info:
-  title: GitHub API
+  title: GitHub API (Mocked)
   version: 1.0.0
 servers:
   - url: https://api.github.com
 paths:
   /user:
     get:
-      operationId: get-user
-      summary: Get authenticated user information
-      description: Get current user
-      tags: [github]
+      operationId: getUser
+      summary: Get authenticated user (mocked)
       responses:
         "200":
           description: OK
@@ -22,20 +20,5 @@ paths:
                 login: octocat
                 id: 1
                 name: The Octocat
-      x-auth:
-        scheme: oauth2
-        injection:
-          type: jsonada
-          mapping: |
-            {
-              "Authorization": "Bearer " & $access_token,
-              "Accept": "application/vnd.github+json",
-              "User-Agent": "openact-test/1.0"
-            }
-      x-ok-path: "$status >= 200 and $status < 300"
       x-output-pick: "$body"
-      x-timeout-ms: 5000
-      x-retry:
-        max_retries: 3
-        retry_on: ["5xx", "429"]
-      x-real-http: true
+      x-simulate-statuses: [200]

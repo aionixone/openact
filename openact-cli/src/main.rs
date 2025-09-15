@@ -42,7 +42,11 @@ enum Commands {
     /// Create a PAT-based auth connection from config file
     AuthPat { tenant: String, config: String },
     /// Inspect an auth connection by TRN (mask sensitive fields)
-    AuthInspect { trn: String, #[arg(long, value_parser = ["text","json"], default_value = "text")] output: String },
+    AuthInspect {
+        trn: String,
+        #[arg(long, value_parser = ["text","json"], default_value = "text")]
+        output: String,
+    },
     /// Refresh an auth connection by TRN (if provider supports refresh)
     AuthRefresh { trn: String },
     /// Begin OAuth and output authorize URL; save session to file
@@ -57,7 +61,10 @@ enum Commands {
         scope: Option<String>,
         #[arg(long, help = "Wait for callback and auto-complete (no manual copy)")]
         wait: bool,
-        #[arg(long, help = "Do not delete session file after success when --wait is used")]
+        #[arg(
+            long,
+            help = "Do not delete session file after success when --wait is used"
+        )]
         keep_session: bool,
         #[arg(long, help = "Open browser after printing URL")]
         open_browser: bool,
@@ -131,8 +138,71 @@ enum Commands {
         dry_run: bool,
         #[arg(long, default_value_t = false)]
         trace: bool,
+        #[arg(
+            long,
+            help = "Path to input JSON file (path_params/query/headers/body)"
+        )]
+        input_json: Option<String>,
+        #[arg(
+            long,
+            help = "Path parameter k=v; repeatable",
+            value_parser,
+            number_of_values = 1
+        )]
+        path: Vec<String>,
+        #[arg(
+            long,
+            help = "Query parameter k=v; repeatable",
+            value_parser,
+            number_of_values = 1
+        )]
+        query: Vec<String>,
+        #[arg(
+            long,
+            help = "Header K=V; repeatable",
+            value_parser,
+            number_of_values = 1
+        )]
+        header: Vec<String>,
+        #[arg(long, help = "Inline JSON body string", conflicts_with = "body")]
+        body_json: Option<String>,
+        #[arg(
+            long,
+            help = "Body file prefixed with @, e.g. --body @file.json",
+            conflicts_with = "body_json"
+        )]
+        body: Option<String>,
+        #[arg(long, default_value_t = false, help = "Fetch all pages if action supports pagination")]
+        all_pages: bool,
+        #[arg(long, help = "Maximum number of pages to fetch")]
+        max_pages: Option<u64>,
+        #[arg(long, help = "Per-page size hint if supported")]
+        per_page: Option<u64>,
         #[arg(long)]
         save: Option<String>,
+        #[arg(
+            long,
+            help = "Form fields k=v for multipart upload; repeatable",
+            value_parser,
+            number_of_values = 1
+        )]
+        form: Vec<String>,
+        #[arg(
+            long,
+            help = "File parts field=@path; repeatable",
+            value_parser,
+            number_of_values = 1
+        )]
+        file: Vec<String>,
+        #[arg(
+            long,
+            help = "Download non-JSON responses to file path"
+        )]
+        download_to: Option<String>,
+        #[arg(long, default_value_t = false, help = "Treat application/x-ndjson as stream and aggregate lines")]
+        stream: bool,
+        #[arg(long, default_value_t = false, help = "Print retry summary (attempts_total, retries, last_status, last_error_class)")]
+        retry_summary: bool,
     },
     /// Register an action from a YAML file into DB
     ActionRegister {
@@ -145,9 +215,13 @@ enum Commands {
     /// Delete an action by TRN
     ActionDelete { trn: String },
     /// Inspect an action by TRN
-    ActionInspect { trn: String, #[arg(long, value_parser = ["text","json"], default_value = "text")] output: String },
+    ActionInspect {
+        trn: String,
+        #[arg(long, value_parser = ["text","json"], default_value = "text")]
+        output: String,
+    },
     /// List actions by tenant
-    ActionList { 
+    ActionList {
         tenant: String,
         #[arg(long, value_parser = ["text","json"], default_value = "text")]
         output: String,
@@ -213,20 +287,28 @@ async fn main() -> Result<()> {
                         Some("AUTHFLOW_MASTER_KEY")
                     } else if std::env::var("OPENACT_MASTER_KEY").is_ok() {
                         Some("OPENACT_MASTER_KEY")
-                    } else { None };
+                    } else {
+                        None
+                    };
                     serde_json::json!({
                         "master_key": master_from.unwrap_or("(not set)"),
                     })
                 };
-                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": true,
-                    "data": { "stats": {"bindings": s.bindings, "actions": s.actions, "auth_connections": s.auth_connections}, "env": env }
-                }))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "ok": true,
+                        "data": { "stats": {"bindings": s.bindings, "actions": s.actions, "auth_connections": s.auth_connections}, "env": env }
+                    }))?
+                );
             } else {
                 ctx.health().await?;
                 let s = ctx.stats().await?;
                 println!("ok");
-                println!("bindings={} actions={} auth_connections={}", s.bindings, s.actions, s.auth_connections);
+                println!(
+                    "bindings={} actions={} auth_connections={}",
+                    s.bindings, s.actions, s.auth_connections
+                );
             }
         }
         Commands::AuthList { output } => {
@@ -234,9 +316,16 @@ async fn main() -> Result<()> {
             let am = AuthManager::from_database_url(cfg.database_url.clone()).await?;
             let refs = am.list().await?;
             if force_json {
-                println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "ok": true, "data": { "connections": refs } }))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({ "ok": true, "data": { "connections": refs } })
+                    )?
+                );
             } else {
-                for r in refs { println!("{}", r); }
+                for r in refs {
+                    println!("{}", r);
+                }
             }
         }
         Commands::ActionList { tenant, output } => {
@@ -247,35 +336,77 @@ async fn main() -> Result<()> {
                 let items: Vec<serde_json::Value> = list.into_iter().map(|a| serde_json::json!({
                     "trn": a.trn, "tenant": a.tenant, "provider": a.provider, "name": a.name, "active": a.is_active
                 })).collect();
-                println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "ok": true, "data": { "actions": items } }))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({ "ok": true, "data": { "actions": items } })
+                    )?
+                );
             } else {
-                for a in list { println!("{} {} {} {}", a.trn, a.tenant, a.provider, a.name); }
+                for a in list {
+                    println!("{} {} {} {}", a.trn, a.tenant, a.provider, a.name);
+                }
             }
         }
-        Commands::BindingList { tenant, auth_trn, action_trn, verbose, output } => {
+        Commands::BindingList {
+            tenant,
+            auth_trn,
+            action_trn,
+            verbose,
+            output,
+        } => {
             let force_json = json_only || output == "json";
             let bm = BindingManager::new(ctx.db.pool().clone());
             let rows = bm.list_by_tenant(&tenant).await?;
-            let rows = rows.into_iter().filter(|b| {
-                (auth_trn.as_ref().map(|x| &b.auth_trn == x).unwrap_or(true)) && (action_trn.as_ref().map(|x| &b.action_trn == x).unwrap_or(true))
-            }).collect::<Vec<_>>();
+            let rows = rows
+                .into_iter()
+                .filter(|b| {
+                    (auth_trn.as_ref().map(|x| &b.auth_trn == x).unwrap_or(true))
+                        && (action_trn
+                            .as_ref()
+                            .map(|x| &b.action_trn == x)
+                            .unwrap_or(true))
+                })
+                .collect::<Vec<_>>();
             if force_json {
-                let items: Vec<serde_json::Value> = rows.into_iter().map(|b| {
-                    let mut o = serde_json::Map::new();
-                    o.insert("tenant".to_string(), serde_json::json!(b.tenant));
-                    o.insert("auth_trn".to_string(), serde_json::json!(b.auth_trn));
-                    o.insert("action_trn".to_string(), serde_json::json!(b.action_trn));
-                    if verbose {
-                        o.insert("created_by".to_string(), serde_json::to_value(&b.created_by).unwrap_or(serde_json::Value::Null));
-                        o.insert("created_at".to_string(), serde_json::to_value(&b.created_at).unwrap_or(serde_json::Value::Null));
-                    }
-                    serde_json::Value::Object(o)
-                }).collect();
-                println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "ok": true, "data": { "bindings": items } }))?);
+                let items: Vec<serde_json::Value> = rows
+                    .into_iter()
+                    .map(|b| {
+                        let mut o = serde_json::Map::new();
+                        o.insert("tenant".to_string(), serde_json::json!(b.tenant));
+                        o.insert("auth_trn".to_string(), serde_json::json!(b.auth_trn));
+                        o.insert("action_trn".to_string(), serde_json::json!(b.action_trn));
+                        if verbose {
+                            o.insert(
+                                "created_by".to_string(),
+                                serde_json::to_value(&b.created_by)
+                                    .unwrap_or(serde_json::Value::Null),
+                            );
+                            o.insert(
+                                "created_at".to_string(),
+                                serde_json::to_value(&b.created_at)
+                                    .unwrap_or(serde_json::Value::Null),
+                            );
+                        }
+                        serde_json::Value::Object(o)
+                    })
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({ "ok": true, "data": { "bindings": items } })
+                    )?
+                );
             } else {
                 for b in rows {
-                    if verbose { println!("tenant={} auth={} action={} created_by={:?} created_at={:?}", b.tenant, b.auth_trn, b.action_trn, b.created_by, b.created_at); }
-                    else { println!("{} -> {}", b.auth_trn, b.action_trn); }
+                    if verbose {
+                        println!(
+                            "tenant={} auth={} action={} created_by={:?} created_at={:?}",
+                            b.tenant, b.auth_trn, b.action_trn, b.created_by, b.created_at
+                        );
+                    } else {
+                        println!("{} -> {}", b.auth_trn, b.action_trn);
+                    }
                 }
             }
         }
@@ -386,7 +517,9 @@ async fn main() -> Result<()> {
         Commands::AuthDelete { trn } => {
             let am = AuthManager::from_database_url(cfg.database_url.clone()).await?;
             let ok = am.delete(&trn).await?;
-            if !json_only { println!("{}", if ok { "deleted" } else { "not found" }); }
+            if !json_only {
+                println!("{}", if ok { "deleted" } else { "not found" });
+            }
         }
         Commands::AuthCreatePat {
             tenant,
@@ -402,7 +535,9 @@ async fn main() -> Result<()> {
             let trn = am
                 .create_pat_connection(&tenant, &provider, &user_id, &token)
                 .await?;
-            if !json_only { println!("created: {}", trn); }
+            if !json_only {
+                println!("created: {}", trn);
+            }
         }
         Commands::AuthPat { tenant, config } => {
             #[derive(serde::Deserialize)]
@@ -444,15 +579,21 @@ async fn main() -> Result<()> {
             let trn = am
                 .create_pat_connection(&tenant, &cfgf.provider, &cfgf.user_id, &token)
                 .await?;
-            if !json_only { println!("created: {}", trn); }
+            if !json_only {
+                println!("created: {}", trn);
+            }
         }
         Commands::AuthInspect { trn, output } => {
             let am = AuthManager::from_database_url(cfg.database_url.clone()).await?;
             if let Some(conn) = am.get(&trn).await? {
                 let mut extra_masked = conn.extra.clone();
                 if let serde_json::Value::Object(ref mut obj) = extra_masked {
-                    if obj.contains_key("access_token") { obj.insert("access_token".to_string(), serde_json::json!("***")); }
-                    if obj.contains_key("refresh_token") { obj.insert("refresh_token".to_string(), serde_json::json!("***")); }
+                    if obj.contains_key("access_token") {
+                        obj.insert("access_token".to_string(), serde_json::json!("***"));
+                    }
+                    if obj.contains_key("refresh_token") {
+                        obj.insert("refresh_token".to_string(), serde_json::json!("***"));
+                    }
                 }
                 let force_json = json_only || output == "json";
                 if force_json {
@@ -465,10 +606,23 @@ async fn main() -> Result<()> {
                         "scope": conn.scope,
                         "extra": extra_masked,
                     });
-                    println!("{}", serde_json::to_string_pretty(&serde_json::json!({"ok": true, "data": data}))?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(
+                            &serde_json::json!({"ok": true, "data": data})
+                        )?
+                    );
                 } else {
-                    println!("tenant={} provider={} user_id={} token_type={} scope={} trn={} extra={}",
-                        conn.trn.tenant, conn.trn.provider, conn.trn.user_id, conn.token_type, conn.scope.unwrap_or_default(), conn.trn.to_trn_string().unwrap_or_default(), extra_masked);
+                    println!(
+                        "tenant={} provider={} user_id={} token_type={} scope={} trn={} extra={}",
+                        conn.trn.tenant,
+                        conn.trn.provider,
+                        conn.trn.user_id,
+                        conn.token_type,
+                        conn.scope.unwrap_or_default(),
+                        conn.trn.to_trn_string().unwrap_or_default(),
+                        extra_masked
+                    );
                 }
             } else {
                 anyhow::bail!(format!("auth not found: {}", trn));
@@ -788,7 +942,10 @@ async fn main() -> Result<()> {
             let next = v.get("next_state").and_then(|x| x.as_str()).unwrap_or("");
             let redirect = v.get("redirect_uri").and_then(|x| x.as_str()).unwrap_or("");
             let auth_url = v.get("auth_url").and_then(|x| x.as_str()).unwrap_or("");
-            println!("flow={} next_state={} redirect_uri={} auth_url={}", flow, next, redirect, auth_url);
+            println!(
+                "flow={} next_state={} redirect_uri={} auth_url={}",
+                flow, next, redirect, auth_url
+            );
             if let Some(state) = v.pointer("/context/state").and_then(|x| x.as_str()) {
                 println!("state={}", state);
             }
@@ -819,7 +976,9 @@ async fn main() -> Result<()> {
             let b = bm
                 .bind(&tenant, &auth_trn, &action_trn, Some("cli"))
                 .await?;
-            if !json_only { println!("bound: {} -> {}", b.auth_trn, b.action_trn); }
+            if !json_only {
+                println!("bound: {} -> {}", b.auth_trn, b.action_trn);
+            }
         }
         Commands::BindingUnbind {
             tenant,
@@ -842,7 +1001,9 @@ async fn main() -> Result<()> {
             }
             let bm = BindingManager::new(ctx.db.pool().clone());
             let ok = bm.unbind(&tenant, &auth_trn, &action_trn).await?;
-            if !json_only { println!("{}", if ok { "unbound" } else { "not found" }); }
+            if !json_only {
+                println!("{}", if ok { "unbound" } else { "not found" });
+            }
         }
         Commands::Run {
             tenant,
@@ -851,7 +1012,21 @@ async fn main() -> Result<()> {
             output,
             dry_run,
             trace,
+            input_json,
+            path,
+            query,
+            header,
+            body_json,
+            body,
+            all_pages,
+            max_pages,
+            per_page,
             save,
+            form,
+            file,
+            download_to,
+            stream,
+            retry_summary,
         } => {
             // Prefer TRN-based execution via core engine (unified persistence)
             let engine = ExecutionEngine::new(ctx.db.clone());
@@ -865,52 +1040,256 @@ async fn main() -> Result<()> {
                     "trace": trace,
                 });
                 if force_json {
-                    println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                        "ok": true,
-                        "data": preview
-                    }))?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "ok": true,
+                            "data": preview
+                        }))?
+                    );
                 } else {
                     println!("[dry-run] 即将执行: {}", preview);
                 }
-                if let Some(file) = save { std::fs::write(file, serde_json::to_string_pretty(&preview)?)?; }
+                if let Some(file) = save {
+                    std::fs::write(file, serde_json::to_string_pretty(&preview)?)?;
+                }
                 return Ok(());
             }
 
-            match engine.run_action_by_trn(&tenant, &action_trn, &exec_trn).await {
-                Ok(res) => {
-                    if force_json {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&serde_json::json!({
-                                "ok": true,
-                                "data": {
-                                    "status": res.status,
-                                    "response": res.response_data,
-                                    "error": res.error_message,
-                                    "status_code": res.status_code,
-                                    "duration_ms": res.duration_ms,
-                                    "exec_trn": exec_trn,
-                                    "action_trn": action_trn,
-                                }
-                            }))?
-                        );
+            // Build optional input from --input-json
+            // Merge input from flags and --input-json (flags take precedence)
+            let from_file = if let Some(p) = input_json {
+                let text = std::fs::read_to_string(&p).map_err(|e| {
+                    anyhow::anyhow!(format!("failed to read input file {}: {}", p, e))
+                })?;
+                let v: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|e| anyhow::anyhow!(format!("invalid input json: {}", e)))?;
+                let path_params = v
+                    .get("path_params")
+                    .and_then(|x| x.as_object())
+                    .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                let query = v
+                    .get("query")
+                    .and_then(|x| x.as_object())
+                    .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                let headers = v.get("headers").and_then(|x| x.as_object()).map(|m| {
+                    m.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                });
+                let body = v.get("body").cloned();
+                Some(openact_core::ActionInput {
+                    path_params,
+                    query,
+                    headers,
+                    body,
+                    pagination: None,
+                })
+            } else {
+                None
+            };
+
+            // Helpers to parse k=v and K=V
+            fn parse_kv_pairs(
+                pairs: &Vec<String>,
+            ) -> anyhow::Result<std::collections::HashMap<String, serde_json::Value>> {
+                let mut m = std::collections::HashMap::new();
+                for item in pairs {
+                    if let Some((k, v)) = item.split_once('=') {
+                        // try parse value as JSON, fallback to string
+                        let val = serde_json::from_str::<serde_json::Value>(v)
+                            .unwrap_or(serde_json::Value::String(v.to_string()));
+                        m.insert(k.to_string(), val);
                     } else {
-                        println!("📊 执行状态: {:?}", res.status);
-                        if let Some(ref data) = res.response_data { println!("📄 响应数据: {}", data); }
-                        if let Some(ref error) = res.error_message { println!("❌ 错误信息: {}", error); }
-                        println!("⏱️  执行时长: {}ms", res.duration_ms.unwrap_or(0));
-                        if let Some(code) = res.status_code { println!("🔢 状态码: {}", code); }
+                        return Err(anyhow::anyhow!(format!(
+                            "invalid pair '{}', expected k=v",
+                            item
+                        )));
                     }
-                    if let Some(file) = save {
-                        let doc = serde_json::json!({
+                }
+                Ok(m)
+            }
+            fn parse_header_pairs(
+                pairs: &Vec<String>,
+            ) -> anyhow::Result<std::collections::HashMap<String, String>> {
+                let mut m = std::collections::HashMap::new();
+                for item in pairs {
+                    if let Some((k, v)) = item.split_once('=') {
+                        m.insert(k.to_string(), v.to_string());
+                    } else {
+                        return Err(anyhow::anyhow!(format!(
+                            "invalid header '{}', expected K=V",
+                            item
+                        )));
+                    }
+                }
+                Ok(m)
+            }
+
+            // Merge explicit flags
+            let path_map = if !path.is_empty() {
+                Some(parse_kv_pairs(&path)?)
+            } else {
+                from_file.as_ref().and_then(|i| i.path_params.clone())
+            };
+            let query_map = if !query.is_empty() {
+                Some(parse_kv_pairs(&query)?)
+            } else {
+                from_file.as_ref().and_then(|i| i.query.clone())
+            };
+            let header_map = if !header.is_empty() {
+                Some(parse_header_pairs(&header)?)
+            } else {
+                from_file.as_ref().and_then(|i| i.headers.clone())
+            };
+            let body_val = if let Some(text) = body_json {
+                Some(serde_json::from_str::<serde_json::Value>(&text).map_err(|e| anyhow::anyhow!(format!("invalid --body-json: {}", e)))?)
+            } else if let Some(spec) = body {
+                if let Some(rest) = spec.strip_prefix('@') {
+                    let t = std::fs::read_to_string(rest).map_err(|e| anyhow::anyhow!(format!("failed to read body file {}: {}", rest, e)))?;
+                    Some(serde_json::from_str::<serde_json::Value>(&t).map_err(|e| anyhow::anyhow!(format!("invalid body file json: {}", e)))?)
+                } else {
+                    Some(serde_json::from_str::<serde_json::Value>(&spec).unwrap_or(serde_json::Value::String(spec)))
+                }
+            } else { from_file.as_ref().and_then(|i| i.body.clone()) };
+
+            // Map --form/--file into multipart structure under body
+            let mut body_val = body_val;
+            if !form.is_empty() || !file.is_empty() {
+                // Build {"_multipart": {"fields": {...}, "files": [{field, path}]}}
+                let mut fields_map = serde_json::Map::new();
+                for kv in &form {
+                    if let Some((k, v)) = kv.split_once('=') { fields_map.insert(k.to_string(), serde_json::Value::String(v.to_string())); }
+                }
+                let mut files_arr: Vec<serde_json::Value> = Vec::new();
+                for fv in &file {
+                    if let Some((field, path)) = fv.split_once('=') {
+                        let path = path.trim();
+                        let p = if let Some(rest) = path.strip_prefix('@') { rest.to_string() } else { path.to_string() };
+                        files_arr.push(serde_json::json!({"field": field, "path": p}));
+                    }
+                }
+                let mut mp = serde_json::Map::new();
+                if !fields_map.is_empty() { mp.insert("fields".to_string(), serde_json::Value::Object(fields_map)); }
+                if !files_arr.is_empty() { mp.insert("files".to_string(), serde_json::Value::Array(files_arr)); }
+                let mut obj = serde_json::Map::new();
+                obj.insert("_multipart".to_string(), serde_json::Value::Object(mp));
+                body_val = Some(serde_json::Value::Object(obj));
+            }
+
+            let pagination = if all_pages || max_pages.is_some() || per_page.is_some() {
+                Some(openact_core::PaginationOptions { all_pages, max_pages, per_page })
+            } else { None };
+            let input_opt = if path_map.is_some() || query_map.is_some() || header_map.is_some() || body_val.is_some() || pagination.is_some() { Some(openact_core::ActionInput { path_params: path_map, query: query_map, headers: header_map, body: body_val, pagination }) } else { None };
+
+            match engine
+                .run_action_by_trn_with_input(&tenant, &action_trn, &exec_trn, input_opt)
+                .await
+            {
+                Ok(res) => {
+                    // Optionally post-process response for download/stream
+                    let mut adjusted_response = res.response_data.clone();
+                    // Download non-JSON body to file
+                    if let Some(ref file_path) = download_to {
+                        if let Some(resp) = adjusted_response.as_mut() {
+                            if let Some(http) = resp.get_mut("http") {
+                                if let Some(obj) = http.as_object_mut() {
+                                    if let Some(body) = obj.get("body") {
+                                        if let Some(s) = body.as_str() {
+                                            // write string body to file
+                                            if let Err(e) = std::fs::write(file_path, s.as_bytes()) {
+                                                eprintln!("warn: failed to write download_to file {}: {}", file_path, e);
+                                            } else {
+                                                obj.insert(
+                                                    "body".to_string(),
+                                                    serde_json::json!({"saved_to": file_path, "bytes": s.len()}),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if force_json {
+                        // Extract trace/diagnostics when requested
+                        let mut extra = serde_json::Map::new();
+                        if trace {
+                            if let Some(ref data) = adjusted_response {
+                                if let Some(tr) = data.get("trace") { extra.insert("trace".to_string(), tr.clone()); }
+                                if let Some(diag) = data.get("diagnostics") { extra.insert("diagnostics".to_string(), diag.clone()); }
+                            }
+                        }
+                        if retry_summary || trace {
+                            if let Some(ref data) = adjusted_response {
+                                if let Some(retry) = data.get("retry") { extra.insert("retry".to_string(), retry.clone()); }
+                            }
+                        }
+                        let mut data_obj = serde_json::json!({
                             "status": res.status,
-                            "response": res.response_data,
+                            "response": adjusted_response,
                             "error": res.error_message,
                             "status_code": res.status_code,
                             "duration_ms": res.duration_ms,
                             "exec_trn": exec_trn,
                             "action_trn": action_trn,
                         });
+                        if !extra.is_empty() {
+                            if let Some(obj) = data_obj.as_object_mut() { obj.extend(extra); }
+                        }
+                        println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "ok": true, "data": data_obj }))?);
+                    } else {
+                        println!("📊 执行状态: {:?}", res.status);
+                        if let Some(ref data) = adjusted_response {
+                            // If stream requested and body is NDJSON array, print each element
+                            if stream {
+                                if let Some(arr) = data.get("http").and_then(|h| h.get("body")).and_then(|b| b.as_array()) {
+                                    for item in arr { println!("{}", item); }
+                                } else {
+                                    println!("📄 响应数据: {}", data);
+                                }
+                            } else {
+                                println!("📄 响应数据: {}", data);
+                            }
+                            if retry_summary || trace {
+                                if let Some(retry) = data.get("retry") { eprintln!("🔁 retry: {}", retry); }
+                            }
+                            if trace {
+                                if let Some(tr) = data.get("trace") { eprintln!("🔎 trace: {}", tr); }
+                                if let Some(diag) = data.get("diagnostics") { eprintln!("🩺 diagnostics: {}", diag); }
+                            }
+                        }
+                        if let Some(ref error) = res.error_message { println!("❌ 错误信息: {}", error); }
+                        println!("⏱️  执行时长: {}ms", res.duration_ms.unwrap_or(0));
+                        if let Some(code) = res.status_code { println!("🔢 状态码: {}", code); }
+                    }
+                    if let Some(file) = save {
+                        let mut doc = serde_json::json!({
+                            "status": res.status,
+                            "response": adjusted_response,
+                            "error": res.error_message,
+                            "status_code": res.status_code,
+                            "duration_ms": res.duration_ms,
+                            "exec_trn": exec_trn,
+                            "action_trn": action_trn,
+                        });
+                        if trace {
+                            if let Some(ref data) = adjusted_response {
+                                if let Some(tr) = data.get("trace") {
+                                    if let Some(obj) = doc.as_object_mut() { obj.insert("trace".to_string(), tr.clone()); }
+                                }
+                                if let Some(diag) = data.get("diagnostics") {
+                                    if let Some(obj) = doc.as_object_mut() { obj.insert("diagnostics".to_string(), diag.clone()); }
+                                }
+                            }
+                        }
+                        if retry_summary || trace {
+                            if let Some(ref data) = adjusted_response {
+                                if let Some(retry) = data.get("retry") {
+                                    if let Some(obj) = doc.as_object_mut() { obj.insert("retry".to_string(), retry.clone()); }
+                                }
+                            }
+                        }
                         std::fs::write(file, serde_json::to_string_pretty(&doc)?)?;
                     }
                 }
@@ -944,15 +1323,19 @@ async fn main() -> Result<()> {
             let action = registry
                 .register_from_yaml(&tenant, &provider, &name, &trn, p)
                 .await?;
-            if !json_only { println!(
-                "registered: {} -> {} {} {}",
-                action.trn, tenant, provider, name
-            ); }
+            if !json_only {
+                println!(
+                    "registered: {} -> {} {} {}",
+                    action.trn, tenant, provider, name
+                );
+            }
         }
         Commands::ActionDelete { trn } => {
             let registry = ActionRegistry::new(ctx.db.pool().clone());
             let ok = registry.delete_by_trn(&trn).await?;
-            if !json_only { println!("{}", if ok { "deleted" } else { "not found" }); }
+            if !json_only {
+                println!("{}", if ok { "deleted" } else { "not found" });
+            }
         }
         Commands::ActionInspect { trn, output } => {
             let registry = ActionRegistry::new(ctx.db.pool().clone());
@@ -966,7 +1349,10 @@ async fn main() -> Result<()> {
                     "name": a.name,
                     "active": a.is_active,
                 });
-                println!("{}", serde_json::to_string_pretty(&serde_json::json!({"ok": true, "data": data}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({"ok": true, "data": data}))?
+                );
             } else {
                 println!(
                     "trn={} tenant={} provider={} name={} active={}",
@@ -978,27 +1364,46 @@ async fn main() -> Result<()> {
             let registry = ActionRegistry::new(ctx.db.pool().clone());
             let p = std::path::Path::new(&yaml_path);
             let a = registry.update_from_yaml(&trn, p).await?;
-            if !json_only { println!("updated: {}", a.trn); }
+            if !json_only {
+                println!("updated: {}", a.trn);
+            }
         }
         Commands::ActionExport { trn } => {
             let registry = ActionRegistry::new(ctx.db.pool().clone());
             let spec = registry.export_spec_by_trn(&trn).await?;
-            if !json_only { println!("{}", spec); }
+            if !json_only {
+                println!("{}", spec);
+            }
         }
-        Commands::Doctor { dsl, port_start, port_end } => {
+        Commands::Doctor {
+            dsl,
+            port_start,
+            port_end,
+        } => {
             if !json_only {
                 println!("== OpenAct Doctor ==");
                 // Env checks
-                let db_url_res = std::env::var("OPENACT_DATABASE_URL").or_else(|_| std::env::var("AUTHFLOW_SQLITE_URL"));
-                let db_url_str = db_url_res.clone().unwrap_or_else(|_| "(missing)".to_string());
+                let db_url_res = std::env::var("OPENACT_DATABASE_URL")
+                    .or_else(|_| std::env::var("AUTHFLOW_SQLITE_URL"));
+                let db_url_str = db_url_res
+                    .clone()
+                    .unwrap_or_else(|_| "(missing)".to_string());
                 println!("DB URL: {}", db_url_str);
                 if db_url_res.is_err() {
                     let cwd = std::env::current_dir().ok();
-                    if let Some(p) = cwd { println!("Suggestion: export OPENACT_DATABASE_URL=sqlite:{}/manifest/data/openact.db", p.display()); }
+                    if let Some(p) = cwd {
+                        println!("Suggestion: export OPENACT_DATABASE_URL=sqlite:{}/manifest/data/openact.db", p.display());
+                    }
                 }
-                let master = std::env::var("OPENACT_MASTER_KEY").or_else(|_| std::env::var("AUTHFLOW_MASTER_KEY"));
-                println!("Master Key: {}", if master.is_ok() { "(set)" } else { "(not set)" });
-                if master.is_err() { println!("Suggestion: export OPENACT_MASTER_KEY=your-32-bytes-key"); }
+                let master = std::env::var("OPENACT_MASTER_KEY")
+                    .or_else(|_| std::env::var("AUTHFLOW_MASTER_KEY"));
+                println!(
+                    "Master Key: {}",
+                    if master.is_ok() { "(set)" } else { "(not set)" }
+                );
+                if master.is_err() {
+                    println!("Suggestion: export OPENACT_MASTER_KEY=your-32-bytes-key");
+                }
 
                 // DB connectivity
                 let pool = ctx.db.pool().clone();
@@ -1010,39 +1415,71 @@ async fn main() -> Result<()> {
                 // Port availability
                 let mut avail = Vec::new();
                 for p in port_start..=port_end {
-                    if std::net::TcpListener::bind(("127.0.0.1", p)).is_ok() { avail.push(p); }
-                    if avail.len() >= 3 { break; }
+                    if std::net::TcpListener::bind(("127.0.0.1", p)).is_ok() {
+                        avail.push(p);
+                    }
+                    if avail.len() >= 3 {
+                        break;
+                    }
                 }
                 if avail.is_empty() {
                     println!("Ports {}-{}: no free ports", port_start, port_end);
                     println!("Suggestion: choose a different range via --port-start/--port-end, or pass --redirect to auth-begin/auth-login");
-                } else { println!("Free ports (sample): {:?}", avail); }
+                } else {
+                    println!("Free ports (sample): {:?}", avail);
+                }
 
                 // Secrets mapping (optional DSL)
                 if let Some(path) = dsl {
-                    use openact_core::AuthOrchestrator; use std::path::Path;
+                    use openact_core::AuthOrchestrator;
+                    use std::path::Path;
                     let orch = AuthOrchestrator::new(ctx.db.pool().clone());
                     let p = Path::new(&path);
                     // reuse orchestrator's secret extractor via temp functions by calling begin and catching error
-                    let res = orch.begin_oauth_from_config("doctor", p, Some("OAuth"), Some("http://localhost:8080/oauth/callback"), Some("user:email")).await;
+                    let res = orch
+                        .begin_oauth_from_config(
+                            "doctor",
+                            p,
+                            Some("OAuth"),
+                            Some("http://localhost:8080/oauth/callback"),
+                            Some("user:email"),
+                        )
+                        .await;
                     match res {
-                        Ok((url, _)) => { println!("DSL parse: OK (authorize_url sample: {})", url); }
+                        Ok((url, _)) => {
+                            println!("DSL parse: OK (authorize_url sample: {})", url);
+                        }
                         Err(e) => {
                             let msg = format!("{}", e);
                             if msg.contains("missing required secrets") {
                                 println!("Secrets: MISSING -> {}", msg);
                                 // derive keys from message: missing required secrets: [k1, k2]
                                 if let (Some(s), Some(eidx)) = (msg.find('['), msg.find(']')) {
-                                    if eidx > s { let keys_str = &msg[s+1..eidx];
-                                        let keys: Vec<String> = keys_str.split(',').map(|t| t.trim().trim_matches('"').to_string()).filter(|k| !k.is_empty()).collect();
+                                    if eidx > s {
+                                        let keys_str = &msg[s + 1..eidx];
+                                        let keys: Vec<String> = keys_str
+                                            .split(',')
+                                            .map(|t| t.trim().trim_matches('"').to_string())
+                                            .filter(|k| !k.is_empty())
+                                            .collect();
                                         if !keys.is_empty() {
                                             println!("Suggestions (env):");
-                                            for k in &keys { println!("  export {}=<value>", k.replace('-', "_").to_uppercase()); }
+                                            for k in &keys {
+                                                println!(
+                                                    "  export {}=<value>",
+                                                    k.replace('-', "_").to_uppercase()
+                                                );
+                                            }
                                             println!("Suggestion (file): set OPENACT_SECRETS_FILE to a json/yaml containing:");
-                                            let sample: serde_json::Value = serde_json::json!(
-                                                keys.iter().map(|k| (k.clone(), "<value>".into())).collect::<serde_json::Map<_, _>>()
+                                            let sample: serde_json::Value = serde_json::json!(keys
+                                                .iter()
+                                                .map(|k| (k.clone(), "<value>".into()))
+                                                .collect::<serde_json::Map<_, _>>());
+                                            println!(
+                                                "{}",
+                                                serde_json::to_string_pretty(&sample)
+                                                    .unwrap_or("{}".to_string())
                                             );
-                                            println!("{}", serde_json::to_string_pretty(&sample).unwrap_or("{}".to_string()));
                                         }
                                     }
                                 }
