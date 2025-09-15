@@ -1,53 +1,82 @@
-name: "createIssue"
-display_name: "Create Issue"
-method: "POST"
-path: "/repos/{owner}/{repo}/issues"
-description: "Create a new issue in a repository"
-parameters:
-  - name: "owner"
-    type: "path"
-    description: "Repository owner (username or organization)"
-    required: true
-  - name: "repo"
-    type: "path"
-    description: "Repository name"
-    required: true
-  - name: "title"
-    type: "body"
-    description: "Issue title"
-    required: true
-  - name: "body"
-    type: "body"
-    description: "Issue body content"
-    required: false
-  - name: "labels"
-    type: "body"
-    description: "Array of label names"
-    required: false
-  - name: "assignees"
-    type: "body"
-    description: "Array of usernames to assign"
-    required: false
-  - name: "milestone"
-    type: "body"
-    description: "Milestone number"
-    required: false
-response_mapping: "$body"
-timeout_ms: 5000
-retry:
-  max_retries: 3
-  retry_on: ["5xx", "429"]
-headers:
-  Authorization: "{% 'Bearer ' & $access_token %}"
-  Accept: "application/vnd.github+json"
-  User-Agent: "openact/1.0"
-  Content-Type: "application/json"
-examples:
-  - name: "Create simple issue"
-    description: "Create a basic issue with title and body"
-    parameters:
-      owner: "octocat"
-      repo: "Hello-World"
-      title: "Bug report"
-      body: "Something is not working correctly"
-      labels: ["bug", "help wanted"]
+openapi: 3.0.0
+info:
+  title: GitHub API
+  version: 1.0.0
+servers:
+  - url: https://api.github.com
+paths:
+  /repos/{owner}/{repo}/issues:
+    post:
+      operationId: create-issue
+      summary: Create Issue
+      description: Create a new issue in a repository
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          description: Repository owner (username or organization)
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          description: Repository name
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  description: Issue title
+                body:
+                  type: string
+                  description: Issue body content
+                labels:
+                  type: array
+                  items:
+                    type: string
+                  description: Array of label names
+                assignees:
+                  type: array
+                  items:
+                    type: string
+                  description: Array of usernames to assign
+                milestone:
+                  type: integer
+                  description: Milestone number
+            example:
+              title: Bug report
+              body: Something is not working correctly
+              labels: [bug, "help wanted"]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+      x-auth:
+        scheme: oauth2
+        injection:
+          type: jsonada
+          mapping: |
+            {
+              "Authorization": "Bearer " & $access_token,
+              "Accept": "application/vnd.github+json",
+              "User-Agent": "openact/1.0",
+              "Content-Type": "application/json"
+            }
+      x-ok-path: "$status >= 200 and $status < 300"
+      x-output-pick: "$body"
+      x-timeout-ms: 5000
+      x-retry:
+        max_retries: 3
+        retry_on: ["5xx", "429"]
+      x-real-http: true

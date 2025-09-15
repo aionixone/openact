@@ -1,44 +1,68 @@
-name: "listRepos"
-display_name: "List Repositories"
-method: "GET"
-path: "/user/repos"
-description: "List repositories for the authenticated user"
-parameters:
-  - name: "per_page"
-    type: "query"
-    description: "Number of results per page (max 100)"
-    default: 30
-    required: false
-  - name: "page"
-    type: "query"
-    description: "Page number of results to fetch"
-    default: 1
-    required: false
-  - name: "sort"
-    type: "query"
-    description: "Sort repositories by created, updated, pushed, full_name"
-    default: "created"
-    required: false
-  - name: "direction"
-    type: "query"
-    description: "Sort direction (asc or desc)"
-    default: "desc"
-    required: false
-response_mapping: "$body"
-timeout_ms: 5000
-retry:
-  max_retries: 3
-  retry_on: ["5xx", "429"]
-headers:
-  Authorization: "{% 'Bearer ' & $access_token %}"
-  Accept: "application/vnd.github+json"
-  User-Agent: "openact/1.0"
-pagination:
-  type: "link"
-  link_expr: "{% $response.headers.Link %}"
-examples:
-  - name: "List user repositories"
-    description: "Get all repositories for the authenticated user"
-    parameters:
-      per_page: 10
-      sort: "updated"
+openapi: 3.0.0
+info:
+  title: GitHub API
+  version: 1.0.0
+servers:
+  - url: https://api.github.com
+paths:
+  /user/repos:
+    get:
+      operationId: list-repos
+      summary: List Repositories
+      description: List repositories for the authenticated user
+      tags: [github]
+      parameters:
+        - name: per_page
+          in: query
+          description: Number of results per page (max 100)
+          required: false
+          schema:
+            type: integer
+            default: 30
+        - name: page
+          in: query
+          description: Page number of results to fetch
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: sort
+          in: query
+          description: Sort repositories by created, updated, pushed, full_name
+          required: false
+          schema:
+            type: string
+            default: created
+        - name: direction
+          in: query
+          description: Sort direction (asc or desc)
+          required: false
+          schema:
+            type: string
+            default: desc
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+      x-auth:
+        scheme: oauth2
+        injection:
+          type: jsonada
+          mapping: |
+            {
+              "Authorization": "Bearer " & $access_token,
+              "Accept": "application/vnd.github+json",
+              "User-Agent": "openact/1.0"
+            }
+      x-ok-path: "$status >= 200 and $status < 300"
+      x-output-pick: "$body"
+      x-timeout-ms: 5000
+      x-retry:
+        max_retries: 3
+        retry_on: ["5xx", "429"]
+      x-real-http: true
