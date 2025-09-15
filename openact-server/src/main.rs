@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use openact_core::{database::CoreDatabase, action_registry::ActionRegistry, binding::BindingManager, AuthManager, AuthOrchestrator, ExecutionEngine};
 use authflow::engine::TaskHandler;
-use manifest::storage::{ExecutionRepository, action_models::CreateExecutionRequest};
+use manifest::storage::ExecutionRepository;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -460,71 +460,52 @@ struct RunReq { tenant: String, action_trn: String, #[serde(default)] exec_trn: 
 
 #[utoipa::path(post, path = "/api/v1/run", request_body = RunReq, responses((status = 200, description = "OK")))]
 async fn run_action(State(state): State<Arc<AppState>>, Json(req): Json<RunReq>) -> (StatusCode, Json<serde_json::Value>) {
-    // Load Action spec from DB
-    let registry = ActionRegistry::new(state.db.pool().clone());
-    let stored = match registry.get_by_trn(&req.action_trn).await { Ok(a) => a, Err(e) => { return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": {"code": "NotFound", "message": e.to_string()}}))); } };
-    #[derive(Deserialize)] struct Spec { method: String, path: String, #[serde(default)] headers: Option<std::collections::HashMap<String, String>>, #[serde(default)] base_url: Option<String> }
-    let spec: Spec = match serde_yaml::from_str(&stored.openapi_spec) { Ok(s) => s, Err(e) => { return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": {"code": "BadRequest", "message": format!("invalid action yaml: {}", e)}}))); } };
-
-    // Build Action (manifest model)
-    let mut action = manifest::action::Action::new(stored.name.clone(), spec.method, spec.path, stored.provider.clone(), stored.tenant.clone(), stored.trn.clone());
-    action.extensions.insert("x-real-http".to_string(), serde_json::json!(true));
-    if let Some(base) = spec.base_url.or_else(|| std::env::var("OPENACT_BASE_URL").ok()) { action.extensions.insert("x-base-url".to_string(), serde_json::json!(base)); }
-
-    // Headers & trace
-    let mut headers = spec.headers.unwrap_or_default();
-    if req.trace.unwrap_or(false) { headers.insert("X-OpenAct-Trace".to_string(), "true".to_string()); }
-    // Output preference (currently always JSON, but record for debugging)
-    let output_pref = req.output.clone().unwrap_or_else(|| "json".to_string());
-
-    // Execution engine
     let engine = ExecutionEngine::new(state.db.clone());
-    let exec_trn = req.exec_trn.unwrap_or_else(|| format!("trn:exec:{}:{}:{}", req.tenant, stored.provider.clone(), chrono::Utc::now().timestamp_millis()));
+    let exec_trn = req
+        .exec_trn
+        .unwrap_or_else(|| format!("trn:exec:{}:{}:{}", req.tenant, "api", chrono::Utc::now().timestamp_millis()));
 
     if req.dry_run.unwrap_or(false) {
         let preview = serde_json::json!({
             "tenant": req.tenant,
-            "action_trn": stored.trn,
+            "action_trn": req.action_trn,
             "exec_trn": exec_trn,
-            "method": action.method,
-            "path": action.path,
-            "base_url": action.extensions.get("x-base-url"),
-            "headers": headers,
-            "output": output_pref,
+            "output": req.output.clone().unwrap_or_else(|| "json".to_string()),
+            "trace": req.trace.unwrap_or(false),
         });
         return (StatusCode::OK, Json(serde_json::json!({"preview": preview})));
     }
 
-    // create execution row (pending)
-    let erepo = ExecutionRepository::new(state.db.pool().clone());
-    let _ = erepo.ensure_table_exists().await; // ensure table exists before using
-    let _ = erepo.create_execution(CreateExecutionRequest { execution_trn: exec_trn.clone(), action_trn: stored.trn.clone(), tenant: req.tenant.clone(), input_data: None }).await;
-
-    let run_res = engine.run_action_with_overrides(&req.tenant, action, &exec_trn, None, Some(headers)).await;
-    match run_res {
-        Ok(res) => {
-            // best-effort update execution row
-            if let Ok(row) = erepo.get_execution_by_trn(&exec_trn).await {
-                let _ = erepo.update_execution_result(row.id.unwrap_or(0), manifest::storage::action_models::ExecutionResult { 
-                    output_data: res.response_data.clone().map(|v| v.to_string()), 
-                    status: format!("{:?}", res.status).to_lowercase(), 
-                    status_code: res.status_code.map(|c| c as i32), 
-                    error_message: res.error_message.clone(), 
-                    duration_ms: res.duration_ms.map(|d| d as i64) 
-                }).await;
-            }
-            (StatusCode::OK, Json(serde_json::json!({
-                "status": res.status,
-                "response": res.response_data,
-                "error": res.error_message,
-                "status_code": res.status_code,
-                "duration_ms": res.duration_ms,
-                "exec_trn": exec_trn,
-                "action_trn": stored.trn,
-                "output": output_pref,
-            })))
+    match engine
+        .run_action_by_trn(&req.tenant, &req.action_trn, &exec_trn)
+        .await
+    {
+        Ok(res) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "ok": true,
+                "data": {
+                    "status": res.status,
+                    "response": res.response_data,
+                    "error": res.error_message,
+                    "status_code": res.status_code,
+                    "duration_ms": res.duration_ms,
+                    "exec_trn": exec_trn,
+                    "action_trn": req.action_trn,
+                }
+            })),
+        ),
+        Err(e) => {
+            let code = StatusCode::BAD_REQUEST;
+            (
+                code,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "error": {"code": "BadRequest", "message": e.to_string()},
+                    "meta": {"exec_trn": exec_trn, "action_trn": req.action_trn, "tenant": req.tenant}
+                })),
+            )
         }
-        Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": {"code": "BadRequest", "message": e.to_string()}})))
     }
 }
 
@@ -534,18 +515,21 @@ async fn get_execution(State(state): State<Arc<AppState>>, Path(exec_trn): Path<
     let _ = erepo.ensure_table_exists().await; // ensure table exists before querying
     match erepo.get_execution_by_trn(&exec_trn).await {
         Ok(row) => (StatusCode::OK, Json(serde_json::json!({
-            "execution_trn": row.execution_trn,
-            "action_trn": row.action_trn,
-            "tenant": row.tenant,
-            "status": row.status,
-            "status_code": row.status_code,
-            "error_message": row.error_message,
-            "duration_ms": row.duration_ms,
-            "output_data": row.output_data,
-            "created_at": row.created_at,
-            "completed_at": row.completed_at,
+            "ok": true,
+            "data": {
+                "execution_trn": row.execution_trn,
+                "action_trn": row.action_trn,
+                "tenant": row.tenant,
+                "status": row.status,
+                "status_code": row.status_code,
+                "error_message": row.error_message,
+                "duration_ms": row.duration_ms,
+                "output_data": row.output_data,
+                "created_at": row.created_at,
+                "completed_at": row.completed_at,
+            }
         }))),
-        Err(_) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": {"code": "NotFound", "message": "execution not found"}})))
+        Err(_) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"ok": false, "error": {"code": "NotFound", "message": "execution not found"}})))
     }
 }
 #[utoipa::path(

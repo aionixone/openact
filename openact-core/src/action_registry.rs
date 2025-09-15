@@ -3,7 +3,7 @@ use manifest::storage::{
     action_models::{CreateActionRequest, UpdateActionRequest},
     action_repository::ActionRepository,
 };
-use serde::Deserialize;
+// use serde::Deserialize; // no longer needed after enforcing OpenAPI-only
 use sqlx::SqlitePool;
 use std::path::Path;
 
@@ -52,39 +52,12 @@ impl ActionRegistry {
         self.ensure_actions_table().await?;
         let content = std::fs::read_to_string(yaml_path)
             .map_err(|e| CoreError::InvalidInput(e.to_string()))?;
-        // Minimal YAML validation
-        #[derive(Deserialize)]
-        struct MinimalYaml {
-            name: String,
-            method: String,
-            path: String,
-        }
-        let parsed: MinimalYaml = serde_yaml::from_str(&content)
-            .map_err(|e| CoreError::InvalidInput(format!("invalid action yaml: {}", e)))?;
-        // Basic validations
-        if parsed.name.trim().is_empty()
-            || parsed.method.trim().is_empty()
-            || parsed.path.trim().is_empty()
-        {
-            return Err(CoreError::InvalidInput(
-                "invalid action yaml: missing name/method/path".into(),
-            ));
-        }
-        // HTTP method whitelist
-        const ALLOWED: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
-        if !ALLOWED.contains(&parsed.method.to_uppercase().as_str()) {
-            return Err(CoreError::InvalidInput(format!(
-                "invalid method: {}",
-                parsed.method
-            )));
-        }
-        // Path must start with '/'
-        if !parsed.path.starts_with('/') {
-            return Err(CoreError::InvalidInput(format!(
-                "invalid path (must start with '/'): {}",
-                parsed.path
-            )));
-        }
+        // Enforce OpenAPI 3.0: must parse as OpenApi30Spec
+        let _spec: manifest::spec::api_spec::OpenApi30Spec = serde_yaml::from_str(&content)
+            .map_err(|e| CoreError::InvalidInput(format!(
+                "invalid OpenAPI (expected 3.0): {}",
+                e
+            )))?;
         let req = CreateActionRequest {
             trn: trn.to_string(),
             tenant: tenant.to_string(),
@@ -214,9 +187,27 @@ mod tests {
     async fn register_and_get_action() {
         let pool = setup_memory_pool().await;
         let registry = ActionRegistry::new(pool);
-        // create temp yaml
+        // create temp OpenAPI yaml
         let mut f = tempfile::NamedTempFile::new().unwrap();
-        writeln!(f, "name: get-user\nmethod: GET\npath: /user").unwrap();
+        writeln!(
+            f,
+            "{}",
+            r#"openapi: 3.0.0
+info:
+  title: Test
+  version: 1.0.0
+servers:
+  - url: https://api.github.com
+paths:
+  /user:
+    get:
+      operationId: get-user
+      responses:
+        '200':
+          description: OK
+"#
+        )
+        .unwrap();
         let path = f.into_temp_path();
         let trn = "trn:openact:tenant1:action/github/getUser@v1";
 
@@ -235,7 +226,8 @@ mod tests {
         let pool = setup_memory_pool().await;
         let registry = ActionRegistry::new(pool);
         let mut f = tempfile::NamedTempFile::new().unwrap();
-        writeln!(f, "name: \nmethod: GET").unwrap(); // missing path & invalid name
+        // invalid (not an OpenAPI 3.0 doc)
+        writeln!(f, "name: \nmethod: GET").unwrap();
         let path = f.into_temp_path();
         let trn = "trn:openact:tenant1:action/github/getUser@v1";
         let err = registry

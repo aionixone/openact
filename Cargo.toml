@@ -6,6 +6,7 @@ members = [
     "openact-core",
     "openact-cli",
     "openact-server",
+    "openact-stdio",
 ]
 
 [workspace.package]

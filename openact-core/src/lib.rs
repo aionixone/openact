@@ -12,8 +12,9 @@ pub use binding::{Binding, BindingManager};
 pub use config::{CoreConfig, CoreContext};
 pub use database::CoreDatabase;
 pub use auth_orchestrator::AuthOrchestrator;
-use manifest::action::{Action, ActionExecutionContext};
+use manifest::action::{Action, ActionExecutionContext, ActionParser, ActionParsingOptions};
 pub use manifest::action::{ActionRunner, AuthAdapter};
+use manifest::storage::execution_repository::ExecutionRepository;
 use std::sync::Arc;
 
 pub mod error {
@@ -34,12 +35,203 @@ pub mod error {
 pub struct ExecutionEngine {
     pub db: CoreDatabase,
     pub bindings: BindingManager,
+    pub action_registry: crate::action_registry::ActionRegistry,
+    pub execution_repo: ExecutionRepository,
 }
 
 impl ExecutionEngine {
     pub fn new(db: CoreDatabase) -> Self {
         let bindings = BindingManager::new(db.pool().clone());
-        Self { db, bindings }
+        let action_registry = crate::action_registry::ActionRegistry::new(db.pool().clone());
+        let execution_repo = ExecutionRepository::new(db.pool().clone());
+        Self { 
+            db, 
+            bindings, 
+            action_registry,
+            execution_repo,
+        }
+    }
+
+    /// Convert stored action (DB model) to runtime action (execution model)
+    fn convert_stored_to_runtime_action(
+        stored_action: &manifest::storage::action_models::Action,
+    ) -> error::Result<Action> {
+        // Parse the OpenAPI spec to create runtime Actions
+        let mut parser = ActionParser::new(ActionParsingOptions {
+            default_tenant: stored_action.tenant.clone(),
+            default_provider: stored_action.provider.clone(),
+            ..Default::default()
+        });
+
+        // Stored spec may be YAML or JSON; serde_yaml can read both
+        let spec: manifest::spec::api_spec::OpenApi30Spec = serde_yaml::from_str(&stored_action.openapi_spec)
+            .map_err(|e| error::CoreError::InvalidInput(format!(
+                "failed to parse OpenAPI spec: {} (Only OpenAPI 3.0 is supported)",
+                e
+            )))?;
+
+        let mut result = parser
+            .parse_spec(&spec)
+            .map_err(|e| error::CoreError::InvalidInput(format!("failed to parse actions from spec: {}", e)))?;
+
+        // Heuristics to select the intended action and align identifiers
+        if result.actions.len() == 1 {
+            let mut a = result.actions.remove(0);
+            a.trn = stored_action.trn.clone();
+            a.tenant = stored_action.tenant.clone();
+            a.provider = stored_action.provider.clone();
+            return Ok(a);
+        }
+
+        if let Some(mut a) = result
+            .actions
+            .iter()
+            .cloned()
+            .find(|a| a.name == stored_action.name)
+        {
+            a.trn = stored_action.trn.clone();
+            a.tenant = stored_action.tenant.clone();
+            a.provider = stored_action.provider.clone();
+            return Ok(a);
+        }
+
+        // Fallback: if at least one action was parsed, use the first (clone)
+        if let Some(mut a) = result.actions.first().cloned() {
+            a.trn = stored_action.trn.clone();
+            a.tenant = stored_action.tenant.clone();
+            a.provider = stored_action.provider.clone();
+            return Ok(a);
+        }
+
+        // Last resort: build action from the first path+method in the OpenAPI doc
+        for (p, item) in &spec.paths.paths {
+            let choose = |method: &str| -> Action {
+                let op_name = item
+                    .get
+                    .as_ref()
+                    .and_then(|op| op.operation_id.clone())
+                    .unwrap_or_else(|| {
+                        let segs: Vec<&str> = p
+                            .trim_start_matches('/')
+                            .split('/')
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let mut name_parts = vec![method.to_lowercase()];
+                        name_parts.extend(segs.into_iter().map(|s| s.trim_matches('{').trim_matches('}').to_lowercase()));
+                        name_parts.join(".")
+                    });
+                let a = Action::new(
+                    op_name,
+                    method.to_string(),
+                    p.clone(),
+                    stored_action.provider.clone(),
+                    stored_action.tenant.clone(),
+                    stored_action.trn.clone(),
+                );
+                a
+            };
+            if item.get.is_some() { return Ok(choose("GET")); }
+            if item.post.is_some() { return Ok(choose("POST")); }
+            if item.put.is_some() { return Ok(choose("PUT")); }
+            if item.delete.is_some() { return Ok(choose("DELETE")); }
+            if item.patch.is_some() { return Ok(choose("PATCH")); }
+            if item.head.is_some() { return Ok(choose("HEAD")); }
+            if item.options.is_some() { return Ok(choose("OPTIONS")); }
+            if item.trace.is_some() { return Ok(choose("TRACE")); }
+        }
+
+        Err(error::CoreError::InvalidInput(format!("no actions parsed from spec for trn={}", stored_action.trn)))
+    }
+
+    /// Run action by TRN with execution persistence
+    pub async fn run_action_by_trn(
+        &self,
+        tenant: &str,
+        action_trn: &str,
+        exec_trn: &str,
+    ) -> error::Result<manifest::action::models::ActionExecutionResult> {
+        use manifest::storage::action_models::{CreateExecutionRequest, ExecutionResult};
+
+        // Ensure execution table exists
+        self
+            .execution_repo
+            .ensure_table_exists()
+            .await
+            .map_err(|e| error::CoreError::InvalidInput(e.to_string()))?;
+
+        // Fetch and validate action BEFORE creating execution record to avoid FK failures
+        let stored_action = self.action_registry.get_by_trn(action_trn).await?;
+        if stored_action.tenant != tenant {
+            return Err(error::CoreError::InvalidInput(format!(
+                "tenant mismatch: requested={}, action tenant={}",
+                tenant, stored_action.tenant
+            )));
+        }
+        
+        // Convert to runtime action
+        let runtime_action = Self::convert_stored_to_runtime_action(&stored_action)?;
+        
+        // Create execution record (status defaults to pending in repo)
+        let create_req = CreateExecutionRequest {
+            execution_trn: exec_trn.to_string(),
+            action_trn: action_trn.to_string(),
+            tenant: tenant.to_string(),
+            input_data: None,
+        };
+
+        let execution_record = self
+            .execution_repo
+            .create_execution(create_req)
+            .await
+            .map_err(|e| error::CoreError::InvalidInput(format!("failed to create execution: {}", e)))?;
+        
+        let start_time = std::time::Instant::now();
+        
+        // Run the action using existing run_action method
+        let result = self.run_action(tenant, runtime_action, exec_trn).await;
+        
+        // Update execution record with results
+        let duration = start_time.elapsed();
+        match result {
+            Ok(success_result) => {
+                // Persist success result
+                let output_data = success_result
+                    .response_data
+                    .as_ref()
+                    .and_then(|v| serde_json::to_string(v).ok());
+                let exec_result = ExecutionResult {
+                    output_data,
+                    status: "completed".to_string(),
+                    status_code: success_result.status_code,
+                    error_message: None,
+                    duration_ms: success_result.duration_ms.map(|v| v as i64),
+                };
+                self
+                    .execution_repo
+                    .update_execution_result(execution_record.id.unwrap_or(0), exec_result)
+                    .await
+                    .map_err(|e| error::CoreError::InvalidInput(format!("failed to update execution: {}", e)))?;
+
+                Ok(success_result)
+            }
+            Err(err) => {
+                // Persist failed result
+                let exec_result = ExecutionResult {
+                    output_data: None,
+                    status: "failed".to_string(),
+                    status_code: Some(500),
+                    error_message: Some(err.to_string()),
+                    duration_ms: Some(duration.as_millis() as i64),
+                };
+                self
+                    .execution_repo
+                    .update_execution_result(execution_record.id.unwrap_or(0), exec_result)
+                    .await
+                    .map_err(|e| error::CoreError::InvalidInput(format!("failed to update execution: {}", e)))?;
+
+                Err(err)
+            }
+        }
     }
 
     /// Run a provided Action after wiring auth via bindings
