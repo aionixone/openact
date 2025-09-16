@@ -11,6 +11,7 @@ mod ensure;
 mod http_request;
 mod inject;
 mod secrets;
+pub mod multi_value;
 mod oauth2 {
     pub mod client_credentials;
     pub mod refresh_token;
@@ -28,7 +29,7 @@ pub use crate::actions::connection::{
 };
 pub use crate::actions::ensure::EnsureFreshTokenHandler;
 pub use crate::actions::http_request::HttpTaskHandler;
-pub use crate::actions::inject::{InjectApiKeyHandler, InjectBearerHandler};
+pub use crate::actions::inject::{InjectApiKeyHandler, InjectBearerHandler, InjectBasicAuthHandler};
 pub use crate::actions::oauth2::{
     authorize::OAuth2AuthorizeRedirectHandler,
     client_credentials::OAuth2ClientCredentialsHandler,
@@ -39,6 +40,9 @@ pub use crate::actions::oauth2::{
 pub use crate::actions::secrets::VaultSecretsProvider;
 pub use crate::actions::secrets::{
     MemorySecretsProvider, SecretsProvider, SecretsResolveHandler, SecretsResolveManyHandler,
+};
+pub use crate::actions::multi_value::{
+    HttpPolicy, MultiValue, MultiValueMap, MultiValueMerger, MergeStrategy,
 };
 
 // A lightweight default router that wires common stateless actions.
@@ -68,6 +72,7 @@ impl TaskHandler for DefaultRouter {
             // Inject
             "inject.bearer" => InjectBearerHandler.execute(resource, state_name, ctx),
             "inject.api_key" => InjectApiKeyHandler.execute(resource, state_name, ctx),
+            "inject.basic" => InjectBasicAuthHandler.execute(resource, state_name, ctx),
 
             // Secrets (explicitly choose memory provider by default)
             "secrets.resolve" => SecretsResolveHandler::<MemorySecretsProvider>::default()
