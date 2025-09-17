@@ -34,8 +34,12 @@
               "usePKCE": true
             },
             "assign": {
-              "auth_state": "{% result.state %}",
-              "code_verifier": "{% result.code_verifier %}"
+              "meta": {
+                "oauth": {
+                  "expected_state": "{% result.state %}",
+                  "code_verifier": "{% result.code_verifier %}"
+                }
+              }
             },
             "next": "AwaitCallback"
           },

@@ -18,7 +18,7 @@ use authflow::{
     engine::TaskHandler,
     store::{
         connection_store::{Connection, ConnectionStore},
-        sqlite_connection_store::{SqliteConnectionStore, SqliteConfig},
+        sqlite_connection_store::DbConnectionStore,
         auth_trn::AuthConnectionTrn,
     },
 };
@@ -31,15 +31,10 @@ async fn get_authflow_store() -> Arc<dyn ConnectionStore> {
     if let Some(s) = AUTHFLOW_STORE.get() {
         return s.clone();
     }
-    // Prefer unified DB URL, then fallback to legacy authflow var, then default
-    let db_url = std::env::var("OPENACT_DB_URL")
-        .or_else(|_| std::env::var("OPENACT_AUTHFLOW_DB"))
-        .unwrap_or_else(|_| "sqlite:./data/openact.db".to_string());
-    let enable_encryption = std::env::var("OPENACT_AUTHFLOW_ENCRYPTION").map(|v| v == "true" || v == "1").unwrap_or(false);
-    let cfg = SqliteConfig { database_url: db_url, enable_encryption, ..Default::default() };
-    let store = SqliteConnectionStore::new(cfg)
+    // Use shared storage adapter
+    let store = DbConnectionStore::new()
         .await
-        .expect("Failed to init SqliteConnectionStore");
+        .expect("Failed to init DbConnectionStore");
     let arc: Arc<dyn ConnectionStore> = Arc::new(store);
     let _ = AUTHFLOW_STORE.set(arc.clone());
     arc

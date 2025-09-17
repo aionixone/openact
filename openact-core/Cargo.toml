@@ -36,8 +36,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # TRN 系统
 trn-rust = { path = "../../trn-rust" }
 
-# AuthFlow 集成
-authflow = { path = "../authflow", features = ["sqlite"] }
+# AuthFlow 集成（不再需要 sqlite feature）
+authflow = { path = "../authflow" }
 
 # JSONata 已下沉到上层解析层
 

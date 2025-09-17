@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
     "authflow",
-    "openact-core"
+    "openact-core", 
+    "openact-registry",
+    "openact-storage"
 ]
 
 [workspace.package]

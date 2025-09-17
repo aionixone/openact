@@ -361,6 +361,8 @@ struct CallbackParams {
     code: Option<String>,
     state: Option<String>,
     execution_id: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
 }
 
 #[cfg(feature = "server")]
@@ -372,84 +374,63 @@ async fn oauth_callback(
         "[callback] received params code={:?} state={:?} execution_id={:?}",
         params.code, params.state, params.execution_id
     );
-    let exec_id = if let Some(eid) = params.execution_id.clone() {
-        println!("[callback] using provided execution_id={}", eid);
-        eid
-    } else if let Some(state_token) = params.state.clone() {
-        // Reverse lookup execution by state (compatible with context override where state only exists in states.*.result.state)
-        fn context_matches_state(ctx: &serde_json::Value, s: &str) -> bool {
-            // 1) Top-level state
-            if ctx.get("state").and_then(|v| v.as_str()) == Some(s) { return true; }
-            // 2) Nested context.state (after execution context wrapping)
-            if let Some(inner) = ctx.get("context") {
-                if context_matches_state(inner, s) { return true; }
-            }
-            // 3) Iterate over states.*.result.state
-            if let Some(obj) = ctx.get("states").and_then(|v| v.as_object()) {
-                for (_name, st) in obj.iter() {
-                    if st.get("result").and_then(|r| r.get("state")).and_then(|v| v.as_str()) == Some(s) {
-                        return true;
-                    }
-                }
-            }
-            false
-        }
 
-        let executions = state.executions.read().unwrap();
-        if let Some((k, _)) = executions
-            .iter()
-            .filter(|(_, e)| matches!(e.status, ExecutionStatus::Running | ExecutionStatus::Paused))
-            .find(|(_, e)| e.context.as_ref().map(|c| context_matches_state(c, &state_token)).unwrap_or(false))
-        {
-            println!("[callback] matched execution by state token: {}", state_token);
-            k.clone()
-        } else {
-            println!("[callback] NO_EXECUTION matched for state token: {}", state_token);
+    // Require state
+    let state_token = match params.state.clone() {
+        Some(s) if !s.is_empty() => s,
+        _ => {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({ "error": {"code": "NO_EXECUTION", "message": "No execution matches the provided state"} })),
-            )
-                .into_response();
-        }
-    } else {
-        // If execution_id is not explicitly provided and state is not provided, choose the latest Running/Paused execution
-        let executions = state.executions.read().unwrap();
-        if let Some((k, _)) = executions
-            .iter()
-            .filter(|(_, e)| matches!(e.status, ExecutionStatus::Running | ExecutionStatus::Paused))
-            .max_by_key(|(_, e)| e.updated_at)
-        {
-            println!("[callback] fallback to latest running/paused execution: {}", k);
-            k.clone()
-        } else {
-            println!("[callback] NO_EXECUTION: no running/paused execution found");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": {"code": "NO_EXECUTION", "message": "No running or paused execution to resume"} })),
+                Json(json!({ "error": {"code": "MISSING_STATE", "message": "state is required"} })),
             )
                 .into_response();
         }
     };
 
-    let code = params.code.clone().unwrap_or_default();
-    let state_val = params.state.clone().unwrap_or_default();
+    // Derive execution_id from state token (placeholder: identity mapping or simple extraction)
+    // TODO: replace with JWT/HMAC verification and decoding to execution_id
+    let exec_id = if let Some(eid) = params.execution_id.clone() {
+        eid
+    } else {
+        // For now, assume state token encodes execution id directly (scaffold)
+        state_token.clone()
+    };
 
-    // Write code/state and trigger resume
+    let code_opt = params.code.clone();
+
+    // Write code/state under context.vars.meta.oauth and trigger resume
     {
         let mut executions = state.executions.write().unwrap();
         if let Some(execution) = executions.get_mut(&exec_id) {
             println!(
                 "[callback] resuming execution={} with code(len={}) state={}",
                 exec_id,
-                code.len(),
-                state_val
+                code_opt.as_deref().map(|c| c.len()).unwrap_or(0),
+                state_token
             );
             execution.status = ExecutionStatus::Running;
             execution.updated_at = SystemTime::now();
             let mut new_ctx = execution.context.clone().unwrap_or_else(|| json!({}));
             if let serde_json::Value::Object(ref mut map) = new_ctx {
-                map.insert("code".to_string(), json!(code));
-                map.insert("state".to_string(), json!(state_val));
+                let vars = map.entry("vars").or_insert_with(|| json!({}));
+                if let serde_json::Value::Object(ref mut vars_map) = vars {
+                    let meta = vars_map.entry("meta").or_insert_with(|| json!({}));
+                    if let serde_json::Value::Object(ref mut meta_map) = meta {
+                        let oauth = meta_map.entry("oauth").or_insert_with(|| json!({}));
+                        if let serde_json::Value::Object(ref mut oauth_map) = oauth {
+                            oauth_map.insert("state".to_string(), json!(state_token));
+                            if let Some(code) = code_opt {
+                                oauth_map.insert("code".to_string(), json!(code));
+                            }
+                            if let Some(err) = params.error.clone() {
+                                oauth_map.insert("error".to_string(), json!(err));
+                            }
+                            if let Some(desc) = params.error_description.clone() {
+                                oauth_map.insert("error_description".to_string(), json!(desc));
+                            }
+                        }
+                    }
+                }
             }
             execution.context = Some(new_ctx);
         } else {
@@ -988,10 +969,32 @@ async fn resume_execution(
             let mut new_ctx = execution.context.clone().unwrap_or_else(|| json!({}));
             if let serde_json::Value::Object(ref mut map) = new_ctx {
                 if let Some(code) = req.input.get("code").cloned() {
-                    map.insert("code".to_string(), code);
+                    map.insert("code".to_string(), code.clone());
+                    // Mirror into vars.meta.oauth.code
+                    let vars = map.entry("vars").or_insert_with(|| json!({}));
+                    if let serde_json::Value::Object(ref mut vars_map) = vars {
+                        let meta = vars_map.entry("meta").or_insert_with(|| json!({}));
+                        if let serde_json::Value::Object(ref mut meta_map) = meta {
+                            let oauth = meta_map.entry("oauth").or_insert_with(|| json!({}));
+                            if let serde_json::Value::Object(ref mut oauth_map) = oauth {
+                                oauth_map.insert("code".to_string(), json!(code));
+                            }
+                        }
+                    }
                 }
                 if let Some(state_val) = req.input.get("state").cloned() {
-                    map.insert("state".to_string(), state_val);
+                    map.insert("state".to_string(), state_val.clone());
+                    // Mirror into vars.meta.oauth.state
+                    let vars = map.entry("vars").or_insert_with(|| json!({}));
+                    if let serde_json::Value::Object(ref mut vars_map) = vars {
+                        let meta = vars_map.entry("meta").or_insert_with(|| json!({}));
+                        if let serde_json::Value::Object(ref mut meta_map) = meta {
+                            let oauth = meta_map.entry("oauth").or_insert_with(|| json!({}));
+                            if let serde_json::Value::Object(ref mut oauth_map) = oauth {
+                                oauth_map.insert("state".to_string(), json!(state_val));
+                            }
+                        }
+                    }
                 }
             }
             execution.context = Some(new_ctx);

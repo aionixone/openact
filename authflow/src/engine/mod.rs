@@ -96,9 +96,30 @@ pub fn run_flow(
                 // parameters
                 let mapped_input = mapper.evaluate_arguments(&parameters, &ctx)?;
 
-                // Execute with mapped input if present; fall back to full context
-                let exec_in = mapped_input.as_ref().unwrap_or(&context);
-                let raw_out = handler.execute(&resource, &state_name, exec_in)?;
+                // Always ensure context includes current vars, whether using mapped input or not
+                let mut enriched_context = context.clone();
+                let obj = enriched_context.as_object_mut().unwrap();
+                let mut varmap = serde_json::Map::new();
+                for (k, v) in vars.iter() { varmap.insert(k.clone(), v.clone()); }
+                obj.insert("vars".into(), Value::Object(varmap));
+                
+                // Execute with mapped input if present, otherwise use enriched context
+                let exec_context = if let Some(mapped) = mapped_input.as_ref() {
+                    // Merge mapped parameters with vars
+                    let mut merged = enriched_context.clone();
+                    if let Some(mapped_obj) = mapped.as_object() {
+                        if let Some(merged_obj) = merged.as_object_mut() {
+                            for (k, v) in mapped_obj {
+                                merged_obj.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                    merged
+                } else {
+                    enriched_context
+                };
+                
+                let raw_out = handler.execute(&resource, &state_name, &exec_context)?;
 
                 // assign → extend vars after execution (can access result)
                 if assign.is_some() {
@@ -293,7 +314,7 @@ pub fn run_until_pause_or_end(
                     Err(e) if e.to_string().contains("PAUSE_FOR_CALLBACK") => {
                         let run_id = uuid::Uuid::new_v4().to_string();
                         let await_meta = json!({
-                            "expected_state": context.pointer("/vars/auth/state"),
+                            "expected_state": context.pointer("/vars/meta/oauth/expected_state"),
                             "reason": "oauth_callback"
                         });
                         return Ok(RunOutcome::Pending(PendingInfo {
@@ -1280,21 +1301,17 @@ states:
       scope: "read"
       usePKCE: true
     assign:
-      auth_state: "{{% result.state %}}"
-      auth_code_verifier: "{{% result.code_verifier %}}"
+      meta:
+        oauth:
+          expected_state: "{{% result.state %}}"
+          code_verifier: "{{% result.code_verifier %}}"
+          code: "the_code"
+          state: "{{% result.state %}}"
     next: "Await"
   Await:
     type: task
     resource: "oauth2.await_callback"
-    parameters:
-      returned_state: "{{% $auth_state %}}"
-      expected_state: "{{% $auth_state %}}"
-      code: "the_code"
-      expected_pkce:
-        code_verifier: "{{% $auth_code_verifier %}}"
-    assign:
-      callback_code: "{{% result.code %}}"
-      callback_code_verifier: "{{% result.code_verifier %}}"
+    parameters: {{}}
     next: "Exchange"
   Exchange:
     type: task
@@ -1309,8 +1326,8 @@ states:
         grant_type: "authorization_code"
         client_id: "cid"
         redirect_uri: "https://app/cb"
-        code: "{{% $callback_code %}}"
-        code_verifier: "{{% $callback_code_verifier %}}"
+        code: "{{% states.Await.result.code %}}"
+        code_verifier: "{{% states.Await.result.code_verifier %}}"
     output: "{{% result.body.access_token %}}"
     end: true
 "#,

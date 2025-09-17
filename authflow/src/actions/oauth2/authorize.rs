@@ -86,117 +86,33 @@ pub struct OAuth2AwaitCallbackHandler;
 
 impl TaskHandler for OAuth2AwaitCallbackHandler {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
-        // Log the context for debugging
-        println!("OAuth2AwaitCallbackHandler::execute called with context: {}", serde_json::to_string(ctx).unwrap_or_else(|_| "invalid json".to_string()));
-        
-        // Recursively find the code in the context
-        fn find_code_recursive(ctx: &Value) -> Option<&str> {
-            if let Some(code) = ctx.get("code").and_then(|v| v.as_str()) {
-                return Some(code);
-            }
-            if let Some(input) = ctx.get("input") {
-                if let Some(code) = find_code_recursive(input) {
-                    return Some(code);
-                }
-            }
-            if let Some(context) = ctx.get("context") {
-                if let Some(code) = find_code_recursive(context) {
-                    return Some(code);
-                }
-            }
-            None
-        }
-        
-        let code = find_code_recursive(ctx);
-        println!("Found code: {:?}", code);
-        if code.is_none() {
-            println!("No code found, returning PAUSE_FOR_CALLBACK");
-            return Err(anyhow::anyhow!("PAUSE_FOR_CALLBACK"));
-        }
-        let code = code.unwrap();
-        println!("Using code: {}", code);
+        // Expect code/state in canonical location written by callback handler
+        let code = ctx
+            .pointer("/vars/meta/oauth/code")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("PAUSE_FOR_CALLBACK"))?;
 
-        // Recursively find the state in the context
-        fn find_state_recursive(ctx: &Value) -> Option<&str> {
-            if let Some(state) = ctx.get("state").and_then(|v| v.as_str()) {
-                return Some(state);
-            }
-            if let Some(state) = ctx.get("returned_state").and_then(|v| v.as_str()) {
-                return Some(state);
-            }
-            if let Some(input) = ctx.get("input") {
-                if let Some(state) = find_state_recursive(input) {
-                    return Some(state);
-                }
-            }
-            if let Some(context) = ctx.get("context") {
-                if let Some(state) = find_state_recursive(context) {
-                    return Some(state);
-                }
-            }
-            None
-        }
-        
-        let returned = find_state_recursive(ctx);
-        
-        // Find the expected state, prioritizing the result from StartAuth
-        fn find_expected_state(ctx: &Value) -> Option<&str> {
-            // First, look for an explicit expected_state
-            if let Some(state) = ctx.get("expected_state").and_then(|v| v.as_str()) {
-                return Some(state);
-            }
-            
-            // Then, look for the state in the StartAuth result
-            fn find_start_auth_state(ctx: &Value) -> Option<&str> {
-                if let Some(states) = ctx.get("states") {
-                    if let Some(start_auth) = states.get("StartAuth") {
-                        if let Some(result) = start_auth.get("result") {
-                            if let Some(state) = result.get("state").and_then(|v| v.as_str()) {
-                                return Some(state);
-                            }
-                        }
-                    }
-                }
-                
-                // Recursively search
-                if let Some(obj) = ctx.as_object() {
-                    for value in obj.values() {
-                        if let Some(state) = find_start_auth_state(value) {
-                            return Some(state);
-                        }
-                    }
-                }
-                None
-            }
-            
-            find_start_auth_state(ctx)
-        }
-        
-        let expected = find_expected_state(ctx);
-        
-        println!("State validation: returned={:?}, expected={:?}", returned, expected);
-        
-        // Validate the state only if an explicit expected_state is found
-        if let (Some(r), Some(e)) = (returned, expected) {
+        let returned_state = ctx.pointer("/vars/meta/oauth/state").and_then(|v| v.as_str());
+        let expected_state = ctx
+            .pointer("/vars/meta/oauth/expected_state")
+            .and_then(|v| v.as_str());
+
+        if let (Some(r), Some(e)) = (returned_state, expected_state) {
             if r != e {
-                println!("State mismatch: returned={}, expected={}", r, e);
-                return Err(anyhow::anyhow!("state mismatch: returned={}, expected={}", r, e));
+                return Err(anyhow::anyhow!(
+                    "state mismatch: returned={}, expected={}",
+                    r, e
+                ));
             }
-            println!("State validation passed");
-        } else {
-            println!("Skipping state validation (no expected state found)");
         }
 
-        // Prepare the output JSON
         let mut out = json!({ "code": code });
-        if let Some(v) = ctx
-            .get("expected_pkce")
-            .and_then(|o| o.get("code_verifier"))
+        if let Some(verifier) = ctx
+            .pointer("/vars/meta/oauth/code_verifier")
             .and_then(|v| v.as_str())
         {
-            out["code_verifier"] = Value::String(v.to_string());
+            out["code_verifier"] = Value::String(verifier.to_string());
         }
-        println!("OAuth2AwaitCallbackHandler returning: {}", serde_json::to_string(&out).unwrap_or_else(|_| "invalid json".to_string()));
         Ok(out)
     }
 }

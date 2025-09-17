@@ -15,6 +15,8 @@ fn main() {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 启动 AuthFlow 服务器...");
+    // Ensure shared migrations are applied before serving
+    authflow::bootstrap::run_shared_migrations().await?;
     
     let app = create_router_async().await;
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));

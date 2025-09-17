@@ -4,6 +4,7 @@ pub mod api;
 pub mod actions;
 pub mod callback;
 pub mod dsl;
+pub mod bootstrap;
 
 #[cfg(feature = "server")]
 pub mod server;

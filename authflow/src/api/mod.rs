@@ -91,6 +91,21 @@ pub fn resume_obtain(
             json!({"code": args.code, "state": args.state, "returned_state": args.state}),
         );
     }
+    // Also mirror into vars.meta.oauth.* for canonical await_callback
+    {
+        let map = ctx.as_object_mut().unwrap();
+        let vars = map.entry("vars").or_insert_with(|| json!({}));
+        if let Value::Object(vars_map) = vars {
+            let meta = vars_map.entry("meta").or_insert_with(|| json!({}));
+            if let Value::Object(meta_map) = meta {
+                let oauth = meta_map.entry("oauth").or_insert_with(|| json!({}));
+                if let Value::Object(oauth_map) = oauth {
+                    oauth_map.insert("code".to_string(), Value::String(args.code.clone()));
+                    oauth_map.insert("state".to_string(), Value::String(args.state.clone()));
+                }
+            }
+        }
+    }
 
     // Continue execution from next_state until end
     let outcome = run_until_pause_or_end(dsl, &cp.paused_state, ctx, handler, 100)?;
@@ -154,18 +169,15 @@ states:
       scope: "read"
       usePKCE: true
     assign:
-      auth_state: "{{% result.state %}}"
-      auth_code_verifier: "{{% result.code_verifier %}}"
+      meta:
+        oauth:
+          expected_state: "{{% result.state %}}"
+          code_verifier: "{{% result.code_verifier %}}"
     next: "Await"
   Await:
     type: task
     resource: "oauth2.await_callback"
-    parameters:
-      state: "{{% input.state %}}"
-      expected_state: "{{% $auth_state %}}"
-      code: "{{% input.code %}}"
-      expected_pkce:
-        code_verifier: "{{% $auth_code_verifier %}}"
+    parameters: {{}}
     next: "Exchange"
   Exchange:
     type: task
@@ -179,8 +191,8 @@ states:
         grant_type: "authorization_code"
         client_id: "cid"
         redirect_uri: "https://app/cb"
-        code: "{{% vars.cb.code %}}"
-        code_verifier: "{{% vars.cb.code_verifier %}}"
+        code: "{{% states.Await.result.code %}}"
+        code_verifier: "{{% states.Await.result.code_verifier %}}"
     output: "{{% result.body.access_token %}}"
     end: true
 "#,

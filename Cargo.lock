@@ -392,7 +392,6 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 name = "authflow"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
  "anyhow",
  "async-trait",
  "aws-credential-types",
@@ -410,13 +409,13 @@ dependencies = [
  "indexmap",
  "jsonwebtoken",
  "oauth2",
+ "openact-storage",
  "rand 0.8.5",
  "reqwest 0.12.23",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
- "sqlx",
  "stepflow-dsl",
  "tempfile",
  "thiserror 1.0.69",
@@ -2403,6 +2402,38 @@ dependencies = [
  "tracing-subscriber",
  "trn-rust",
  "urlencoding",
+]
+
+[[package]]
+name = "openact-registry"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "openact-storage",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "openact-storage"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio-test",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
