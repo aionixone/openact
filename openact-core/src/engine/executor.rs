@@ -31,7 +31,10 @@ async fn get_authflow_store() -> Arc<dyn ConnectionStore> {
     if let Some(s) = AUTHFLOW_STORE.get() {
         return s.clone();
     }
-    let db_url = std::env::var("OPENACT_AUTHFLOW_DB").unwrap_or_else(|_| "sqlite:./data/authflow.db".to_string());
+    // Prefer unified DB URL, then fallback to legacy authflow var, then default
+    let db_url = std::env::var("OPENACT_DB_URL")
+        .or_else(|_| std::env::var("OPENACT_AUTHFLOW_DB"))
+        .unwrap_or_else(|_| "sqlite:./data/openact.db".to_string());
     let enable_encryption = std::env::var("OPENACT_AUTHFLOW_ENCRYPTION").map(|v| v == "true" || v == "1").unwrap_or(false);
     let cfg = SqliteConfig { database_url: db_url, enable_encryption, ..Default::default() };
     let store = SqliteConnectionStore::new(cfg)
