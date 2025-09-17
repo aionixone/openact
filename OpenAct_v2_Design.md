@@ -42,26 +42,19 @@ OpenAct v2 是基于 AWS Step Functions HTTP Task 设计理念的完全重构版
 
 ### 核心改进建议
 
-### A. 输入映射与路径语言：统一到 JSONata
+### A. 输入映射简化（核心静态，动态上层）
 
-将 JsonPath 风格统一替换为 JSONata，提供更强大的表达式能力。
+- 核心引擎不再内置 JSONata/Mapping，所有动态映射由上层 Resolver 处理，向核心传入已解析的静态值。
+- MultiValue 采用简单的多字符串值表示。
 
 ```rust
-pub struct JsonataExpr(pub String);
-
-pub struct Mapping {
-    pub static_value: Option<serde_json::Value>,
-    pub expr: Option<JsonataExpr>, // 二选一
-}
-
 pub struct MultiValue {
-    pub values: Vec<Mapping>, // 支持 static 或 JSONata
+    pub values: Vec<String>,
 }
 
-pub struct OutputMapping {
-    pub ok_path: Option<JsonataExpr>,       // 判定"请求成功"的条件
-    pub error_path: Option<JsonataExpr>,    // 提取错误消息/码
-    pub output_pick: Option<JsonataExpr>,   // 产出最终返回体
+pub struct HttpParameter {
+    pub key: String,
+    pub value: String,
 }
 ```
 
@@ -76,11 +69,11 @@ pub struct HttpPolicy {
     pub multi_value_append_headers: Vec<String>, // 如 ["accept","cookie","set-cookie"]
 }
 
-// 更新后的 InvocationHttpParameters
+// 更新后的 InvocationHttpParameters（数组形式，便于兼容 AWS 配置）
 pub struct InvocationHttpParameters {
     pub body_parameters: Vec<HttpParameter>,
-    pub header_parameters: HashMap<String, MultiValue>,
-    pub query_string_parameters: HashMap<String, MultiValue>,
+    pub header_parameters: Vec<HttpParameter>,
+    pub query_string_parameters: Vec<HttpParameter>,
 }
 ```
 
@@ -175,13 +168,10 @@ pub struct ResponsePolicy {
 
 ### F. 分页/重试/错误分类的"高阶语义"
 
-内置分页和错误处理策略。
+内置分页和错误处理策略（分页提取表达式由上层 Resolver 负责，核心仅保留简单限制）。
 
 ```rust
 pub struct PaginationConfig {
-    pub next_page_expr: JsonataExpr,      // 从响应中提取"下一页 URL 或 pageToken"
-    pub stop_condition: Option<JsonataExpr>, // 判定是否停止
-    pub accum_expr: Option<JsonataExpr>,  // 结果合并策略
     pub max_pages: Option<u32>,
 }
 ```
@@ -215,22 +205,17 @@ pub struct Connection {
     pub trn: String,  // trn:openact:tenant1:connection/github@v1
     pub name: String,
     pub authorization_type: AuthorizationType,
-    pub auth_parameters: AuthParameters,  // InvocationHttpParameters 现在在 auth_parameters 内部
+    pub auth_parameters: AuthParameters,  // InvocationHttpParameters 在此内部
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-pub enum AuthorizationType {
-    ApiKey,
-    OAuth,
-    Basic,
-}
+pub enum AuthorizationType { ApiKey, OAuth, Basic }
 
 pub struct AuthParameters {
     pub api_key_auth_parameters: Option<ApiKeyAuthParameters>,
     pub oauth_parameters: Option<OAuthParameters>,
     pub basic_auth_parameters: Option<BasicAuthParameters>,
-    // HTTP 调用参数（在认证参数内部）
     pub invocation_http_parameters: Option<InvocationHttpParameters>,
 }
 
@@ -251,10 +236,7 @@ pub struct OAuthParameters {
     pub grant_type: OAuthGrantType,
 }
 
-pub enum OAuthGrantType {
-    ClientCredentials,
-    AuthorizationCode,
-}
+pub enum OAuthGrantType { ClientCredentials, AuthorizationCode }
 
 pub struct BasicAuthParameters {
     pub username: Credential,
@@ -263,110 +245,36 @@ pub struct BasicAuthParameters {
 
 pub struct InvocationHttpParameters {
     pub body_parameters: Vec<HttpParameter>,
-    pub header_parameters: HashMap<String, MultiValue>,
-    pub query_string_parameters: HashMap<String, MultiValue>,
+    pub header_parameters: Vec<HttpParameter>,
+    pub query_string_parameters: Vec<HttpParameter>,
 }
 
 pub struct HttpParameter {
     pub key: String,
-    pub value: Mapping,
-}
-
-// 数组格式的 HTTP 参数（用于配置导入/导出）
-pub struct ArrayInvocationHttpParameters {
-    pub body_parameters: Vec<KeyValueParameter>,
-    pub header_parameters: Vec<KeyValueParameter>, 
-    pub query_string_parameters: Vec<KeyValueParameter>,
-}
-
-pub struct KeyValueParameter {
-    pub key: String,
     pub value: String,
 }
 
-// 转换函数
-impl From<ArrayInvocationHttpParameters> for InvocationHttpParameters {
-    fn from(array_params: ArrayInvocationHttpParameters) -> Self {
-        // 将数组格式转换为我们的内部格式
-        // [{"key": "name", "value": "value"}] -> HashMap<String, MultiValue>
-        // 多个相同 key 的项会合并为 MultiValue
-    }
+pub struct ArrayInvocationHttpParameters {
+    pub body_parameters: Vec<KeyValueParameter>,
+    pub header_parameters: Vec<KeyValueParameter>,
+    pub query_string_parameters: Vec<KeyValueParameter>,
 }
 
-impl From<InvocationHttpParameters> for ArrayInvocationHttpParameters {
-    fn from(params: InvocationHttpParameters) -> Self {
-        // 将内部格式转换为数组格式用于导出
-        // HashMap<String, MultiValue> -> [{"key": "name", "value": "value"}]
-        // MultiValue 会展开为多个数组项
-    }
-}
-
-pub struct HttpPolicy {
-    pub denied_headers: Vec<String>,        // 默认：["host","content-length","transfer-encoding","expect","authorization"]
-    pub reserved_headers: Vec<String>,      // 由系统/Connection 注入，如 "authorization"
-    pub multi_value_append_headers: Vec<String>, // 如 ["accept","cookie","set-cookie"]
-    pub drop_forbidden_headers: bool,      // true=静默丢弃，false=报错
-}
-
-pub struct SecretRef {
-    pub key: String,     // 存储Key
-    pub version: String, // 版本
-}
-
-pub enum Credential {
-    InlineEncrypted(String), // 加密后的密文（兼容导入）
-    Secret(SecretRef),       // 指向 Secret Store
-}
-
-pub struct TransformConfig {
-    pub request_body_encoding: RequestBodyEncoding,
-    pub request_encoding_options: Option<RequestEncodingOptions>,
-}
-
-pub enum RequestBodyEncoding {
-    None,        // 默认 JSON 格式
-    UrlEncoded,  // URL 编码格式
-}
-
-pub struct RequestEncodingOptions {
-    pub array_format: ArrayFormat,
-}
-
-pub enum ArrayFormat {
-    Indices,   // array[0]=a&array[1]=b&array[2]=c&array[3]=d
-    Repeat,    // array=a&array=b&array=c&array=d
-    Commas,    // array=a,b,c,d
-    Brackets,  // array[]=a&array[]=b&array[]=c&array[]=d
-}
-
-pub struct RetryConfig {
-    pub max_attempts: u32,
-    pub backoff_rate: f64,
-    pub interval_seconds: u64,
-    pub retry_on: Vec<String>,  // HTTP 状态码
-    pub jitter_strategy: JitterStrategy,
-}
-
-pub enum JitterStrategy {
-    None,
-    Full,
-    Equal,
-}
+pub struct KeyValueParameter { pub key: String, pub value: String }
 ```
 
 #### 2. Task (任务)
-Task 定义具体的 API 调用参数，类似 AWS HTTP Task。
+Task 定义具体的 API 调用参数（核心为静态值；若需动态由上层 Resolver 预处理后传入）。
 
 ```rust
 pub struct HttpTask {
     pub trn: String,  // trn:openact:tenant1:task/list-repos@v1
-    pub api_endpoint: Mapping,                  // 支持静态字符串或 JSONata 生成
-    pub method: Method,                         // 如果需要动态，也可引入 Mapping<Method>
+    pub api_endpoint: String,
+    pub method: String,
     pub connection_trn: String,  // 引用 Connection 的 TRN
-    pub headers: Option<HashMap<String, MultiValue>>,
-    pub query_params: Option<HashMap<String, MultiValue>>,
-    pub request_body: Option<serde_json::Value>,  
-    pub output: Option<OutputMapping>,
+    pub headers: Option<HashMap<String, MultiValue>>,      // 多值：Vec<String>
+    pub query_params: Option<HashMap<String, MultiValue>>, // 多值：Vec<String>
+    pub request_body: Option<serde_json::Value>,
     pub transform: Option<TransformConfig>,
     pub retry: Option<RetryConfig>,
     pub timeouts: Option<TimeoutConfig>,
@@ -376,7 +284,7 @@ pub struct HttpTask {
     pub network: Option<NetworkConfig>,
     pub response_policy: Option<ResponsePolicy>,
     pub pagination: Option<PaginationConfig>,
-    pub http_policy: Option<HttpPolicy>,  // 可覆盖全局策略
+    pub http_policy: Option<HttpPolicy>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -395,15 +303,9 @@ TRN 格式:
 - trn:openact:tenant1:task/list-repos@v1
 ```
 
-## 统一数据模型与规则
+## 统一数据模型与规则（调整）
 
-### JSONata 统一约定
-
-所有可动态位置均支持 `Mapping`（`static_value` 或 `expr` 二选一）：
-- `api_endpoint`: 支持静态字符串或 JSONata 生成
-- `method`: 可选支持动态方法选择
-- `headers`/`query_params`: 支持 JSONata 表达式
-- `request_body`: 允许含 ".$" 的 JSON 结构
+- 核心不包含 JSONata/Mapping。所有动态计算（如从输入选择字段、拼接 URL、动态 Method/Headers）由上层 Resolver 完成，产出静态请求数据再交给核心执行。
 
 ### 大小写与覆盖规则
 
@@ -712,8 +614,8 @@ Task 定义具体的 HTTP 请求参数，类似 AWS Step Functions HTTP Task：
     "ApiEndpoint": "https://api.github.com/repos/owner/repo/issues",
     "Method": "POST",
     "RequestBody": {
-      "title.$": "$.issue_title",
-      "body.$": "$.issue_body",
+      "title": "example title",
+      "body": "example body",
       "labels": ["bug"]
     }
   }
@@ -930,7 +832,7 @@ POST /api/v1/connections
 POST /api/v1/tasks
 {
   "trn": "trn:openact:tenant1:task/list-repos@v1",
-  "api_endpoint": {"static_value": "https://api.github.com/user/repos"},
+  "api_endpoint": "https://api.github.com/user/repos",
   "method": "GET",
   "connection_trn": "trn:openact:tenant1:connection/github@v1"
 }
@@ -979,15 +881,15 @@ GET /api/v1/secrets/github_client_id
 }
 ```
 
-## 认证系统
+## 认证系统（类型修正）
 
 ### 认证类型
 
 #### 1. OAuth2
 ```rust
 pub struct OAuthParameters {
-    pub client_id: String,
-    pub client_secret: String,
+    pub client_id: Credential,
+    pub client_secret: Credential,
     pub token_url: String,
     pub scope: Option<String>,
     pub redirect_uri: Option<String>,
