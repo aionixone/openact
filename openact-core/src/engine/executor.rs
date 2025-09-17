@@ -5,10 +5,8 @@ use crate::config::AuthorizationType;
 use crate::config::{ConnectionConfig, TaskConfig};
 use crate::error::Result;
 use crate::trn::TrnManager;
-use bumpalo::Bump;
 use bytes::Bytes;
 use chrono::Utc;
-use jsonata_rs::JsonAta;
 use once_cell::sync::OnceCell;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method as ReqwestMethod;
@@ -94,7 +92,7 @@ impl TaskExecutor {
     }
 
     /// 根据 TRN 执行任务
-    pub async fn execute_by_trn(&self, task_trn: &str, input: Value) -> Result<ExecutionResult> {
+    pub async fn execute_by_trn(&self, task_trn: &str, _input: Value) -> Result<ExecutionResult> {
         let mut timing = ExecutionTiming::new(Utc::now());
 
         // 获取 Task 配置，如果不存在直接返回失败结果
@@ -145,7 +143,7 @@ impl TaskExecutor {
 
         // 执行任务
         let result = self
-            .execute_task_with_connection(task, connection, input)
+            .execute_task_with_connection(task, connection)
             .await;
 
         // 完成时间统计
@@ -166,22 +164,11 @@ impl TaskExecutor {
         &self,
         task: &TaskConfig,
         connection: &ConnectionConfig,
-        input: Value,
     ) -> Result<ExecutionResult> {
         // 1) 参数合并 (Connection > Task)
-        let mut merged = crate::merge::ParameterMerger::merge(connection, task)?;
+        let merged = crate::merge::ParameterMerger::merge(connection, task)?;
 
-        // 2) 求值 headers/query 中的 JSONata 表达式
-        crate::merge::ParameterMerger::apply_dynamic_values(&mut merged, &input)?;
-
-        // 3) 求值 api_endpoint / method（已经在 build_req_parts 中处理，这里不需要再处理）
-        // merged.api_endpoint 和 merged.method 现在是 Mapping 类型，会在构建请求时求值
-
-        // 4) 求值 request_body（递归对字符串值和以 ".$" 结尾的 key 求值）
-        if let Some(mut body) = merged.request_body.take() {
-            self.evaluate_json_in_place(&mut body, &input)?;
-            merged.request_body = Some(body);
-        }
+        // 动态求值已下沉到上层解析层，core 不再处理 input 表达式
 
         // 5) 构造并发送 HTTP 请求（带 Retry/Retry-After），映射超时
         let response_json = self.send_with_retry(task, connection, &merged).await?;
@@ -208,77 +195,7 @@ impl TaskExecutor {
 }
 
 impl TaskExecutor {
-    
-
-    /// 递归地在 JSON 中求值：
-    /// - 如果 key 以 ".$" 结尾，则对值（应为字符串表达式）求值，并将 key 去掉 ".$" 重命名
-    /// - 如果值是字符串且以 `$.` 开头，则将其作为表达式求值替换
-    fn evaluate_json_in_place(&self, node: &mut Value, input: &Value) -> Result<()> {
-        match node {
-            Value::Object(map) => {
-                // 收集需要重命名的键
-                let mut to_insert: Vec<(String, Value)> = Vec::new();
-                let mut to_remove: Vec<String> = Vec::new();
-
-                for (k, v) in map.iter_mut() {
-                    if k.ends_with(".$") {
-                        // 以 ".$" 结尾：值应为字符串表达式
-                        if let Value::String(expr) = v {
-                            let new_key = k.trim_end_matches(".$").to_string();
-                            let evaluated = self.eval_jsonata_to_value(expr, input)?;
-                            to_insert.push((new_key, evaluated));
-                            to_remove.push(k.clone());
-                        }
-                    } else {
-                        // 普通键：递归处理其值
-                        self.evaluate_json_in_place(v, input)?;
-                    }
-                }
-
-                // 应用重命名
-                for key in to_remove {
-                    map.remove(&key);
-                }
-                for (k, v) in to_insert {
-                    map.insert(k, v);
-                }
-                Ok(())
-            }
-            Value::Array(arr) => {
-                for item in arr.iter_mut() {
-                    self.evaluate_json_in_place(item, input)?;
-                }
-                Ok(())
-            }
-            Value::String(s) => {
-                if s.trim_start().starts_with("$.") || s.trim_start().starts_with("$") {
-                    let evaluated = self.eval_jsonata_to_value(s, input)?;
-                    *node = evaluated;
-                }
-                Ok(())
-            }
-            _ => Ok(()),
-        }
-    }
-
-    fn eval_jsonata_to_value(&self, expr: &str, input: &Value) -> Result<Value> {
-        // 将输入序列化为字符串
-        let data_str = serde_json::to_string(input).map_err(|e| {
-            crate::error::OpenActError::jsonata_expr(format!("input serialize error: {}", e))
-        })?;
-        let arena = Bump::new();
-        let jsonata = JsonAta::new(expr, &arena)
-            .map_err(|e| crate::error::OpenActError::jsonata_expr(format!("parse error: {}", e)))?;
-        let result = jsonata
-            .evaluate(Some(&data_str), None)
-            .map_err(|e| crate::error::OpenActError::jsonata_expr(format!("eval error: {}", e)))?;
-        // 将 jsonata_rs::Value 通过 serialize(false) 转回 serde_json::Value
-        let out = result.serialize(false);
-        let value = serde_json::from_str(&out).unwrap_or(Value::Null);
-        Ok(value)
-    }
-
-    
+    // JSON 动态求值逻辑已移除
 
     fn encode_urlencoded(json: &Value) -> String {
         // MVP: 仅支持平面对象与数组（采用 repeat 编码），嵌套对象以 path[key] 展开
@@ -460,35 +377,29 @@ impl TaskExecutor {
         connection: &ConnectionConfig,
         merged: &crate::merge::MergedParameters,
     ) -> Result<(String, ReqwestMethod, HeaderMap, Option<Bytes>)> {
-        // 评估 Method（支持 JSONata 表达式）
-        let method_str = self.evaluate_mapping(&merged.method, &serde_json::Value::Null)?;
-        let method = ReqwestMethod::from_bytes(method_str.as_bytes()).map_err(|e| {
+        // 使用静态 Method
+        let method = ReqwestMethod::from_bytes(merged.method.as_bytes()).map_err(|e| {
             crate::error::OpenActError::invalid_config(format!("invalid method: {}", e))
         })?;
         
-        // 评估 API Endpoint（支持 JSONata 表达式）
-        let api_endpoint_str = self.evaluate_mapping(&merged.api_endpoint, &serde_json::Value::Null)?;
-        let mut url = reqwest::Url::parse(&api_endpoint_str).map_err(|e| {
+        // 使用静态 API Endpoint
+        let mut url = reqwest::Url::parse(&merged.api_endpoint).map_err(|e| {
             crate::error::OpenActError::invalid_config(format!("invalid url: {}", e))
         })?;
         {
             let mut qp = url.query_pairs_mut();
             for (k, mv) in &merged.query_parameters {
-                for m in &mv.values {
-                    let value = self.evaluate_mapping(m, &serde_json::Value::Null)?;
-                    qp.append_pair(k, &value);
-                }
+                for v in &mv.values { qp.append_pair(k, v); }
             }
         }
 
         // Headers 收集（先从合并后的 headers 构建候选）
         let mut header_map = HeaderMap::new();
         for (k, mv) in &merged.headers {
-            for m in &mv.values {
-                let v = self.evaluate_mapping(m, &serde_json::Value::Null)?;
+            for v in &mv.values {
                 if let (Ok(name), Ok(value)) = (
                     HeaderName::from_bytes(k.as_bytes()),
-                    HeaderValue::from_str(&v),
+                    HeaderValue::from_str(v),
                 ) {
                     header_map.append(name, value);
                 }
@@ -715,142 +626,6 @@ impl TaskExecutor {
         }
     }
 
-    /// 构建超时配置
-    fn build_timeout_config(
-        &self,
-        task: &TaskConfig,
-        connection: &ConnectionConfig,
-    ) -> Result<crate::config::types::TimeoutConfig> {
-        // 优先级：Task > Connection > 默认值
-        let task_timeout = task.timeouts.as_ref();
-        let connection_timeout = connection.timeouts.as_ref();
-        
-        let connect_ms = task_timeout
-            .and_then(|t| Some(t.connect_ms))
-            .or_else(|| connection_timeout.and_then(|t| Some(t.connect_ms)))
-            .unwrap_or(5000); // 默认 5s
-            
-        let read_ms = task_timeout
-            .and_then(|t| Some(t.read_ms))
-            .or_else(|| connection_timeout.and_then(|t| Some(t.read_ms)))
-            .unwrap_or(30000); // 默认 30s
-            
-        let total_ms = task_timeout
-            .and_then(|t| Some(t.total_ms))
-            .or_else(|| connection_timeout.and_then(|t| Some(t.total_ms)))
-            .or_else(|| task.timeout_seconds.map(|s| s * 1000))
-            .unwrap_or(60000); // 默认 60s
-            
-        Ok(crate::config::types::TimeoutConfig {
-            connect_ms,
-            read_ms,
-            total_ms,
-        })
-    }
-
-    /// 构建 HTTP 客户端
-    
-
-    /// 构建带网络配置的 HTTP 客户端
-    fn build_http_client_with_network(
-        &self,
-        timeout_config: &crate::config::types::TimeoutConfig,
-        network_config: Option<&crate::config::types::NetworkConfig>,
-    ) -> Result<reqwest::Client> {
-        let mut builder = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_millis(timeout_config.connect_ms))
-            .timeout(std::time::Duration::from_millis(timeout_config.total_ms));
-
-        // 应用网络配置
-        if let Some(network) = network_config {
-            // 代理配置
-            if let Some(proxy_url) = &network.proxy_url {
-                let proxy = reqwest::Proxy::all(proxy_url)
-                    .map_err(|e| crate::error::OpenActError::network(format!("invalid proxy URL: {}", e)))?;
-                builder = builder.proxy(proxy);
-            }
-
-            // TLS 配置
-            if let Some(tls) = &network.tls {
-                builder = self.apply_tls_config(builder, tls)?;
-            }
-        }
-
-        builder
-            .build()
-            .map_err(|e| crate::error::OpenActError::network(format!("build http client: {}", e)))
-    }
-
-    /// 应用 TLS 配置到 ClientBuilder
-    fn apply_tls_config(
-        &self,
-        mut builder: reqwest::ClientBuilder,
-        tls_config: &crate::config::types::TlsConfig,
-    ) -> Result<reqwest::ClientBuilder> {
-        // 证书验证设置
-        if !tls_config.verify_peer {
-            builder = builder.danger_accept_invalid_certs(true);
-        }
-
-        // 自定义 CA 证书
-        if let Some(ca_pem) = &tls_config.ca_pem {
-            let cert = reqwest::Certificate::from_pem(ca_pem)
-                .map_err(|e| crate::error::OpenActError::network(format!("invalid CA certificate: {}", e)))?;
-            builder = builder.add_root_certificate(cert);
-        }
-
-        // mTLS（客户端证书）
-        if let (Some(cert_pem), Some(key_pem)) = (&tls_config.client_cert_pem, &tls_config.client_key_pem) {
-            let identity = reqwest::Identity::from_pem(&[cert_pem.as_slice(), key_pem.as_slice()].concat())
-                .map_err(|e| crate::error::OpenActError::network(format!("invalid client certificate: {}", e)))?;
-            builder = builder.identity(identity);
-        }
-
-        // 注意：reqwest 不直接支持 server_name（SNI）设置
-        // 这通常由底层 TLS 库自动处理，基于请求的 Host header
-
-        Ok(builder)
-    }
-
-    /// 评估 Mapping（静态值或 JSONata 表达式）
-    fn evaluate_mapping(
-        &self,
-        mapping: &crate::config::types::Mapping,
-        input: &serde_json::Value,
-    ) -> Result<String> {
-        match mapping {
-            crate::config::types::Mapping::Static(value) => {
-                // 静态值直接转换为字符串
-                match value {
-                    serde_json::Value::String(s) => Ok(s.clone()),
-                    _ => Ok(value.to_string()),
-                }
-            }
-            crate::config::types::Mapping::Dynamic { expr } => {
-                // JSONata 表达式求值
-                self.evaluate_jsonata_expression(expr, input)
-            }
-        }
-    }
-
-    /// 评估 JSONata 表达式
-    fn evaluate_jsonata_expression(
-        &self,
-        expr: &crate::config::types::JsonataExpr,
-        input: &serde_json::Value,
-    ) -> Result<String> {
-        // 使用 jsonata-rs 库进行表达式求值
-        let bump = Bump::new();
-        // 将输入 JSON 序列化为字符串，交给 jsonata-rs evaluate 接口
-        let input_str = input.to_string();
-        let result = JsonAta::new(&expr.0, &bump)
-            .map_err(|e| crate::error::OpenActError::JSONataExpr(format!("JSONata parse error: {}", e)))?
-            .evaluate(Some(&input_str), None)
-            .map_err(|e| crate::error::OpenActError::JSONataExpr(format!("JSONata eval error: {}", e)))?;
-
-        Ok(result.to_string())
-    }
-
     /// 获取新的 OAuth token（client_credentials）
     async fn obtain_oauth_token(&self, connection: &ConnectionConfig) -> Result<String> {
         if let Some(oauth_params) = &connection.auth_parameters.o_auth_parameters {
@@ -914,6 +689,100 @@ impl TaskExecutor {
         } else {
             Err(crate::error::OpenActError::auth("Missing OAuth parameters"))
         }
+    }
+
+    /// 构建超时配置
+    fn build_timeout_config(
+        &self,
+        task: &TaskConfig,
+        connection: &ConnectionConfig,
+    ) -> Result<crate::config::types::TimeoutConfig> {
+        // 优先级：Task > Connection > 默认值
+        let task_timeout = task.timeouts.as_ref();
+        let connection_timeout = connection.timeouts.as_ref();
+        
+        let connect_ms = task_timeout
+            .and_then(|t| Some(t.connect_ms))
+            .or_else(|| connection_timeout.and_then(|t| Some(t.connect_ms)))
+            .unwrap_or(5000); // 默认 5s
+            
+        let read_ms = task_timeout
+            .and_then(|t| Some(t.read_ms))
+            .or_else(|| connection_timeout.and_then(|t| Some(t.read_ms)))
+            .unwrap_or(30000); // 默认 30s
+            
+        let total_ms = task_timeout
+            .and_then(|t| Some(t.total_ms))
+            .or_else(|| connection_timeout.and_then(|t| Some(t.total_ms)))
+            .or_else(|| task.timeout_seconds.map(|s| s * 1000))
+            .unwrap_or(60000); // 默认 60s
+            
+        Ok(crate::config::types::TimeoutConfig {
+            connect_ms,
+            read_ms,
+            total_ms,
+        })
+    }
+
+    /// 构建带网络配置的 HTTP 客户端
+    fn build_http_client_with_network(
+        &self,
+        timeout_config: &crate::config::types::TimeoutConfig,
+        network_config: Option<&crate::config::types::NetworkConfig>,
+    ) -> Result<reqwest::Client> {
+        let mut builder = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_millis(timeout_config.connect_ms))
+            .timeout(std::time::Duration::from_millis(timeout_config.total_ms));
+
+        // 应用网络配置
+        if let Some(network) = network_config {
+            // 代理配置
+            if let Some(proxy_url) = &network.proxy_url {
+                let proxy = reqwest::Proxy::all(proxy_url)
+                    .map_err(|e| crate::error::OpenActError::network(format!("invalid proxy URL: {}", e)))?;
+                builder = builder.proxy(proxy);
+            }
+
+            // TLS 配置
+            if let Some(tls) = &network.tls {
+                builder = self.apply_tls_config(builder, tls)?;
+            }
+        }
+
+        builder
+            .build()
+            .map_err(|e| crate::error::OpenActError::network(format!("build http client: {}", e)))
+    }
+
+    /// 应用 TLS 配置到 ClientBuilder
+    fn apply_tls_config(
+        &self,
+        mut builder: reqwest::ClientBuilder,
+        tls_config: &crate::config::types::TlsConfig,
+    ) -> Result<reqwest::ClientBuilder> {
+        // 证书验证设置
+        if !tls_config.verify_peer {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+
+        // 自定义 CA 证书
+        if let Some(ca_pem) = &tls_config.ca_pem {
+            let cert = reqwest::Certificate::from_pem(ca_pem)
+                .map_err(|e| crate::error::OpenActError::network(format!("invalid CA certificate: {}", e)))?;
+            builder = builder.add_root_certificate(cert);
+        }
+
+        // mTLS（客户端证书）
+        if let (Some(cert_pem), Some(key_pem)) = (&tls_config.client_cert_pem, &tls_config.client_key_pem) {
+            let identity = reqwest::Identity::from_pem(&[cert_pem.as_slice(), key_pem.as_slice()].concat())
+                .map_err(|e| crate::error::OpenActError::network(format!("invalid client certificate: {}", e)))?;
+            builder = builder.identity(identity);
+        }
+
+        // 注意：reqwest 不直接支持 server_name（SNI）设置
+        // 这通常由底层 TLS 库自动处理，基于请求的 Host header
+
+        Ok(builder)
     }
 }
 
@@ -985,8 +854,8 @@ mod tests {
 
     fn create_test_task(connection_trn: &str) -> TaskConfig {
         let parameters = TaskParameters {
-            api_endpoint: crate::config::types::Mapping::static_value("https://api.test.com/data"),
-            method: crate::config::types::Mapping::static_value("GET"),
+            api_endpoint: "https://api.test.com/data".to_string(),
+            method: "GET".to_string(),
             headers: std::collections::HashMap::new(),
             query_parameters: std::collections::HashMap::new(),
             request_body: None,

@@ -65,21 +65,21 @@ pub struct TaskConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct TaskParameters {
-    /// API 端点 - 支持静态值或 JSONata 表达式
-    pub api_endpoint: crate::config::types::Mapping,
+    /// API 端点（静态字符串）
+    pub api_endpoint: String,
     
-    /// HTTP 方法 - 支持静态值或 JSONata 表达式
-    pub method: crate::config::types::Mapping,
+    /// HTTP 方法（静态字符串）
+    pub method: String,
     
-    /// Headers (Task 级别) - 支持多值和 JSONata 表达式
+    /// Headers (Task 级别) - 支持多值
     #[serde(default)]
     pub headers: HashMap<String, crate::config::types::MultiValue>,
     
-    /// Query Parameters (Task 级别) - 支持多值和 JSONata 表达式
+    /// Query Parameters (Task 级别) - 支持多值
     #[serde(default)]
     pub query_parameters: HashMap<String, crate::config::types::MultiValue>,
     
-    /// Request Body - 支持含 JSONata 表达式的 JSON 结构
+    /// Request Body - 静态 JSON 结构
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_body: Option<serde_json::Value>,
 }
@@ -127,12 +127,12 @@ impl TaskConfig {
             return Err(OpenActError::task_config("Only Http task type is supported"));
         }
 
-        // 验证 API 端点（允许动态表达式，此处仅检查非空）
+        // 验证 API 端点
         if self.parameters.api_endpoint.is_empty() {
             return Err(OpenActError::task_config("API endpoint is required"));
         }
 
-        // 验证 HTTP 方法（允许动态表达式，此处只校验静态场景）
+        // 验证 HTTP 方法
         match self.parameters.method.to_uppercase().as_str() {
             "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" => {}
             _ => return Err(OpenActError::task_config("Invalid HTTP method")),

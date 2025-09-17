@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use crate::config::{ConnectionConfig, TaskConfig};
-use crate::config::types::{InvocationHttpParameters, MultiValue, Mapping};
+use crate::config::types::{InvocationHttpParameters, MultiValue};
 use crate::error::{OpenActError, Result};
 
 /// 合并后的参数
@@ -17,11 +17,11 @@ pub struct MergedParameters {
     /// 最终的 Body Parameters
     pub body_parameters: HashMap<String, String>,
     
-    /// API 端点（支持 JSONata 表达式）
-    pub api_endpoint: crate::config::types::Mapping,
+    /// API 端点（静态）
+    pub api_endpoint: String,
     
-    /// HTTP 方法（支持 JSONata 表达式）
-    pub method: crate::config::types::Mapping,
+    /// HTTP 方法（静态）
+    pub method: String,
     
     /// Request Body（如果有）
     pub request_body: Option<serde_json::Value>,
@@ -90,22 +90,9 @@ impl ParameterMerger {
             merged.query_parameters.insert(param.key.clone(), MultiValue::single(param.value.clone()));
         }
 
-        // 合并 Body Parameters（将 Mapping 转换为字符串）
+        // 合并 Body Parameters（字符串）
         for param in &invocation_params.body_parameters {
-            let value_str = match &param.value {
-                Mapping::Static(json_val) => {
-                    if let Some(s) = json_val.as_str() {
-                        s.to_string()
-                    } else {
-                        json_val.to_string()
-                    }
-                }
-                Mapping::Dynamic { expr } => {
-                    // 动态值暂时转为表达式字符串，后续需要实际求值
-                    format!("{{{{ {} }}}}", expr.as_str())
-                }
-            };
-            merged.body_parameters.insert(param.key.clone(), value_str);
+            merged.body_parameters.insert(param.key.clone(), param.value.clone());
         }
 
         Ok(())
@@ -132,149 +119,7 @@ impl ParameterMerger {
         Ok(())
     }
 
-    /// 应用动态值替换 (JSONata 表达式处理)
-    /// 
-    /// TODO: 实现 JSONata 表达式处理
-    pub fn apply_dynamic_values(
-        merged: &mut MergedParameters,
-        input: &serde_json::Value,
-    ) -> Result<()> {
-        // 处理 Headers 中的动态值
-        for (_key, multi_value) in merged.headers.iter_mut() {
-            for mapping in multi_value.values.iter_mut() {
-                if let Some(processed) = Self::process_dynamic_mapping(mapping, input)? {
-                    *mapping = processed;
-                }
-            }
-        }
-
-        // 处理 Query Parameters 中的动态值
-        for (_key, multi_value) in merged.query_parameters.iter_mut() {
-            for mapping in multi_value.values.iter_mut() {
-                if let Some(processed) = Self::process_dynamic_mapping(mapping, input)? {
-                    *mapping = processed;
-                }
-            }
-        }
-
-        // 处理 Body Parameters 中的动态值
-        for (_key, value) in merged.body_parameters.iter_mut() {
-            if let Some(processed) = Self::process_dynamic_value(value, input)? {
-                *value = processed;
-            }
-        }
-
-        // 处理 API 端点中的动态值（现为 Mapping 类型，由执行器阶段统一求值）
-
-        // 处理 Request Body 中的动态值（JSON 结构）
-        if let Some(ref mut body) = merged.request_body {
-            Self::process_json_dynamic_values(body, input)?;
-        }
-
-        Ok(())
-    }
-
-    /// 处理单个动态映射
-    fn process_dynamic_mapping(
-        mapping: &Mapping,
-        input: &serde_json::Value,
-    ) -> Result<Option<Mapping>> {
-        // 统一用执行器中的 JSONata 求值风格：
-        // 1) Dynamic 表达式：直接用 jsonata 表达式求值
-        // 2) Static 字符串以 "$" 开头：按表达式求值；否则返回 None
-        match mapping {
-            Mapping::Dynamic { expr } => {
-                let evaluated = Self::eval_jsonata(expr.as_str(), input)?;
-                Ok(Some(Mapping::static_value(evaluated)))
-            }
-            Mapping::Static(v) => {
-                if let Some(s) = v.as_str() {
-                    if s.trim_start().starts_with("$") {
-                        let evaluated = Self::eval_jsonata(s, input)?;
-                        return Ok(Some(Mapping::static_value(evaluated)));
-                    }
-                }
-                Ok(None)
-            }
-        }
-    }
-
-    /// 处理单个动态值
-    fn process_dynamic_value(
-        value: &str,
-        input: &serde_json::Value,
-    ) -> Result<Option<String>> {
-        if value.trim_start().starts_with("$") {
-            let evaluated = Self::eval_jsonata(value, input)?;
-            return Ok(Some(evaluated.to_string()));
-        }
-        Ok(None)
-    }
-
-    /// 处理 JSON 结构中的动态值
-    fn process_json_dynamic_values(
-        json: &mut serde_json::Value,
-        input: &serde_json::Value,
-    ) -> Result<()> {
-        match json {
-            serde_json::Value::Object(map) => {
-                for (key, value) in map.iter_mut() {
-                    // 处理以 ".$" 结尾的键名（JSONata 表达式）
-                    if key.ends_with(".$") {
-                        if let serde_json::Value::String(expr) = value {
-                            let evaluated = Self::eval_jsonata(expr, input)?;
-                            *value = evaluated;
-                        }
-                    } else {
-                        // 递归处理嵌套对象
-                        Self::process_json_dynamic_values(value, input)?;
-                    }
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for item in arr.iter_mut() {
-                    Self::process_json_dynamic_values(item, input)?;
-                }
-            }
-            _ => {}
-        }
-        
-        Ok(())
-    }
-
-    /// 使用 jsonata-rs 进行表达式求值，输入为 serde_json::Value，输出 serde_json::Value
-    fn eval_jsonata(expr: &str, input: &serde_json::Value) -> Result<serde_json::Value> {
-        let arena = bumpalo::Bump::new();
-        // 将输入序列化为字符串以对接 jsonata-rs API
-        let input_str = serde_json::to_string(input)
-            .map_err(|e| OpenActError::jsonata_expr(format!("input serialize error: {}", e)))?;
-        let ja = jsonata_rs::JsonAta::new(expr, &arena)
-            .map_err(|e| OpenActError::jsonata_expr(format!("parse error: {}", e)))?;
-        let out = ja
-            .evaluate(Some(&input_str), None)
-            .map_err(|e| OpenActError::jsonata_expr(format!("eval error: {}", e)))?;
-        // jsonata_rs::Value -> json string -> serde_json::Value
-        let json_str = out.serialize(false);
-        let v = serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null);
-        Ok(v)
-    }
-
-    /// 简单的 JSON 路径值获取（临时实现）
-    fn get_json_path_value<'a>(json: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
-        let parts: Vec<&str> = path.split('.').collect();
-        let mut current = json;
-        
-        for part in parts {
-            match current {
-                serde_json::Value::Object(map) => {
-                    current = map.get(part)?;
-                }
-                _ => return None,
-            }
-        }
-        
-        Some(current)
-    }
+    // 动态求值已下沉到上层解析层；core 不再处理动态表达式
 }
 
 #[cfg(test)]
@@ -288,17 +133,17 @@ mod tests {
             header_parameters: vec![
                 crate::config::types::HttpParameter {
                     key: "User-Agent".to_string(),
-                    value: "OpenAct/1.0".to_string().into(),
+                    value: "OpenAct/1.0".to_string(),
                 },
                 crate::config::types::HttpParameter {
                     key: "Accept".to_string(),
-                    value: "application/json".to_string().into(),
+                    value: "application/json".to_string(),
                 },
             ],
             query_string_parameters: vec![
                 crate::config::types::HttpParameter {
                     key: "per_page".to_string(),
-                    value: "100".to_string().into(),
+                    value: "100".to_string(),
                 },
             ],
             body_parameters: vec![],
@@ -332,8 +177,8 @@ mod tests {
         query_params.insert("sort".to_string(), "updated".into());
 
         let parameters = TaskParameters {
-            api_endpoint: "https://api.test.com/data".to_string().into(),
-            method: "GET".to_string().into(),
+            api_endpoint: "https://api.test.com/data".to_string(),
+            method: "GET".to_string(),
             headers,
             query_parameters: query_params,
             request_body: None,
@@ -355,15 +200,15 @@ mod tests {
         let merged = ParameterMerger::merge(&connection, &task).unwrap();
 
         // 验证 Connection 参数覆盖了 Task 参数
-        assert_eq!(merged.headers.get("Accept").and_then(|mv| mv.first()).and_then(|m| m.as_static()).and_then(|v| v.as_str()), Some("application/json"));
-        assert_eq!(merged.headers.get("User-Agent").and_then(|mv| mv.first()).and_then(|m| m.as_static()).and_then(|v| v.as_str()), Some("OpenAct/1.0"));
-        assert_eq!(merged.headers.get("X-Custom").and_then(|mv| mv.first()).and_then(|m| m.as_static()).and_then(|v| v.as_str()), Some("task-header"));
+        assert_eq!(merged.headers.get("Accept").and_then(|mv| mv.first()).cloned(), Some("application/json".to_string()));
+        assert_eq!(merged.headers.get("User-Agent").and_then(|mv| mv.first()).cloned(), Some("OpenAct/1.0".to_string()));
+        assert_eq!(merged.headers.get("X-Custom").and_then(|mv| mv.first()).cloned(), Some("task-header".to_string()));
 
-        assert_eq!(merged.query_parameters.get("per_page").and_then(|mv| mv.first()).and_then(|m| m.as_static()).and_then(|v| v.as_str()), Some("100"));
-        assert_eq!(merged.query_parameters.get("sort").and_then(|mv| mv.first()).and_then(|m| m.as_static()).and_then(|v| v.as_str()), Some("updated"));
+        assert_eq!(merged.query_parameters.get("per_page").and_then(|mv| mv.first()).cloned(), Some("100".to_string()));
+        assert_eq!(merged.query_parameters.get("sort").and_then(|mv| mv.first()).cloned(), Some("updated".to_string()));
 
-        assert_eq!(merged.api_endpoint.as_string().unwrap_or_default(), "https://api.test.com/data");
-        assert_eq!(merged.method.as_string().unwrap_or_default(), "GET");
+        assert_eq!(merged.api_endpoint, "https://api.test.com/data");
+        assert_eq!(merged.method, "GET");
     }
 
     #[test]
@@ -380,7 +225,7 @@ mod tests {
         let inv = InvocationHttpParameters {
             header_parameters: vec![crate::config::types::HttpParameter {
                 key: "Cookie".to_string(),
-                value: "b=2".to_string().into(),
+                value: "b=2".to_string(),
             }],
             query_string_parameters: vec![],
             body_parameters: vec![],
@@ -407,14 +252,7 @@ mod tests {
 
         // 断言 Cookie 被追加为多值：应包含 a=1 和 b=2
         let mv = merged.headers.get("Cookie").expect("cookie header missing");
-        let values: Vec<String> = mv
-            .values
-            .iter()
-            .map(|m| match m {
-                crate::config::types::Mapping::Static(v) => v.as_str().unwrap_or(&v.to_string()).to_string(),
-                crate::config::types::Mapping::Dynamic { expr } => expr.as_str().to_string(),
-            })
-            .collect();
+        let values: Vec<String> = mv.values.clone();
         assert!(values.contains(&"a=1".to_string()));
         assert!(values.contains(&"b=2".to_string()));
         assert_eq!(values.len(), 2);
@@ -430,30 +268,7 @@ mod tests {
 
         // 测试无效的 API 端点
         let mut invalid_merged = merged;
-        invalid_merged.api_endpoint = "invalid-url".to_string().into();
+        invalid_merged.api_endpoint = "invalid-url".to_string();
         assert!(ParameterMerger::validate(&invalid_merged).is_err());
-    }
-
-    #[test]
-    fn test_dynamic_values() {
-        let connection = create_test_connection_with_params();
-        let mut task = create_test_task();
-        
-        // 添加动态值
-        task.parameters.headers.insert("X-User-ID".to_string(), "$.user.id".to_string().into());
-        
-        let mut merged = ParameterMerger::merge(&connection, &task).unwrap();
-        
-        let input = serde_json::json!({
-            "user": {
-                "id": "12345",
-                "name": "test_user"
-            }
-        });
-
-        ParameterMerger::apply_dynamic_values(&mut merged, &input).unwrap();
-        
-        // 验证动态值被正确替换
-        assert_eq!(merged.headers.get("X-User-ID").and_then(|mv| mv.first()).and_then(|m| m.as_static()).map(|v| v.to_string()), Some("\"12345\"".to_string()));
     }
 }

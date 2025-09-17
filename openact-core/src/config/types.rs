@@ -3,151 +3,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// JSONata 表达式封装
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct JsonataExpr(pub String);
-
-impl JsonataExpr {
-    pub fn new(expr: impl Into<String>) -> Self {
-        Self(expr.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl From<String> for JsonataExpr {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl From<&str> for JsonataExpr {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-/// 统一的值映射 - 支持静态值或 JSONata 表达式
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Mapping {
-    /// 静态值
-    Static(serde_json::Value),
-    /// JSONata 表达式
-    Dynamic { expr: JsonataExpr },
-}
-
-impl Mapping {
-    /// 创建静态值映射
-    pub fn static_value(value: impl Into<serde_json::Value>) -> Self {
-        Self::Static(value.into())
-    }
-
-    /// 创建动态表达式映射
-    pub fn dynamic(expr: impl Into<JsonataExpr>) -> Self {
-        Self::Dynamic { expr: expr.into() }
-    }
-
-    /// 检查是否为静态值
-    pub fn is_static(&self) -> bool {
-        matches!(self, Self::Static(_))
-    }
-
-    /// 检查是否为动态表达式
-    pub fn is_dynamic(&self) -> bool {
-        matches!(self, Self::Dynamic { .. })
-    }
-
-    /// 获取静态值（如果是）
-    pub fn as_static(&self) -> Option<&serde_json::Value> {
-        match self {
-            Self::Static(value) => Some(value),
-            _ => None,
-        }
-    }
-
-    /// 获取表达式（如果是）
-    pub fn as_expression(&self) -> Option<&JsonataExpr> {
-        match self {
-            Self::Dynamic { expr } => Some(expr),
-            _ => None,
-        }
-    }
-
-    /// 检查是否为空（静态空字符串或空表达式）
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Self::Static(value) => {
-                match value {
-                    serde_json::Value::String(s) => s.is_empty(),
-                    serde_json::Value::Null => true,
-                    _ => false,
-                }
-            }
-            Self::Dynamic { expr } => expr.is_empty(),
-        }
-    }
-
-    /// 获取静态字符串值（如果是）
-    pub fn as_string(&self) -> Option<&str> {
-        match self {
-            Self::Static(value) => {
-                match value {
-                    serde_json::Value::String(s) => Some(s),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    /// 检查静态字符串是否以指定前缀开头
-    pub fn starts_with(&self, prefix: &str) -> bool {
-        self.as_string().map_or(false, |s| s.starts_with(prefix))
-    }
-
-    /// 转换为大写（仅对静态字符串）
-    pub fn to_uppercase(&self) -> String {
-        match self {
-            Self::Static(value) => {
-                match value {
-                    serde_json::Value::String(s) => s.to_uppercase(),
-                    _ => value.to_string().to_uppercase(),
-                }
-            }
-            Self::Dynamic { expr } => expr.as_str().to_uppercase(),
-        }
-    }
-}
-
-impl From<serde_json::Value> for Mapping {
-    fn from(value: serde_json::Value) -> Self {
-        Self::Static(value)
-    }
-}
-
-impl From<String> for Mapping {
-    fn from(s: String) -> Self {
-        Self::Static(serde_json::Value::String(s))
-    }
-}
-
-impl From<&str> for Mapping {
-    fn from(s: &str) -> Self {
-        Self::Static(serde_json::Value::String(s.to_string()))
-    }
-}
-
 /// 多值支持 - 用于 Headers 和 Query Parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiValue {
-    pub values: Vec<Mapping>,
+    pub values: Vec<String>,
 }
 
 impl MultiValue {
@@ -157,13 +16,13 @@ impl MultiValue {
     }
 
     /// 创建单值
-    pub fn single(mapping: impl Into<Mapping>) -> Self {
-        Self { values: vec![mapping.into()] }
+    pub fn single(value: impl Into<String>) -> Self {
+        Self { values: vec![value.into()] }
     }
 
     /// 添加值
-    pub fn add(&mut self, mapping: impl Into<Mapping>) {
-        self.values.push(mapping.into());
+    pub fn add(&mut self, value: impl Into<String>) {
+        self.values.push(value.into());
     }
 
     /// 是否为空
@@ -172,12 +31,12 @@ impl MultiValue {
     }
 
     /// 获取第一个值（如果存在）
-    pub fn first(&self) -> Option<&Mapping> {
+    pub fn first(&self) -> Option<&String> {
         self.values.first()
     }
 
     /// 获取所有值
-    pub fn all(&self) -> &[Mapping] {
+    pub fn all(&self) -> &[String] {
         &self.values
     }
 }
@@ -189,45 +48,12 @@ impl Default for MultiValue {
     }
 }
 
-impl From<Mapping> for MultiValue {
-    fn from(mapping: Mapping) -> Self {
-        Self::single(mapping)
-    }
-}
-
-impl From<String> for MultiValue {
-    fn from(s: String) -> Self {
-        Self::single(Mapping::from(s))
-    }
-}
-
-impl From<&str> for MultiValue {
-    fn from(s: &str) -> Self {
-        Self::single(Mapping::from(s))
-    }
-}
-
-impl From<Vec<Mapping>> for MultiValue {
-    fn from(values: Vec<Mapping>) -> Self {
-        Self { values }
-    }
-}
+impl From<String> for MultiValue { fn from(s: String) -> Self { Self::single(s) } }
+impl From<&str> for MultiValue { fn from(s: &str) -> Self { Self::single(s.to_string()) } }
+impl From<Vec<String>> for MultiValue { fn from(values: Vec<String>) -> Self { Self { values } } }
 
 /// 输出映射配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OutputMapping {
-    /// 判定"请求成功"的条件
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ok_path: Option<JsonataExpr>,
-    
-    /// 提取错误消息/码
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_path: Option<JsonataExpr>,
-    
-    /// 产出最终返回体
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_pick: Option<JsonataExpr>,
-}
+// OutputMapping/JSONata 已下沉到上层解析层
 
 /// HTTP 策略配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -506,20 +332,9 @@ impl Default for ResponsePolicy {
     }
 }
 
-/// 分页配置
+/// 分页配置占位（动态表达式已下沉到上层）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaginationConfig {
-    /// 提取下一页指针的表达式
-    pub next_page_expr: JsonataExpr,
-    
-    /// 停止条件表达式
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop_condition: Option<JsonataExpr>,
-    
-    /// 结果合并表达式
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub accum_expr: Option<JsonataExpr>,
-    
     /// 最大页数限制
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_pages: Option<u32>,
@@ -765,7 +580,7 @@ pub struct InvocationHttpParameters {
 #[serde(rename_all = "PascalCase")]
 pub struct HttpParameter {
     pub key: String,
-    pub value: Mapping,
+    pub value: String,
 }
 
 /// 键值对参数（简单字符串，兼容 AWS 格式）
@@ -832,34 +647,20 @@ fn convert_kv_array_to_http_params(kv_params: Vec<KeyValueParameter>) -> Vec<Htt
         .into_iter()
         .map(|kv| HttpParameter {
             key: kv.key,
-            value: Mapping::static_value(kv.value),
+            value: kv.value,
         })
         .collect()
 }
 
 /// 转换工具函数：String HashMap -> MultiValue HashMap
 pub fn string_map_to_multivalue_map(map: HashMap<String, String>) -> HashMap<String, MultiValue> {
-    map.into_iter()
-        .map(|(k, v)| {
-            let mapping = if v.starts_with("$.") {
-                Mapping::dynamic(JsonataExpr::from(v.as_str()))
-            } else {
-                Mapping::from(serde_json::Value::String(v))
-            };
-            (k, MultiValue::single(mapping))
-        })
-        .collect()
+    map.into_iter().map(|(k, v)| (k, MultiValue::single(v))).collect()
 }
 
 /// 转换工具函数：MultiValue HashMap -> String HashMap（取第一个值）
 pub fn multivalue_map_to_string_map(map: HashMap<String, MultiValue>) -> HashMap<String, String> {
     map.into_iter()
-        .filter_map(|(k, mv)| {
-            mv.first()
-                .and_then(|mapping| mapping.as_static())
-                .and_then(|value| value.as_str())
-                .map(|s| (k, s.to_string()))
-        })
+        .filter_map(|(k, mv)| mv.first().map(|v| (k, v.clone())))
         .collect()
 }
 
@@ -927,17 +728,6 @@ impl Default for ArrayFormat {
 fn convert_http_params_to_kv_array(http_params: Vec<HttpParameter>) -> Vec<KeyValueParameter> {
     http_params
         .into_iter()
-        .filter_map(|param| {
-            // 只有静态值才能转换为 KeyValueParameter
-            if let Some(static_value) = param.value.as_static() {
-                if let Some(string_value) = static_value.as_str() {
-                    return Some(KeyValueParameter {
-                        key: param.key,
-                        value: string_value.to_string(),
-                    });
-                }
-            }
-            None
-        })
+        .map(|param| KeyValueParameter { key: param.key, value: param.value })
         .collect()
 }

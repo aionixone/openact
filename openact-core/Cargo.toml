@@ -39,9 +39,7 @@ trn-rust = { path = "../../trn-rust" }
 # AuthFlow 集成
 authflow = { path = "../authflow", features = ["sqlite"] }
 
-# JSONata 表达式
-jsonata-rs = { path = "../../jsonata-rs" }
-bumpalo = "3.0"
+# JSONata 已下沉到上层解析层
 
 # 多值 HTTP 参数
 indexmap = { version = "2.0", features = ["serde"] }
