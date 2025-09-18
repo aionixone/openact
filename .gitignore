@@ -16,9 +16,9 @@
 .env.*
 
 # Databases
-authflow/data/*.db
-authflow/data/*.sqlite
-authflow/data/*.sqlite3
+openact/data/*.db
+openact/data/*.sqlite
+openact/data/*.sqlite3
 
 # Node / JS (if any)
 node_modules/

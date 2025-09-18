@@ -1,4 +1,0 @@
-/target
-# Ignore local databases
-data/
-*.db
