@@ -93,49 +93,99 @@ impl TaskExecutor {
     pub async fn execute_by_trn(&self, task_trn: &str, _input: Value) -> Result<ExecutionResult> {
         let mut timing = ExecutionTiming::new(Utc::now());
 
-        // 获取 Task 配置，如果不存在直接返回失败结果
-        let task = match self.trn_manager.get_task(task_trn).await {
-            Ok(Some(task)) => task,
-            Ok(None) => {
-                timing.finish();
-                return Ok(ExecutionResult::failed(
-                    format!("Task not found: {}", task_trn),
-                    timing,
-                    None,
-                    None,
+        // 获取 Task 配置；如本地未注册则从 DB 加载
+        let mut loaded_task_opt: Option<TaskConfig> = None;
+        let task: &TaskConfig = if let Ok(Some(task)) = self.trn_manager.get_task(task_trn).await {
+            task
+        } else {
+            let reg = openact_registry::Registry::from_env().await
+                .map_err(|e| crate::error::OpenActError::invalid_config(format!("registry init: {}", e)))?;
+            if let Ok(Some(nt)) = reg.get_task(task_trn).await {
+                // 适配窄模型到 TaskConfig（本地变量，不注册）
+                let mut headers = std::collections::HashMap::new();
+                let mut query = std::collections::HashMap::new();
+                if let Some(hs) = nt.headers_json.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()) {
+                    if let Some(obj) = hs.as_object() {
+                        for (k, v) in obj {
+                            if let Some(arr) = v.as_array() {
+                                headers.insert(
+                                    k.clone(),
+                                    crate::config::types::MultiValue { values: arr.iter().map(|x| x.as_str().unwrap_or(&x.to_string()).to_string()).collect() }
+                                );
+                            }
+                        }
+                    }
+                }
+                if let Some(qs) = nt.query_params_json.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()) {
+                    if let Some(obj) = qs.as_object() {
+                        for (k, v) in obj {
+                            if let Some(arr) = v.as_array() {
+                                query.insert(
+                                    k.clone(),
+                                    crate::config::types::MultiValue { values: arr.iter().map(|x| x.as_str().unwrap_or(&x.to_string()).to_string()).collect() }
+                                );
+                            }
+                        }
+                    }
+                }
+                loaded_task_opt = Some(crate::config::task::TaskConfig::new(
+                    nt.trn.clone(),
+                    nt.trn.clone(),
+                    nt.connection_trn.clone(),
+                    crate::config::task::TaskParameters {
+                        api_endpoint: nt.api_endpoint.clone(),
+                        method: nt.method.clone(),
+                        headers,
+                        query_parameters: query,
+                        request_body: nt.request_body_json.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                    },
                 ));
-            }
-            Err(e) => {
+                loaded_task_opt.as_ref().unwrap()
+            } else {
                 timing.finish();
-                return Ok(ExecutionResult::failed(
-                    format!("Failed to get task: {}", e),
-                    timing,
-                    None,
-                    None,
-                ));
+                return Ok(ExecutionResult::failed(format!("Task not found: {}", task_trn), timing, None, None));
             }
         };
 
-        // 获取 Connection 配置，如果不存在直接返回失败结果
-        let connection = match self.trn_manager.get_connection(&task.resource).await {
-            Ok(Some(connection)) => connection,
-            Ok(None) => {
+        // 获取 Connection 配置；如本地未注册则从 DB 加载
+        let mut loaded_conn_opt: Option<ConnectionConfig> = None;
+        let connection: &ConnectionConfig = if let Ok(Some(connection)) = self.trn_manager.get_connection(&task.resource).await {
+            connection
+        } else {
+            let reg = openact_registry::Registry::from_env().await
+                .map_err(|e| crate::error::OpenActError::invalid_config(format!("registry init: {}", e)))?;
+            if let Ok(Some(nc)) = reg.get_connection(&task.resource).await {
+                let mut auth_params = crate::config::types::AuthParameters { api_key_auth_parameters: None, o_auth_parameters: None, basic_auth_parameters: None, invocation_http_parameters: None };
+                let authorization_type = match nc.auth_kind.to_ascii_uppercase().as_str() {
+                    "API_KEY" => {
+                        if let Some(sec) = nc.secrets_encrypted.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()) {
+                            if let Some(api) = sec.get("api_key").and_then(|v| v.as_object()) {
+                                auth_params.api_key_auth_parameters = Some(crate::config::types::ApiKeyAuthParameters { api_key_name: api.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(), api_key_value: crate::config::types::Credential::InlineEncrypted(api.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string()) });
+                            }
+                        }
+                        crate::config::types::AuthorizationType::ApiKey
+                    }
+                    "BEARER_STATIC" => crate::config::types::AuthorizationType::OAuth,
+                    _ => crate::config::types::AuthorizationType::OAuth,
+                };
+                if nc.default_headers_json.is_some() || nc.default_query_params_json.is_some() || nc.default_body_json.is_some() {
+                    let mut headers = Vec::new();
+                    let mut query = Vec::new();
+                    if let Some(hs) = nc.default_headers_json.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).and_then(|v| v.as_object().cloned()) {
+                        for (k, v) in hs { if let Some(arr) = v.as_array() { for vv in arr { headers.push(crate::config::types::HttpParameter { key: k.clone(), value: vv.as_str().unwrap_or(&vv.to_string()).to_string() }); } } }
+                    }
+                    if let Some(qs) = nc.default_query_params_json.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).and_then(|v| v.as_object().cloned()) {
+                        for (k, v) in qs { if let Some(arr) = v.as_array() { for vv in arr { query.push(crate::config::types::HttpParameter { key: k.clone(), value: vv.as_str().unwrap_or(&vv.to_string()).to_string() }); } } }
+                    }
+                    let body = nc.default_body_json.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).and_then(|v| v.as_object().cloned()).unwrap_or_default();
+                    let body_params = body.into_iter().map(|(k, v)| crate::config::types::HttpParameter { key: k, value: v.as_str().unwrap_or(&v.to_string()).to_string() }).collect();
+                    auth_params.invocation_http_parameters = Some(crate::config::types::InvocationHttpParameters { header_parameters: headers, query_string_parameters: query, body_parameters: body_params });
+                }
+                loaded_conn_opt = Some(crate::config::connection::ConnectionConfig::new(nc.trn.clone(), nc.trn.clone(), authorization_type, auth_params));
+                loaded_conn_opt.as_ref().unwrap()
+            } else {
                 timing.finish();
-                return Ok(ExecutionResult::failed(
-                    format!("Connection not found: {}", task.resource),
-                    timing,
-                    None,
-                    None,
-                ));
-            }
-            Err(e) => {
-                timing.finish();
-                return Ok(ExecutionResult::failed(
-                    format!("Failed to get connection: {}", e),
-                    timing,
-                    None,
-                    None,
-                ));
+                return Ok(ExecutionResult::failed(format!("Connection not found: {}", task.resource), timing, None, None));
             }
         };
 

@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "authflow",
     "openact-core", 
-    "openact-registry",
+    "openact-registry", "openact-service",
     "openact-storage"
 ]
 

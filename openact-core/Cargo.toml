@@ -38,6 +38,7 @@ trn-rust = { path = "../../trn-rust" }
 
 # AuthFlow 集成（不再需要 sqlite feature）
 authflow = { path = "../authflow" }
+openact-registry = { path = "../openact-registry" }
 
 # JSONata 已下沉到上层解析层
 

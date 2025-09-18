@@ -2387,6 +2387,7 @@ dependencies = [
  "indexmap",
  "oauth2",
  "once_cell",
+ "openact-registry",
  "rand 0.8.5",
  "regex",
  "reqwest 0.12.23",
@@ -2415,6 +2416,23 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "openact-service"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "oauth2",
+ "openact-core",
+ "openact-registry",
+ "openact-storage",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "urlencoding",
 ]
 
 [[package]]
