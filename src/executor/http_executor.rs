@@ -4,8 +4,10 @@
 
 use crate::models::{ConnectionConfig, TaskConfig, AuthorizationType};
 use crate::store::{ConnectionStore, MemoryConnectionStore};
-use crate::actions::{OAuth2ClientCredentialsHandler, EnsureFreshTokenHandler};
-use crate::engine::TaskHandler;
+#[cfg(feature = "workflow")]
+use crate::authflow::actions::{OAuth2ClientCredentialsHandler, EnsureFreshTokenHandler};
+#[cfg(feature = "workflow")]
+use crate::authflow::engine::TaskHandler;
 use super::auth_injector::create_auth_injector;
 use super::parameter_merger::ParameterMerger;
 

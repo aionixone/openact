@@ -32,7 +32,7 @@ use uuid::Uuid;
 #[cfg(feature = "server")]
 use crate::{
     actions::{DefaultRouter, ActionRouter},
-    dsl::openactDSL,
+    dsl::OpenactDsl,
     engine::{RunOutcome, run_until_pause_or_end, TaskHandler},
     store::{
         ConnectionStore, MemoryConnectionStore, MemoryRunStore, StoreBackend, StoreConfig,
@@ -81,7 +81,7 @@ pub struct WorkflowConfig {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
-    pub dsl: openactDSL,
+    pub dsl: OpenactDsl,
     pub status: WorkflowStatus,
     pub created_at: SystemTime,
     pub updated_at: SystemTime,
@@ -202,10 +202,7 @@ impl ServerState {
         } else {
             println!("[server] Using Memory backend (sqlite feature enabled but openact_STORE != 'sqlite')");
         }
-        #[cfg(not(feature = "sqlite"))]
-        {
-            println!("[server] Using Memory backend (sqlite feature not enabled)");
-        }
+        // Note: sqlite feature flag removed; fallback to memory if not configured
 
         let mut cfg = StoreConfig {
             backend,
@@ -492,7 +489,7 @@ async fn create_workflow(
 ) -> impl IntoResponse {
     // Normalize DSL (JSON layer transformation), then deserialize to strong type and validate
     let normalized_json = normalize_dsl_json(req.dsl);
-    let parsed: openactDSL = match serde_json::from_value(normalized_json) {
+    let parsed: OpenactDsl = match serde_json::from_value(normalized_json) {
         Ok(v) => v,
         Err(e) => {
             return (
