@@ -46,8 +46,6 @@ default = []
 vault = ["dep:vaultrs"]
 callback = ["dep:axum", "dep:tokio-util"]
 server = ["dep:axum", "dep:tokio-util", "dep:tower", "dep:tower-http"]
-# Aggregate feature for workflow-related modules
-workflow = ["server", "callback"]
 
 [dev-dependencies]
 httpmock = "0.7"

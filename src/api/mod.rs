@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use stepflow_dsl::WorkflowDSL;
 
-use crate::engine::{RunOutcome, TaskHandler, run_until_pause_or_end};
+use crate::authflow::engine::{RunOutcome, TaskHandler, run_until_pause_or_end};
 use crate::store::{Checkpoint, RunStore};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,9 +107,9 @@ pub fn resume_obtain(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actions::HttpTaskHandler;
-    use crate::actions::{OAuth2AuthorizeRedirectHandler, OAuth2AwaitCallbackHandler};
-    use crate::engine::TaskHandler;
+    use crate::authflow::actions::HttpTaskHandler;
+    use crate::authflow::actions::{OAuth2AuthorizeRedirectHandler, OAuth2AwaitCallbackHandler};
+    use crate::authflow::engine::TaskHandler;
     use crate::store::MemoryRunStore;
     use httpmock::prelude::*;
 

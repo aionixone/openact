@@ -3,10 +3,8 @@
 //! 处理直接HTTP调用：API Key、Basic Auth、OAuth2 Client Credentials
 
 use crate::models::{ConnectionConfig, TaskConfig, AuthorizationType};
-use crate::store::{ConnectionStore, MemoryConnectionStore};
-#[cfg(feature = "workflow")]
+use crate::store::MemoryConnectionStore;
 use crate::authflow::actions::{OAuth2ClientCredentialsHandler, EnsureFreshTokenHandler};
-#[cfg(feature = "workflow")]
 use crate::authflow::engine::TaskHandler;
 use super::auth_injector::create_auth_injector;
 use super::parameter_merger::ParameterMerger;
@@ -15,15 +13,11 @@ use anyhow::{Result, anyhow, Context};
 use reqwest::{Client, Response};
 use reqwest::header::{HeaderValue, AUTHORIZATION};
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 use serde_json::json;
-use tokio::sync::OnceCell;
 
 // 全局HTTP客户端
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
-
-// 全局ConnectionStore实例
-static CONNECTION_STORE: OnceCell<Arc<dyn ConnectionStore>> = OnceCell::const_new();
 
 /// HTTP执行器：处理直接HTTP调用
 pub struct HttpExecutor {
@@ -36,19 +30,6 @@ impl HttpExecutor {
         Self {
             client: Self::get_http_client(),
         }
-    }
-
-    /// 获取全局ConnectionStore实例
-    async fn get_connection_store() -> Arc<dyn ConnectionStore> {
-        if let Some(store) = CONNECTION_STORE.get() {
-            return store.clone();
-        }
-
-        // TODO: 这里应该从环境变量或配置中选择合适的ConnectionStore
-        // 临时使用MemoryConnectionStore
-        let store: Arc<dyn ConnectionStore> = Arc::new(MemoryConnectionStore::new());
-        let _ = CONNECTION_STORE.set(store.clone());
-        store
     }
 
     /// 获取共享的HTTP客户端
@@ -170,9 +151,6 @@ impl HttpExecutor {
             .map_err(|_| anyhow!("Invalid access token format"))?;
         headers.insert(AUTHORIZATION, header_value);
 
-        // TODO: 可选地缓存token到auth_connections表，用于后续的refresh
-        // 这需要expires_in信息和可能的refresh_token
-
         Ok(())
     }
 
@@ -189,7 +167,6 @@ impl HttpExecutor {
             .ok_or_else(|| anyhow!("OAuth2 parameters missing for connection: {}", connection.trn))?;
 
         // 临时使用MemoryConnectionStore，后续可以改为从配置选择
-        // TODO: 集成真正的数据库存储
         let store = MemoryConnectionStore::new();
         
         // 使用现有的EnsureFreshTokenHandler来处理token刷新
@@ -254,6 +231,7 @@ mod tests {
     use crate::models::{ApiKeyAuthParameters, BasicAuthParameters};
     use std::collections::HashMap;
 
+    #[allow(dead_code)]
     fn create_api_key_connection() -> ConnectionConfig {
         let mut connection = ConnectionConfig::new(
             "trn:connection:api-key-test".to_string(),
@@ -269,6 +247,7 @@ mod tests {
         connection
     }
 
+    #[allow(dead_code)]
     fn create_basic_auth_connection() -> ConnectionConfig {
         let mut connection = ConnectionConfig::new(
             "trn:connection:basic-test".to_string(),
@@ -284,6 +263,7 @@ mod tests {
         connection
     }
 
+    #[allow(dead_code)]
     fn create_test_task() -> TaskConfig {
         TaskConfig::new(
             "trn:task:test".to_string(),

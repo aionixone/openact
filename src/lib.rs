@@ -3,20 +3,20 @@ pub mod models;
 pub mod executor;
 
 // Workflow-related modules remain public (original paths)
-pub mod dsl;
-pub mod actions;
-pub mod engine;
-pub mod callback;
-#[cfg(feature = "server")]
-pub mod server;
+// Deprecated: moved under authflow
+// pub mod dsl;
+// pub mod actions;
+// pub mod engine;
+// pub mod callback;
+// #[cfg(feature = "server")]
+// pub mod server;
 
-// Direct path stays at top-level; workflow path is gated under `workflow`
-#[cfg(feature = "workflow")]
+// Workflow path is always available
 pub mod authflow;
 
 // Also expose API module used by callback/server
 pub mod api;
 
-// Keep run_flow at original path
-pub use engine::run_flow;
+// Keep run_flow via authflow
+pub use authflow::engine::run_flow;
 

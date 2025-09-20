@@ -1,5 +1,5 @@
-use openact::actions::DefaultRouter;
-use openact::engine::TaskHandler;
+use openact::authflow::actions::DefaultRouter;
+use openact::authflow::engine::TaskHandler;
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

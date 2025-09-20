@@ -1,4 +1,4 @@
-use openact::dsl::OpenactDsl;
+use openact::authflow::dsl::OpenactDsl;
 use std::fs;
 use std::path::Path;
 
