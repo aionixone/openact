@@ -1,25 +1,25 @@
 //! 认证注入器
-//! 
+//!
 //! 根据不同的认证类型注入相应的认证头和参数
 
 use crate::models::{AuthorizationType, ConnectionConfig};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use std::collections::HashMap;
 use thiserror::Error;
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 /// 认证注入错误
 #[derive(Error, Debug)]
 pub enum AuthInjectionError {
     #[error("Missing authentication parameters for {auth_type:?}")]
     MissingAuthParams { auth_type: AuthorizationType },
-    
+
     #[error("Invalid header name: {name}")]
     InvalidHeaderName { name: String },
-    
+
     #[error("Invalid header value: {value}")]
     InvalidHeaderValue { value: String },
-    
+
     #[error("OAuth2 token not available for connection: {connection_trn}")]
     OAuth2TokenNotAvailable { connection_trn: String },
 }
@@ -56,12 +56,12 @@ impl AuthInjector for ApiKeyInjector {
         // 根据API Key名称决定注入位置
         // 常见模式：
         // - "Authorization" -> Header: "Bearer {api_key}" 或 "ApiKey {api_key}"
-        // - "X-API-Key" -> Header: "{api_key}"  
+        // - "X-API-Key" -> Header: "{api_key}"
         // - "api_key" -> Query: "{api_key}"
-        
+
         let key_name = &api_key_params.api_key_name;
         let key_value = &api_key_params.api_key_value;
-        
+
         if key_name.eq_ignore_ascii_case("authorization") {
             // Authorization header with Bearer prefix
             let auth_value = format!("Bearer {}", key_value);
@@ -70,16 +70,22 @@ impl AuthInjector for ApiKeyInjector {
             headers.insert(AUTHORIZATION, header_value);
         } else if key_name.starts_with("X-") || key_name.contains("-") {
             // Custom header
-            let header_name = HeaderName::from_bytes(key_name.as_bytes())
-                .map_err(|_| AuthInjectionError::InvalidHeaderName { name: key_name.clone() })?;
-            let header_value = HeaderValue::from_str(key_value)
-                .map_err(|_| AuthInjectionError::InvalidHeaderValue { value: key_value.clone() })?;
+            let header_name = HeaderName::from_bytes(key_name.as_bytes()).map_err(|_| {
+                AuthInjectionError::InvalidHeaderName {
+                    name: key_name.clone(),
+                }
+            })?;
+            let header_value = HeaderValue::from_str(key_value).map_err(|_| {
+                AuthInjectionError::InvalidHeaderValue {
+                    value: key_value.clone(),
+                }
+            })?;
             headers.insert(header_name, header_value);
         } else {
             // Query parameter
             query_params.insert(key_name.clone(), key_value.clone());
         }
-        
+
         Ok(())
     }
 }
@@ -106,10 +112,10 @@ impl AuthInjector for BasicAuthInjector {
         let credentials = format!("{}:{}", basic_params.username, basic_params.password);
         let encoded = STANDARD.encode(credentials.as_bytes());
         let auth_value = format!("Basic {}", encoded);
-        
+
         let header_value = HeaderValue::from_str(&auth_value)
             .map_err(|_| AuthInjectionError::InvalidHeaderValue { value: auth_value })?;
-        
+
         headers.insert(AUTHORIZATION, header_value);
         Ok(())
     }
@@ -127,7 +133,7 @@ impl AuthInjector for OAuth2Injector {
     ) -> Result<(), AuthInjectionError> {
         // TODO: 从 AuthConnection 存储中获取有效的 access_token
         // 这里需要集成现有的 ConnectionStore 来获取 OAuth2 token
-        
+
         // 临时实现：返回错误，表示需要先获取token
         Err(AuthInjectionError::OAuth2TokenNotAvailable {
             connection_trn: connection.trn.clone(),

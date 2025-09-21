@@ -106,8 +106,7 @@ impl TaskHandler for ActionRouter {
                 ConnectionUpdateHandler { ctx: ctx_wrap }.execute(resource, state_name, ctx)
             }
             "ensure.fresh_token" => {
-                // Use MemoryConnectionStore explicitly until a dyn-friendly Ensure handler is provided
-                let handler = EnsureFreshTokenHandler::<crate::store::MemoryConnectionStore> { store: crate::store::MemoryConnectionStore::new() };
+                let handler = EnsureFreshTokenHandler { store: Arc::new(crate::store::MemoryConnectionStore::new()) };
                 handler.execute(resource, state_name, ctx)
             }
             _ => self.default_router.execute(resource, state_name, ctx),

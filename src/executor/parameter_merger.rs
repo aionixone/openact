@@ -45,6 +45,9 @@ impl ParameterMerger {
         Self::merge_connection_query_params(&mut merged.query_params, connection)?;
         Self::merge_connection_body(&mut merged.body, connection)?;
 
+        // 3. 应用 HttpPolicy（禁止头/保留头/追加多值）
+        Self::apply_http_policy(&mut merged.headers, connection, task)?;
+
         Ok(merged)
     }
 
@@ -144,12 +147,55 @@ impl ParameterMerger {
         }
         Ok(())
     }
+
+    fn apply_http_policy(headers: &mut HeaderMap, connection: &ConnectionConfig, task: &TaskConfig) -> Result<()> {
+        // 选择策略：task优先于connection；若都无则默认
+        let policy = task.http_policy.as_ref().or(connection.http_policy.as_ref()).cloned().unwrap_or_default();
+
+        // 1) 删除禁止头
+        for key in policy.denied_headers.iter() {
+            if let Ok(name) = HeaderName::from_bytes(key.as_bytes()) {
+                headers.remove(name);
+            }
+        }
+
+        // 2) 保留头名单：若 task 显式提供了保留头，则以 task 的值为准，覆盖 ConnectionWins 结果
+        if let Some(task_headers) = &task.headers {
+            for rkey in policy.reserved_headers.iter() {
+                let rkey_lc = rkey.to_lowercase();
+                if let Some(task_vals) = task_headers.get(&rkey_lc).or_else(|| task_headers.get(rkey)) {
+                    if let Ok(name) = HeaderName::from_bytes(rkey_lc.as_bytes()) {
+                        let combined = if task_vals.len() == 1 { task_vals[0].clone() } else { task_vals.join(", ") };
+                        if let Ok(val) = HeaderValue::from_str(&combined) {
+                            headers.insert(name, val);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3) 多值追加头：如果头存在多个值，合并为逗号分隔
+        for key in policy.multi_value_append_headers.iter() {
+            if let Ok(name) = HeaderName::from_bytes(key.as_bytes()) {
+                if let Some(val) = headers.get(&name) {
+                    let s = val.to_str().unwrap_or("");
+                    // 标准化：用逗号分隔；去重简单略过
+                    let joined = s.split(',').map(|v| v.trim()).collect::<Vec<_>>().join(", ");
+                    if let Ok(new_val) = HeaderValue::from_str(&joined) {
+                        headers.insert(name.clone(), new_val);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AuthorizationType, InvocationHttpParameters, HttpParameter};
+    use crate::models::{AuthorizationType, InvocationHttpParameters, HttpParameter, HttpPolicy};
 
     fn create_test_connection() -> ConnectionConfig {
         let mut connection = ConnectionConfig::new(
@@ -201,7 +247,8 @@ mod tests {
         
         let mut headers = HashMap::new();
         headers.insert("Content-Type".to_string(), vec!["application/json".to_string()]);
-        headers.insert("Accept".to_string(), vec!["application/json".to_string()]);
+        headers.insert("Accept".to_string(), vec!["application/json".to_string(), "text/plain".to_string()]);
+        headers.insert("host".to_string(), vec!["example.com".to_string()]);
         task.headers = Some(headers);
         
         let mut query_params = HashMap::new();
@@ -213,6 +260,8 @@ mod tests {
             "existing": "value"
         }));
         
+        // Attach default policy (denies host; multi-append includes accept)
+        task.http_policy = Some(HttpPolicy::default());
         task
     }
 
@@ -228,14 +277,16 @@ mod tests {
             merged.headers.get("Content-Type").unwrap().to_str().unwrap(),
             "application/json; charset=utf-8" // Connection的值
         );
-        assert_eq!(
-            merged.headers.get("Accept").unwrap().to_str().unwrap(),
-            "application/json" // Task的值（没有冲突）
-        );
+        // Multi-value append normalization: task provided two values → comma joined
+        let accept = merged.headers.get("Accept").unwrap().to_str().unwrap();
+        assert!(accept.contains("application/json"));
+        assert!(accept.contains("text/plain"));
         assert_eq!(
             merged.headers.get("X-API-Version").unwrap().to_str().unwrap(),
             "v2" // Connection的值
         );
+        // Denied headers removed
+        assert!(merged.headers.get("host").is_none());
         
         // 验证query参数：Connection覆盖Task
         assert_eq!(merged.query_params.get("limit").unwrap(), "100"); // Connection的值

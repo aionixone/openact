@@ -3,15 +3,16 @@ use chrono::{Duration, Utc};
 use serde_json::{Value, json};
 
 use crate::authflow::engine::TaskHandler;
-use crate::store::{ConnectionStore, MemoryConnectionStore};
+use std::sync::Arc;
+use crate::store::ConnectionStore;
 use crate::authflow::actions;
 
-#[derive(Clone, Default)]
-pub struct EnsureFreshTokenHandler<S: ConnectionStore = MemoryConnectionStore> {
-    pub store: S,
+#[derive(Clone)]
+pub struct EnsureFreshTokenHandler {
+    pub store: Arc<dyn ConnectionStore>,
 }
 
-impl<S: ConnectionStore> TaskHandler for EnsureFreshTokenHandler<S> {
+impl TaskHandler for EnsureFreshTokenHandler {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
         // ctx: { connection_ref, tokenUrl, clientId, clientSecret, skewSeconds? }
         let cref = ctx

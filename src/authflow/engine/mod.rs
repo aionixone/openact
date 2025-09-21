@@ -1215,7 +1215,7 @@ states:
 
     #[test]
     fn ensure_auto_refresh_before_inject() {
-        use crate::store::{ConnectionStore, MemoryConnectionStore};
+        use crate::store::MemoryConnectionStore;
         let server = MockServer::start();
         let m_token = server.mock(|when, then| {
             when.method(POST).path("/token");
@@ -1231,7 +1231,7 @@ states:
 
         #[derive(Clone)]
         struct Router {
-            store: MemoryConnectionStore,
+            store: std::sync::Arc<dyn crate::store::ConnectionStore>,
         }
         impl TaskHandler for Router {
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
@@ -1251,7 +1251,7 @@ states:
             }
         }
 
-        let store = MemoryConnectionStore::default();
+        let store = std::sync::Arc::new(MemoryConnectionStore::default()) as std::sync::Arc<dyn crate::store::ConnectionStore>;
         // expired token
         let mut conn2 = crate::models::AuthConnection::new("tenant2", "prov", "user2", "old").unwrap();
         conn2.update_refresh_token(Some("rt2".to_string()));

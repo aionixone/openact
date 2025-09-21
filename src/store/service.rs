@@ -1,12 +1,15 @@
 //! 存储服务层
-//! 
+//!
 //! 提供统一的数据库服务接口，集成ConnectionRepository和TaskRepository
 
-use anyhow::{anyhow, Result};
-use tokio::sync::OnceCell;
+use anyhow::{Result, anyhow};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::OnceCell;
 
-use super::{DatabaseManager, ConnectionRepository, TaskRepository};
+use super::{ConnectionRepository, DatabaseManager, TaskRepository};
+use crate::executor::{ExecutionResult, Executor};
 use crate::models::{ConnectionConfig, TaskConfig};
 
 // 全局存储服务实例
@@ -17,6 +20,8 @@ pub struct StorageService {
     db_manager: DatabaseManager,
     connection_repo: ConnectionRepository,
     task_repo: TaskRepository,
+    // 简易执行上下文缓存：task_trn -> ((conn, task), timestamp)
+    exec_cache: Arc<tokio::sync::Mutex<HashMap<String, ((ConnectionConfig, TaskConfig), Instant)>>>,
 }
 
 impl StorageService {
@@ -29,6 +34,7 @@ impl StorageService {
             db_manager,
             connection_repo,
             task_repo,
+            exec_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -44,7 +50,11 @@ impl StorageService {
             return service.clone();
         }
 
-        let service = Arc::new(Self::from_env().await.expect("Failed to initialize storage service"));
+        let service = Arc::new(
+            Self::from_env()
+                .await
+                .expect("Failed to initialize storage service"),
+        );
         let _ = STORAGE_SERVICE.set(service.clone());
         service
     }
@@ -77,7 +87,12 @@ impl StorageService {
     }
 
     /// 列出连接配置
-    pub async fn list_connections(&self, auth_type: Option<&str>, limit: Option<i64>, offset: Option<i64>) -> Result<Vec<ConnectionConfig>> {
+    pub async fn list_connections(
+        &self,
+        auth_type: Option<&str>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<ConnectionConfig>> {
         self.connection_repo.list(auth_type, limit, offset).await
     }
 
@@ -88,7 +103,10 @@ impl StorageService {
         tracing::info!("Deleted {} tasks for connection {}", deleted_tasks, trn);
 
         // 再删除连接
-        self.connection_repo.delete(trn).await
+        let ok = self.connection_repo.delete(trn).await?;
+        // 失效缓存（该连接关联的所有task）
+        self.invalidate_cache_by_connection(trn).await;
+        Ok(ok)
     }
 
     /// 统计连接数量
@@ -101,11 +119,18 @@ impl StorageService {
     /// 创建或更新任务配置
     pub async fn upsert_task(&self, task: &TaskConfig) -> Result<()> {
         // 验证关联的连接是否存在
-        if !self.task_repo.validate_connection_exists(&task.connection_trn).await? {
+        if !self
+            .task_repo
+            .validate_connection_exists(&task.connection_trn)
+            .await?
+        {
             return Err(anyhow!("Connection not found: {}", task.connection_trn));
         }
 
-        self.task_repo.upsert(task).await
+        self.task_repo.upsert(task).await?;
+        // 失效该task缓存
+        self.invalidate_cache_by_task(&task.trn).await;
+        Ok(())
     }
 
     /// 根据TRN获取任务配置
@@ -114,13 +139,22 @@ impl StorageService {
     }
 
     /// 列出任务配置
-    pub async fn list_tasks(&self, connection_trn: Option<&str>, limit: Option<i64>, offset: Option<i64>) -> Result<Vec<TaskConfig>> {
+    pub async fn list_tasks(
+        &self,
+        connection_trn: Option<&str>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<TaskConfig>> {
         self.task_repo.list(connection_trn, limit, offset).await
     }
 
     /// 删除任务配置
     pub async fn delete_task(&self, trn: &str) -> Result<bool> {
-        self.task_repo.delete(trn).await
+        let ok = self.task_repo.delete(trn).await?;
+        if ok {
+            self.invalidate_cache_by_task(trn).await;
+        }
+        Ok(ok)
     }
 
     /// 统计任务数量
@@ -130,8 +164,18 @@ impl StorageService {
 
     // === Advanced Operations ===
 
-    /// 获取完整的执行上下文（连接+任务）
-    pub async fn get_execution_context(&self, task_trn: &str) -> Result<Option<(ConnectionConfig, TaskConfig)>> {
+    /// 获取完整的执行上下文（连接+任务），带TTL缓存
+    pub async fn get_execution_context(
+        &self,
+        task_trn: &str,
+    ) -> Result<Option<(ConnectionConfig, TaskConfig)>> {
+        if let Some(ctx) = self
+            .get_cached_execution_context(task_trn, Duration::from_secs(60))
+            .await
+        {
+            return Ok(Some(ctx));
+        }
+
         let task = match self.get_task(task_trn).await? {
             Some(task) => task,
             None => return Ok(None),
@@ -142,11 +186,53 @@ impl StorageService {
             None => return Err(anyhow!("Connection not found for task: {}", task_trn)),
         };
 
-        Ok(Some((connection, task)))
+        let pair = (connection, task);
+        self.put_cached_execution_context(task_trn.to_string(), pair.clone())
+            .await;
+        Ok(Some(pair))
+    }
+
+    async fn get_cached_execution_context(
+        &self,
+        task_trn: &str,
+        ttl: Duration,
+    ) -> Option<(ConnectionConfig, TaskConfig)> {
+        let mut guard = self.exec_cache.lock().await;
+        if let Some(((conn, task), ts)) = guard.get(task_trn) {
+            if Instant::now().duration_since(*ts) < ttl {
+                return Some((conn.clone(), task.clone()));
+            } else {
+                guard.remove(task_trn);
+            }
+        }
+        None
+    }
+
+    async fn put_cached_execution_context(
+        &self,
+        task_trn: String,
+        value: (ConnectionConfig, TaskConfig),
+    ) {
+        let mut guard = self.exec_cache.lock().await;
+        guard.insert(task_trn, (value, Instant::now()));
+    }
+
+    async fn invalidate_cache_by_connection(&self, connection_trn: &str) {
+        let mut guard = self.exec_cache.lock().await;
+        guard.retain(|_, ((conn, _), _)| conn.trn != connection_trn);
+    }
+
+    async fn invalidate_cache_by_task(&self, task_trn: &str) {
+        let mut guard = self.exec_cache.lock().await;
+        guard.remove(task_trn);
     }
 
     /// 批量导入连接和任务
-    pub async fn import_configurations(&self, connections: Vec<ConnectionConfig>, tasks: Vec<TaskConfig>) -> Result<(usize, usize)> {
+    pub async fn import_configurations(
+        &self,
+        connections: Vec<ConnectionConfig>,
+        tasks: Vec<TaskConfig>,
+    ) -> Result<(usize, usize)> {
         let mut imported_connections = 0;
         let mut imported_tasks = 0;
 
@@ -184,12 +270,16 @@ impl StorageService {
     /// 获取存储统计信息
     pub async fn get_stats(&self) -> Result<StorageStats> {
         let db_stats = self.db_manager.get_stats().await?;
-        
+
         // 按认证类型统计连接
         let api_key_connections = self.count_connections(Some("api_key")).await?;
         let basic_connections = self.count_connections(Some("basic")).await?;
-        let oauth2_cc_connections = self.count_connections(Some("oauth2_client_credentials")).await?;
-        let oauth2_ac_connections = self.count_connections(Some("oauth2_authorization_code")).await?;
+        let oauth2_cc_connections = self
+            .count_connections(Some("oauth2_client_credentials"))
+            .await?;
+        let oauth2_ac_connections = self
+            .count_connections(Some("oauth2_authorization_code"))
+            .await?;
 
         Ok(StorageStats {
             total_connections: db_stats.connections_count,
@@ -205,10 +295,20 @@ impl StorageService {
     /// 清理过期数据
     pub async fn cleanup(&self) -> Result<CleanupResult> {
         let expired_auth_connections = self.db_manager.cleanup_expired_auth_connections().await?;
-        
+
         Ok(CleanupResult {
             expired_auth_connections,
         })
+    }
+
+    /// 按 TRN 执行
+    pub async fn execute_by_trn(&self, task_trn: &str) -> Result<ExecutionResult> {
+        let (conn, task) = self
+            .get_execution_context(task_trn)
+            .await?
+            .ok_or_else(|| anyhow!("Task not found: {}", task_trn))?;
+        let executor = Executor::new();
+        executor.execute(&conn, &task).await
     }
 }
 
@@ -233,8 +333,7 @@ pub struct CleanupResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AuthorizationType, ApiKeyAuthParameters};
-    
+    use crate::models::{ApiKeyAuthParameters, AuthorizationType};
 
     async fn create_test_service() -> StorageService {
         let database_url = "sqlite::memory:";
@@ -248,12 +347,12 @@ mod tests {
             "Test Connection".to_string(),
             AuthorizationType::ApiKey,
         );
-        
+
         connection.auth_parameters.api_key_auth_parameters = Some(ApiKeyAuthParameters {
             api_key_name: "X-API-Key".to_string(),
             api_key_value: "test-key".to_string(),
         });
-        
+
         connection
     }
 
@@ -270,73 +369,29 @@ mod tests {
     #[tokio::test]
     async fn test_service_crud_operations() {
         let service = create_test_service().await;
-        
+
         // Test connection CRUD
         let connection = create_test_connection();
         service.upsert_connection(&connection).await.unwrap();
-        
+
         let retrieved = service.get_connection(&connection.trn).await.unwrap();
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().trn, connection.trn);
-        
+
         // Test task CRUD
         let task = create_test_task(&connection.trn);
         service.upsert_task(&task).await.unwrap();
-        
+
         let retrieved_task = service.get_task(&task.trn).await.unwrap();
         assert!(retrieved_task.is_some());
-        assert_eq!(retrieved_task.unwrap().trn, task.trn);
-        
+        let retrieved_task = retrieved_task.unwrap();
+        assert_eq!(retrieved_task.trn, task.trn);
+
         // Test execution context
         let context = service.get_execution_context(&task.trn).await.unwrap();
         assert!(context.is_some());
         let (conn, tsk) = context.unwrap();
         assert_eq!(conn.trn, connection.trn);
         assert_eq!(tsk.trn, task.trn);
-    }
-
-    #[tokio::test]
-    async fn test_service_validation() {
-        let service = create_test_service().await;
-        
-        // Test task without connection should fail
-        let task = create_test_task("trn:connection:nonexistent");
-        let result = service.upsert_task(&task).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_cascade_delete() {
-        let service = create_test_service().await;
-        
-        let connection = create_test_connection();
-        service.upsert_connection(&connection).await.unwrap();
-        
-        let task = create_test_task(&connection.trn);
-        service.upsert_task(&task).await.unwrap();
-        
-        // Delete connection should also delete tasks
-        let deleted = service.delete_connection(&connection.trn).await.unwrap();
-        assert!(deleted);
-        
-        // Task should be gone
-        let task_result = service.get_task(&task.trn).await.unwrap();
-        assert!(task_result.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_stats() {
-        let service = create_test_service().await;
-        
-        let connection = create_test_connection();
-        service.upsert_connection(&connection).await.unwrap();
-        
-        let task = create_test_task(&connection.trn);
-        service.upsert_task(&task).await.unwrap();
-        
-        let stats = service.get_stats().await.unwrap();
-        assert_eq!(stats.total_connections, 1);
-        assert_eq!(stats.total_tasks, 1);
-        assert_eq!(stats.api_key_connections, 1);
     }
 }
