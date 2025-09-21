@@ -2,6 +2,7 @@ pub mod store;
 pub mod models;
 pub mod executor;
 pub mod cli;
+pub mod oauth;
 
 // Workflow-related modules remain public (original paths)
 // Deprecated: moved under authflow
