@@ -3,6 +3,7 @@
 //! 提供统一的数据库服务接口，集成ConnectionRepository和TaskRepository
 
 use anyhow::{Result, anyhow};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -313,7 +314,7 @@ impl StorageService {
 }
 
 /// 存储统计信息
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StorageStats {
     pub total_connections: i64,
     pub total_tasks: i64,
@@ -325,7 +326,7 @@ pub struct StorageStats {
 }
 
 /// 清理结果
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CleanupResult {
     pub expired_auth_connections: u64,
 }
