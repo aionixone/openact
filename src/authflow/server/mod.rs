@@ -196,7 +196,7 @@ impl ServerState {
         let store_env = std::env::var("openact_STORE").unwrap_or_else(|_| "memory".to_string());
         println!("[server] openact_STORE environment variable: {}", store_env);
         let mut backend = StoreBackend::Memory;
-
+        
         if store_env.eq_ignore_ascii_case("sqlite") {
             backend = StoreBackend::Sqlite;
             println!("[server] Using SQLite backend");
@@ -211,7 +211,7 @@ impl ServerState {
             backend,
             ..Default::default()
         };
-
+        
         if let Ok(db_url) =
             std::env::var("OPENACT_DATABASE_URL").or_else(|_| std::env::var("openact_SQLITE_URL"))
         {
@@ -223,10 +223,10 @@ impl ServerState {
         }
 
         let connection_store = create_connection_store(cfg).await.unwrap_or_else(|e| {
-            eprintln!("[server] Failed to create connection store: {:?}", e);
-            eprintln!("[server] Falling back to MemoryConnectionStore");
-            Arc::new(MemoryConnectionStore::new()) as Arc<dyn ConnectionStore>
-        });
+                eprintln!("[server] Failed to create connection store: {:?}", e);
+                eprintln!("[server] Falling back to MemoryConnectionStore");
+                Arc::new(MemoryConnectionStore::new()) as Arc<dyn ConnectionStore>
+            });
         let router: Arc<dyn TaskHandler> = Arc::new(ActionRouter::new(connection_store.clone()));
         Self {
             workflows: Arc::new(RwLock::new(HashMap::new())),

@@ -80,6 +80,8 @@ pub struct ConnectionConfig {
     pub timeout_config: Option<TimeoutConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http_policy: Option<HttpPolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_ref: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub version: i64,
@@ -102,6 +104,7 @@ impl ConnectionConfig {
             network_config: None,
             timeout_config: None,
             http_policy: None,
+            auth_ref: None,
             created_at: now,
             updated_at: now,
             version: 1,

@@ -6,15 +6,42 @@ use anyhow::{Result, anyhow};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::OnceCell;
+use tokio::sync::Mutex as TokioMutex;
 
 use super::{ConnectionRepository, DatabaseManager, TaskRepository};
+use crate::store::{ConnectionStore, AuthConnectionTrn};
+use crate::models::AuthConnection;
+use async_trait::async_trait;
+use sqlx::{Row, sqlite::SqliteRow};
+use base64::{engine::general_purpose, Engine as _};
 use crate::executor::{ExecutionResult, Executor};
 use crate::models::{ConnectionConfig, TaskConfig};
 
 // 全局存储服务实例
 static STORAGE_SERVICE: OnceCell<Arc<StorageService>> = OnceCell::const_new();
+static INJECTED_STORAGE_SERVICE: OnceCell<TokioMutex<Option<Arc<StorageService>>>> = OnceCell::const_new();
+
+/// Test-only: inject a global storage service instance
+pub async fn set_global_storage_service_for_tests(service: Arc<StorageService>) {
+    let slot = INJECTED_STORAGE_SERVICE
+        .get_or_init(|| async { TokioMutex::new(None) })
+        .await;
+    let mut guard = slot.lock().await;
+    *guard = Some(service);
+}
+
+/// Test-only: reset all global state to allow fresh initialization per test
+pub async fn reset_global_storage_for_tests() {
+    if let Some(slot) = INJECTED_STORAGE_SERVICE.get() {
+        let mut guard = slot.lock().await;
+        *guard = None;
+    }
+    // Also reset the main STORAGE_SERVICE if it was initialized
+    // Note: OnceCell doesn't have a reset method, but the injection takes precedence
+}
 
 /// 存储服务
 pub struct StorageService {
@@ -23,6 +50,16 @@ pub struct StorageService {
     task_repo: TaskRepository,
     // 简易执行上下文缓存：task_trn -> ((conn, task), timestamp)
     exec_cache: Arc<tokio::sync::Mutex<HashMap<String, ((ConnectionConfig, TaskConfig), Instant)>>>,
+    // 连接与任务的 TTL 缓存
+    connection_cache: Arc<tokio::sync::Mutex<HashMap<String, (ConnectionConfig, Instant)>>>,
+    task_cache: Arc<tokio::sync::Mutex<HashMap<String, (TaskConfig, Instant)>>>,
+    // 缓存指标
+    exec_cache_lookups: AtomicU64,
+    exec_cache_hits: AtomicU64,
+    conn_cache_lookups: AtomicU64,
+    conn_cache_hits: AtomicU64,
+    task_cache_lookups: AtomicU64,
+    task_cache_hits: AtomicU64,
 }
 
 impl StorageService {
@@ -36,6 +73,14 @@ impl StorageService {
             connection_repo,
             task_repo,
             exec_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            connection_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            task_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            exec_cache_lookups: AtomicU64::new(0),
+            exec_cache_hits: AtomicU64::new(0),
+            conn_cache_lookups: AtomicU64::new(0),
+            conn_cache_hits: AtomicU64::new(0),
+            task_cache_lookups: AtomicU64::new(0),
+            task_cache_hits: AtomicU64::new(0),
         }
     }
 
@@ -47,6 +92,12 @@ impl StorageService {
 
     /// 获取全局存储服务实例
     pub async fn global() -> Arc<StorageService> {
+        if let Some(slot) = INJECTED_STORAGE_SERVICE.get() {
+            let injected_opt = slot.lock().await.clone();
+            if let Some(injected) = injected_opt {
+                return injected;
+            }
+        }
         if let Some(service) = STORAGE_SERVICE.get() {
             return service.clone();
         }
@@ -79,7 +130,10 @@ impl StorageService {
 
     /// 创建或更新连接配置
     pub async fn upsert_connection(&self, connection: &ConnectionConfig) -> Result<()> {
-        self.connection_repo.upsert(connection).await
+        self.connection_repo.upsert(connection).await?;
+        // 失效缓存
+        self.invalidate_connection_cache(&connection.trn).await;
+        Ok(())
     }
 
     /// 根据TRN获取连接配置
@@ -107,6 +161,7 @@ impl StorageService {
         let ok = self.connection_repo.delete(trn).await?;
         // 失效缓存（该连接关联的所有task）
         self.invalidate_cache_by_connection(trn).await;
+        self.invalidate_connection_cache(trn).await;
         Ok(ok)
     }
 
@@ -131,6 +186,7 @@ impl StorageService {
         self.task_repo.upsert(task).await?;
         // 失效该task缓存
         self.invalidate_cache_by_task(&task.trn).await;
+        self.invalidate_task_cache(&task.trn).await;
         Ok(())
     }
 
@@ -154,6 +210,7 @@ impl StorageService {
         let ok = self.task_repo.delete(trn).await?;
         if ok {
             self.invalidate_cache_by_task(trn).await;
+            self.invalidate_task_cache(trn).await;
         }
         Ok(ok)
     }
@@ -170,10 +227,12 @@ impl StorageService {
         &self,
         task_trn: &str,
     ) -> Result<Option<(ConnectionConfig, TaskConfig)>> {
-        if let Some(ctx) = self
+        self.exec_cache_lookups.fetch_add(1, Ordering::Relaxed);
+        let cached = self
             .get_cached_execution_context(task_trn, Duration::from_secs(60))
-            .await
-        {
+            .await;
+        if let Some(ctx) = cached {
+            self.exec_cache_hits.fetch_add(1, Ordering::Relaxed);
             return Ok(Some(ctx));
         }
 
@@ -191,6 +250,46 @@ impl StorageService {
         self.put_cached_execution_context(task_trn.to_string(), pair.clone())
             .await;
         Ok(Some(pair))
+    }
+
+    /// 获取连接（带TTL缓存）—接口预留，Phase 0 先直接转调存储
+    pub async fn get_connection_cached(
+        &self,
+        trn: &str,
+        _ttl: std::time::Duration,
+    ) -> Result<Option<ConnectionConfig>> {
+        let ttl = _ttl;
+        self.conn_cache_lookups.fetch_add(1, Ordering::Relaxed);
+        // 先查缓存
+        if let Some(cached) = self.get_cached_connection(trn, ttl).await {
+            self.conn_cache_hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(Some(cached));
+        }
+        // 读取存储并写入缓存
+        let conn = self.get_connection(trn).await?;
+        if let Some(ref c) = conn {
+            self.put_cached_connection(trn.to_string(), c.clone()).await;
+        }
+        Ok(conn)
+    }
+
+    /// 获取任务（带TTL缓存）—接口预留，Phase 0 先直接转调存储
+    pub async fn get_task_cached(
+        &self,
+        trn: &str,
+        _ttl: std::time::Duration,
+    ) -> Result<Option<TaskConfig>> {
+        let ttl = _ttl;
+        self.task_cache_lookups.fetch_add(1, Ordering::Relaxed);
+        if let Some(cached) = self.get_cached_task(trn, ttl).await {
+            self.task_cache_hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(Some(cached));
+        }
+        let task = self.get_task(trn).await?;
+        if let Some(ref t) = task {
+            self.put_cached_task(trn.to_string(), t.clone()).await;
+        }
+        Ok(task)
     }
 
     async fn get_cached_execution_context(
@@ -226,6 +325,74 @@ impl StorageService {
     async fn invalidate_cache_by_task(&self, task_trn: &str) {
         let mut guard = self.exec_cache.lock().await;
         guard.remove(task_trn);
+    }
+
+    async fn get_cached_connection(&self, trn: &str, ttl: Duration) -> Option<ConnectionConfig> {
+        let mut guard = self.connection_cache.lock().await;
+        if let Some((conn, ts)) = guard.get(trn) {
+            if Instant::now().duration_since(*ts) < ttl {
+                return Some(conn.clone());
+            } else {
+                guard.remove(trn);
+            }
+        }
+        None
+    }
+
+    async fn put_cached_connection(&self, trn: String, conn: ConnectionConfig) {
+        let mut guard = self.connection_cache.lock().await;
+        guard.insert(trn, (conn, Instant::now()));
+    }
+
+    async fn invalidate_connection_cache(&self, trn: &str) {
+        let mut guard = self.connection_cache.lock().await;
+        guard.remove(trn);
+    }
+
+    async fn get_cached_task(&self, trn: &str, ttl: Duration) -> Option<TaskConfig> {
+        let mut guard = self.task_cache.lock().await;
+        if let Some((task, ts)) = guard.get(trn) {
+            if Instant::now().duration_since(*ts) < ttl {
+                return Some(task.clone());
+            } else {
+                guard.remove(trn);
+            }
+        }
+        None
+    }
+
+    async fn put_cached_task(&self, trn: String, task: TaskConfig) {
+        let mut guard = self.task_cache.lock().await;
+        guard.insert(trn, (task, Instant::now()));
+    }
+
+    async fn invalidate_task_cache(&self, trn: &str) {
+        let mut guard = self.task_cache.lock().await;
+        guard.remove(trn);
+    }
+
+    /// 缓存指标
+    pub async fn get_cache_stats(&self) -> CacheStats {
+        let exec_lookups = self.exec_cache_lookups.load(Ordering::Relaxed);
+        let exec_hits = self.exec_cache_hits.load(Ordering::Relaxed);
+        let conn_lookups = self.conn_cache_lookups.load(Ordering::Relaxed);
+        let conn_hits = self.conn_cache_hits.load(Ordering::Relaxed);
+        let task_lookups = self.task_cache_lookups.load(Ordering::Relaxed);
+        let task_hits = self.task_cache_hits.load(Ordering::Relaxed);
+        CacheStats {
+            exec_lookups,
+            exec_hits,
+            exec_hit_rate: if exec_lookups > 0 { exec_hits as f64 / exec_lookups as f64 } else { 0.0 },
+            conn_lookups,
+            conn_hits,
+            conn_hit_rate: if conn_lookups > 0 { conn_hits as f64 / conn_lookups as f64 } else { 0.0 },
+            task_lookups,
+            task_hits,
+            task_hit_rate: if task_lookups > 0 { task_hits as f64 / task_lookups as f64 } else { 0.0 },
+            connection_cache_size: self.connection_cache.lock().await.len() as u64,
+            task_cache_size: self.task_cache.lock().await.len() as u64,
+            exec_cache_size: self.exec_cache.lock().await.len() as u64,
+        }
     }
 
     /// 批量导入连接和任务
@@ -313,6 +480,234 @@ impl StorageService {
     }
 }
 
+// === AuthConnection helpers (enc/dec and row mapping) ===
+impl StorageService {
+    fn enc_service(&self) -> Option<&crate::store::encryption::FieldEncryption> {
+        self.db_manager.encryption().as_ref()
+    }
+
+    fn encrypt_field(&self, data: &str) -> Result<(String, String)> {
+        if let Some(enc) = self.enc_service() {
+            let encrypted = enc.encrypt_field(data)?;
+            Ok((encrypted.data, encrypted.nonce))
+        } else {
+            Ok((general_purpose::STANDARD.encode(data), "no-encryption".to_string()))
+        }
+    }
+
+    fn decrypt_field(&self, data: &str, nonce: &str, key_version: Option<u32>) -> Result<String> {
+        if let Some(enc) = self.enc_service() {
+            let ef = crate::store::encryption::EncryptedField {
+                data: data.to_string(),
+                nonce: nonce.to_string(),
+                key_version: key_version.unwrap_or(1),
+            };
+            enc.decrypt_field(&ef)
+        } else {
+            let decoded = general_purpose::STANDARD.decode(data)
+                .map_err(|e| anyhow!("Failed to decode data: {}", e))?;
+            String::from_utf8(decoded).map_err(|e| anyhow!("Invalid UTF-8 in data: {}", e))
+        }
+    }
+
+    fn row_to_auth_connection(&self, row: &SqliteRow) -> Result<AuthConnection> {
+        let access_token_encrypted: String = row.get("access_token_encrypted");
+        let access_token_nonce: String = row.get("access_token_nonce");
+        let key_version: Option<u32> = row.try_get("key_version").ok();
+        let access_token = self.decrypt_field(&access_token_encrypted, &access_token_nonce, key_version)?;
+
+        let refresh_token = if let (Ok(enc), Ok(nonce)) = (
+            row.try_get::<String, _>("refresh_token_encrypted"),
+            row.try_get::<String, _>("refresh_token_nonce"),
+        ) {
+            if !enc.is_empty() && !nonce.is_empty() {
+                Some(self.decrypt_field(&enc, &nonce, key_version)?)
+            } else { None }
+        } else { None };
+
+        let extra = if let (Ok(enc), Ok(nonce)) = (
+            row.try_get::<String, _>("extra_data_encrypted"),
+            row.try_get::<String, _>("extra_data_nonce"),
+        ) {
+            if !enc.is_empty() && !nonce.is_empty() {
+                let decrypted = self.decrypt_field(&enc, &nonce, key_version)?;
+                serde_json::from_str(&decrypted).unwrap_or(serde_json::Value::Null)
+            } else { serde_json::Value::Null }
+        } else { serde_json::Value::Null };
+
+        let tenant: String = row.get("tenant");
+        let provider: String = row.get("provider");
+        let user_id: String = row.get("user_id");
+        let trn = AuthConnectionTrn::new(tenant, provider, user_id)?;
+
+        Ok(AuthConnection {
+            trn,
+            access_token,
+            refresh_token,
+            expires_at: row.get("expires_at"),
+            token_type: row.get("token_type"),
+            scope: row.get("scope"),
+            extra,
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        })
+    }
+}
+
+#[async_trait]
+impl ConnectionStore for StorageService {
+    async fn get(&self, connection_ref: &str) -> Result<Option<AuthConnection>> {
+        let row = sqlx::query("SELECT * FROM auth_connections WHERE trn = ?")
+            .bind(connection_ref)
+            .fetch_optional(self.db_manager.pool())
+            .await?;
+        if let Some(row) = row { Ok(Some(self.row_to_auth_connection(&row)?)) } else { Ok(None) }
+    }
+
+    async fn put(&self, connection_ref: &str, connection: &AuthConnection) -> Result<()> {
+        let (access_token_encrypted, access_token_nonce) = self.encrypt_field(&connection.access_token)?;
+        let (refresh_token_encrypted, refresh_token_nonce) = if let Some(ref token) = connection.refresh_token {
+            let (e, n) = self.encrypt_field(token)?; (Some(e), Some(n))
+        } else { (None, None) };
+        let (extra_data_encrypted, extra_data_nonce) = if connection.extra != serde_json::Value::Null {
+            let json = serde_json::to_string(&connection.extra)?;
+            let (e, n) = self.encrypt_field(&json)?; (Some(e), Some(n))
+        } else { (None, None) };
+
+        let existing = self.get(connection_ref).await?;
+        if existing.is_some() {
+            sqlx::query(
+                r#"
+                UPDATE auth_connections SET
+                    access_token_encrypted = ?, access_token_nonce = ?,
+                    refresh_token_encrypted = ?, refresh_token_nonce = ?,
+                    expires_at = ?, token_type = ?, scope = ?,
+                    extra_data_encrypted = ?, extra_data_nonce = ?,
+                    updated_at = CURRENT_TIMESTAMP,
+                    version = version + 1
+                WHERE trn = ?
+                "#,
+            )
+            .bind(&access_token_encrypted)
+            .bind(&access_token_nonce)
+            .bind(&refresh_token_encrypted)
+            .bind(&refresh_token_nonce)
+            .bind(&connection.expires_at)
+            .bind(&connection.token_type)
+            .bind(&connection.scope)
+            .bind(&extra_data_encrypted)
+            .bind(&extra_data_nonce)
+            .bind(connection_ref)
+            .execute(self.db_manager.pool())
+            .await?;
+        } else {
+            sqlx::query(
+                r#"
+                INSERT INTO auth_connections 
+                (trn, tenant, provider, user_id, access_token_encrypted, access_token_nonce,
+                 refresh_token_encrypted, refresh_token_nonce, expires_at, token_type, scope,
+                 extra_data_encrypted, extra_data_nonce, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                "#,
+            )
+            .bind(connection_ref)
+            .bind(&connection.trn.tenant)
+            .bind(&connection.trn.provider)
+            .bind(&connection.trn.user_id)
+            .bind(&access_token_encrypted)
+            .bind(&access_token_nonce)
+            .bind(&refresh_token_encrypted)
+            .bind(&refresh_token_nonce)
+            .bind(&connection.expires_at)
+            .bind(&connection.token_type)
+            .bind(&connection.scope)
+            .bind(&extra_data_encrypted)
+            .bind(&extra_data_nonce)
+            .execute(self.db_manager.pool())
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn delete(&self, connection_ref: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM auth_connections WHERE trn = ?")
+            .bind(connection_ref)
+            .execute(self.db_manager.pool())
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn compare_and_swap(
+        &self,
+        connection_ref: &str,
+        expected: Option<&AuthConnection>,
+        new_connection: Option<&AuthConnection>,
+    ) -> Result<bool> {
+        let mut tx = self.db_manager.pool().begin().await?;
+        let current = sqlx::query("SELECT * FROM auth_connections WHERE trn = ?")
+            .bind(connection_ref)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let current_conn = if let Some(row) = current { Some(self.row_to_auth_connection(&row)?) } else { None };
+        let matches = match (expected, &current_conn) {
+            (None, None) => true,
+            (Some(exp), Some(cur)) => exp == cur,
+            _ => false,
+        };
+        if !matches { tx.rollback().await?; return Ok(false); }
+
+        match new_connection {
+            Some(new_conn) => {
+                // Reuse put logic within tx (simplified: touch updated_at if exists)
+                if current_conn.is_some() {
+                    sqlx::query("UPDATE auth_connections SET updated_at = CURRENT_TIMESTAMP, version = version + 1 WHERE trn = ?")
+                        .bind(connection_ref)
+                        .execute(&mut *tx)
+                        .await?;
+                } else {
+                    // Minimal insert with placeholders; caller should follow with put to set full fields
+                    sqlx::query("INSERT INTO auth_connections (trn, tenant, provider, user_id, access_token_encrypted, access_token_nonce, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+                        .bind(connection_ref)
+                        .bind(&new_conn.trn.tenant)
+                        .bind(&new_conn.trn.provider)
+                        .bind(&new_conn.trn.user_id)
+                        .bind("encrypted_placeholder")
+                        .bind("nonce_placeholder")
+                        .execute(&mut *tx)
+                        .await?;
+                }
+            }
+            None => {
+                sqlx::query("DELETE FROM auth_connections WHERE trn = ?")
+                    .bind(connection_ref)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    async fn list_refs(&self) -> Result<Vec<String>> {
+        let refs = sqlx::query_scalar::<_, String>("SELECT trn FROM auth_connections ORDER BY created_at DESC")
+            .fetch_all(self.db_manager.pool())
+            .await?;
+        Ok(refs)
+    }
+
+    async fn cleanup_expired(&self) -> Result<u64> {
+        self.db_manager.cleanup_expired_auth_connections().await
+    }
+
+    async fn count(&self) -> Result<u64> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auth_connections")
+            .fetch_one(self.db_manager.pool())
+            .await?;
+        Ok(count as u64)
+    }
+}
+
 /// 存储统计信息
 #[derive(Debug, Clone, Serialize)]
 pub struct StorageStats {
@@ -331,6 +726,23 @@ pub struct CleanupResult {
     pub expired_auth_connections: u64,
 }
 
+/// 缓存统计
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheStats {
+    pub exec_lookups: u64,
+    pub exec_hits: u64,
+    pub exec_hit_rate: f64,
+    pub conn_lookups: u64,
+    pub conn_hits: u64,
+    pub conn_hit_rate: f64,
+    pub task_lookups: u64,
+    pub task_hits: u64,
+    pub task_hit_rate: f64,
+    pub connection_cache_size: u64,
+    pub task_cache_size: u64,
+    pub exec_cache_size: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,7 +756,7 @@ mod tests {
 
     fn create_test_connection() -> ConnectionConfig {
         let mut connection = ConnectionConfig::new(
-            "trn:connection:test".to_string(),
+            "trn:openact:default:connection/test".to_string(),
             "Test Connection".to_string(),
             AuthorizationType::ApiKey,
         );
@@ -359,7 +771,7 @@ mod tests {
 
     fn create_test_task(connection_trn: &str) -> TaskConfig {
         TaskConfig::new(
-            "trn:task:test".to_string(),
+            "trn:openact:default:task/test".to_string(),
             "Test Task".to_string(),
             connection_trn.to_string(),
             "https://api.example.com/users".to_string(),

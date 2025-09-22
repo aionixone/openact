@@ -12,7 +12,7 @@ mod tests {
     /// 创建API Key测试连接
     fn create_api_key_connection() -> ConnectionConfig {
         let mut connection = ConnectionConfig::new(
-            "trn:connection:api-key-test".to_string(),
+            "trn:openact:default:connection/api-key-test".to_string(),
             "API Key Test Connection".to_string(),
             AuthorizationType::ApiKey,
         );
@@ -28,7 +28,7 @@ mod tests {
     /// 创建OAuth2 Client Credentials测试连接
     fn create_oauth2_client_credentials_connection() -> ConnectionConfig {
         let mut connection = ConnectionConfig::new(
-            "trn:connection:oauth2-cc-test".to_string(),
+            "trn:openact:default:connection/oauth2-cc-test".to_string(),
             "OAuth2 CC Test Connection".to_string(),
             AuthorizationType::OAuth2ClientCredentials,
         );
@@ -48,7 +48,7 @@ mod tests {
     /// 创建测试任务
     fn create_test_task(connection_trn: &str) -> TaskConfig {
         TaskConfig::new(
-            "trn:task:test".to_string(),
+            "trn:openact:default:task/test".to_string(),
             "Test API Task".to_string(),
             connection_trn.to_string(),
             "https://api.example.com/users".to_string(),

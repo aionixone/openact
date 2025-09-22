@@ -199,7 +199,7 @@ mod tests {
 
     fn create_test_connection() -> ConnectionConfig {
         let mut connection = ConnectionConfig::new(
-            "trn:connection:test".to_string(),
+            "trn:openact:default:connection/test".to_string(),
             "Test Connection".to_string(),
             AuthorizationType::ApiKey,
         );
@@ -238,9 +238,9 @@ mod tests {
 
     fn create_test_task() -> TaskConfig {
         let mut task = TaskConfig::new(
-            "trn:task:test".to_string(),
+            "trn:openact:default:task/test".to_string(),
             "Test Task".to_string(),
-            "trn:connection:test".to_string(),
+            "trn:openact:default:connection/test".to_string(),
             "/api/users".to_string(),
             "GET".to_string(),
         );

@@ -136,6 +136,7 @@ impl DatabaseManager {
                 authorization_type TEXT NOT NULL,
                 auth_params_encrypted TEXT NOT NULL,
                 auth_params_nonce TEXT NOT NULL,
+                auth_ref TEXT,
                 default_headers_json TEXT,
                 default_query_params_json TEXT,
                 default_body_json TEXT,
@@ -196,6 +197,7 @@ impl DatabaseManager {
             
             // connections indexes  
             "CREATE INDEX IF NOT EXISTS idx_connections_authorization_type ON connections(authorization_type)",
+            "CREATE INDEX IF NOT EXISTS idx_connections_auth_ref ON connections(auth_ref)",
             "CREATE INDEX IF NOT EXISTS idx_connections_name ON connections(name)",
             
             // tasks indexes

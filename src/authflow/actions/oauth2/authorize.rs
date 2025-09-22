@@ -108,13 +108,13 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
         }
         
         let code = find_code_recursive(ctx);
-        println!("Found code: {:?}", code);
+        println!("[await_cb] found code: {:?}", code);
         if code.is_none() {
-            println!("No code found, returning PAUSE_FOR_CALLBACK");
+            println!("[await_cb] no code found, returning PAUSE_FOR_CALLBACK");
             return Err(anyhow::anyhow!("PAUSE_FOR_CALLBACK"));
         }
         let code = code.unwrap();
-        println!("Using code: {}", code);
+        println!("[await_cb] using code: {}", code);
 
         // Recursively find the state in the context
         fn find_state_recursive(ctx: &Value) -> Option<&str> {
@@ -173,18 +173,17 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
         }
         
         let expected = find_expected_state(ctx);
-        
-        println!("State validation: returned={:?}, expected={:?}", returned, expected);
+        println!("[await_cb] state validation: returned={:?}, expected={:?}", returned, expected);
         
         // Validate the state only if an explicit expected_state is found
         if let (Some(r), Some(e)) = (returned, expected) {
             if r != e {
-                println!("State mismatch: returned={}, expected={}", r, e);
+                println!("[await_cb] state mismatch: returned={}, expected={}", r, e);
                 return Err(anyhow::anyhow!("state mismatch: returned={}, expected={}", r, e));
             }
-            println!("State validation passed");
+            println!("[await_cb] state validation passed");
         } else {
-            println!("Skipping state validation (no expected state found)");
+            println!("[await_cb] skipping state validation (no expected state found)");
         }
 
         // Prepare the output JSON
@@ -196,7 +195,7 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
         {
             out["code_verifier"] = Value::String(v.to_string());
         }
-        println!("OAuth2AwaitCallbackHandler returning: {}", serde_json::to_string(&out).unwrap_or_else(|_| "invalid json".to_string()));
+        println!("[await_cb] returning: {}", serde_json::to_string(&out).unwrap_or_else(|_| "invalid json".to_string()));
         Ok(out)
     }
 }

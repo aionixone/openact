@@ -131,13 +131,9 @@ impl AuthInjector for OAuth2Injector {
         _query_params: &mut HashMap<String, String>,
         connection: &ConnectionConfig,
     ) -> Result<(), AuthInjectionError> {
-        // TODO: 从 AuthConnection 存储中获取有效的 access_token
-        // 这里需要集成现有的 ConnectionStore 来获取 OAuth2 token
-
-        // 临时实现：返回错误，表示需要先获取token
-        Err(AuthInjectionError::OAuth2TokenNotAvailable {
-            connection_trn: connection.trn.clone(),
-        })
+        // Phase 0: interface only. Runtime integration will be added in Phase 3.
+        // For now, return a placeholder error to avoid accidental use.
+        Err(AuthInjectionError::OAuth2TokenNotAvailable { connection_trn: connection.trn.clone() })
     }
 }
 

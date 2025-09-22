@@ -9,6 +9,7 @@ import urllib.parse
 import json
 import sys
 from urllib.parse import urlparse, parse_qs
+import os
 
 class CallbackHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -25,9 +26,10 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
             if error:
                 print(f"❌ OAuth 错误: {error}")
                 self.send_response(400)
-                self.send_header('Content-type', 'text/html')
+                self.send_header('Content-type', 'text/html; charset=utf-8')
                 self.end_headers()
-                self.wfile.write(f"<h1>OAuth 错误: {error}</h1>".encode())
+                html = f"<h1>OAuth 错误: {error}</h1>"
+                self.wfile.write(html.encode('utf-8'))
                 return
             
             if code:
@@ -39,24 +41,25 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
                     f.write(code)
                 
                 self.send_response(200)
-                self.send_header('Content-type', 'text/html')
+                self.send_header('Content-type', 'text/html; charset=utf-8')
                 self.end_headers()
-                self.wfile.write(b"""
-                <html>
-                <head><title>授权成功</title></head>
-                <body>
-                    <h1>✅ GitHub 授权成功！</h1>
-                    <p>授权码已保存，可以继续 OAuth2 流程。</p>
-                    <p>请返回终端查看结果。</p>
-                </body>
-                </html>
-                """)
+                html = (
+                    "<html>"
+                    "<head><title>授权成功</title></head>"
+                    "<body>"
+                    "<h1>✅ GitHub 授权成功！</h1>"
+                    "<p>授权码已保存，可以继续 OAuth2 流程。</p>"
+                    "<p>请返回终端查看结果。</p>"
+                    "</body>"
+                    "</html>"
+                )
+                self.wfile.write(html.encode('utf-8'))
             else:
                 print("❌ 未找到授权码")
                 self.send_response(400)
-                self.send_header('Content-type', 'text/html')
+                self.send_header('Content-type', 'text/html; charset=utf-8')
                 self.end_headers()
-                self.wfile.write(b"<h1>未找到授权码</h1>")
+                self.wfile.write("<h1>未找到授权码</h1>".encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()
@@ -66,7 +69,7 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 def main():
-    PORT = 8080
+    PORT = int(os.environ.get("OPENACT_CALLBACK_PORT", "8080"))
     
     # 检查端口是否被占用
     try:

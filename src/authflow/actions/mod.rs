@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::authflow::engine::TaskHandler;
 use crate::store::ConnectionStore;
+use crate::models::AuthConnection;
 
 mod connection;
 mod ensure;
@@ -97,12 +98,63 @@ impl TaskHandler for ActionRouter {
     fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
         match resource {
             "connection.read" => {
-                // Use Memory store for now to satisfy generic bound
-                let ctx_wrap = ConnectionContext::new(crate::store::MemoryConnectionStore::new());
+                // Create a wrapper that implements ConnectionStore for Arc<dyn ConnectionStore>
+                struct DynStoreWrapper(Arc<dyn ConnectionStore>);
+                #[async_trait::async_trait]
+                impl ConnectionStore for DynStoreWrapper {
+                    async fn get(&self, connection_ref: &str) -> Result<Option<AuthConnection>> {
+                        self.0.get(connection_ref).await
+                    }
+                    async fn put(&self, connection_ref: &str, connection: &AuthConnection) -> Result<()> {
+                        self.0.put(connection_ref, connection).await
+                    }
+                    async fn delete(&self, connection_ref: &str) -> Result<bool> {
+                        self.0.delete(connection_ref).await
+                    }
+                    async fn compare_and_swap(&self, connection_ref: &str, expected: Option<&AuthConnection>, new_connection: Option<&AuthConnection>) -> Result<bool> {
+                        self.0.compare_and_swap(connection_ref, expected, new_connection).await
+                    }
+                    async fn list_refs(&self) -> Result<Vec<String>> {
+                        self.0.list_refs().await
+                    }
+                    async fn cleanup_expired(&self) -> Result<u64> {
+                        self.0.cleanup_expired().await
+                    }
+                    async fn count(&self) -> Result<u64> {
+                        self.0.count().await
+                    }
+                }
+                let ctx_wrap = ConnectionContext::new(DynStoreWrapper(self.connection_store.clone()));
                 ConnectionReadHandler { ctx: ctx_wrap }.execute(resource, state_name, ctx)
             }
             "connection.update" => {
-                let ctx_wrap = ConnectionContext::new(crate::store::MemoryConnectionStore::new());
+                // Create a wrapper that implements ConnectionStore for Arc<dyn ConnectionStore>
+                struct DynStoreWrapper(Arc<dyn ConnectionStore>);
+                #[async_trait::async_trait]
+                impl ConnectionStore for DynStoreWrapper {
+                    async fn get(&self, connection_ref: &str) -> Result<Option<AuthConnection>> {
+                        self.0.get(connection_ref).await
+                    }
+                    async fn put(&self, connection_ref: &str, connection: &AuthConnection) -> Result<()> {
+                        self.0.put(connection_ref, connection).await
+                    }
+                    async fn delete(&self, connection_ref: &str) -> Result<bool> {
+                        self.0.delete(connection_ref).await
+                    }
+                    async fn compare_and_swap(&self, connection_ref: &str, expected: Option<&AuthConnection>, new_connection: Option<&AuthConnection>) -> Result<bool> {
+                        self.0.compare_and_swap(connection_ref, expected, new_connection).await
+                    }
+                    async fn list_refs(&self) -> Result<Vec<String>> {
+                        self.0.list_refs().await
+                    }
+                    async fn cleanup_expired(&self) -> Result<u64> {
+                        self.0.cleanup_expired().await
+                    }
+                    async fn count(&self) -> Result<u64> {
+                        self.0.count().await
+                    }
+                }
+                let ctx_wrap = ConnectionContext::new(DynStoreWrapper(self.connection_store.clone()));
                 ConnectionUpdateHandler { ctx: ctx_wrap }.execute(resource, state_name, ctx)
             }
             "ensure.fresh_token" => {

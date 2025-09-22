@@ -21,7 +21,46 @@ pub async fn get_execution(
     let executions = state.executions.read().unwrap();
 
     match executions.get(&id) {
-        Some(execution) => Json(serde_json::to_value(execution).unwrap()).into_response(),
+        Some(execution) => {
+            let mut response = serde_json::to_value(execution).unwrap();
+            // Add pending_info if execution is paused and has context
+            if matches!(execution.status, ExecutionStatus::Paused) && execution.context.is_some() {
+                if let Some(context) = &execution.context {
+                    // Extract authorization URL from context if available
+                    let mut pending = serde_json::Map::new();
+                    if let Some(auth_result) = context.pointer("/states/StartAuth/result") {
+                        if let Some(authorize_url) = auth_result.get("authorize_url").and_then(|v| v.as_str()) {
+                            pending.insert("authorize_url".to_string(), serde_json::Value::String(authorize_url.to_string()));
+                        }
+                        if let Some(state_val) = auth_result.get("state").and_then(|v| v.as_str()) {
+                            pending.insert("state".to_string(), serde_json::Value::String(state_val.to_string()));
+                        }
+                        if let Some(verifier) = auth_result.get("code_verifier").and_then(|v| v.as_str()) {
+                            pending.insert("code_verifier".to_string(), serde_json::Value::String(verifier.to_string()));
+                        }
+                    }
+                    // Fallback to vars if needed (state/code_verifier saved via assign)
+                    if let Some(vars) = context.get("vars") {
+                        if !pending.contains_key("state") {
+                            if let Some(state_val) = vars.get("auth_state").and_then(|v| v.as_str()) {
+                                pending.insert("state".to_string(), serde_json::Value::String(state_val.to_string()));
+                            }
+                        }
+                        if !pending.contains_key("code_verifier") {
+                            if let Some(verifier) = vars.get("code_verifier").and_then(|v| v.as_str()) {
+                                pending.insert("code_verifier".to_string(), serde_json::Value::String(verifier.to_string()));
+                            }
+                        }
+                    }
+                    if !pending.is_empty() {
+                        if let Some(response_obj) = response.as_object_mut() {
+                            response_obj.insert("pending_info".to_string(), serde_json::Value::Object(pending));
+                        }
+                    }
+                }
+            }
+            Json(response).into_response()
+        },
         None => (
             StatusCode::NOT_FOUND,
             Json(json!({

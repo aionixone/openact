@@ -66,7 +66,15 @@ pub async fn create_connection_store(config: StoreConfig) -> Result<Arc<dyn Conn
         }
         
         StoreBackend::Sqlite => {
-            let sqlite_cfg = config.sqlite.unwrap_or_default();
+            let mut sqlite_cfg = config.sqlite.unwrap_or_default();
+            // Align with OPENACT_DB_URL if provided
+            if let Ok(url) = std::env::var("OPENACT_DB_URL") {
+                sqlite_cfg.database_url = if url.starts_with("sqlite:") { url } else { format!("sqlite:{}", url) };
+            }
+            // Disable encryption if no master key provided (tests/dev)
+            if std::env::var("OPENACT_MASTER_KEY").is_err() {
+                sqlite_cfg.enable_encryption = false;
+            }
             let store = sqlite_connection_store::SqliteConnectionStore::new(sqlite_cfg).await?;
             Ok(Arc::new(store) as Arc<dyn ConnectionStore>)
         }

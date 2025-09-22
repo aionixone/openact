@@ -1,13 +1,13 @@
+use crate::models::{ConnectionConfig, TaskConfig};
+use crate::store::{DatabaseManager, StorageService};
 use anyhow::{Result, anyhow};
-use clap::{Parser, Subcommand, Args};
+use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 use std::io::Read;
 use std::path::PathBuf;
-use crate::store::{StorageService, DatabaseManager};
-use crate::models::{ConnectionConfig, TaskConfig};
 
 #[derive(Parser, Debug)]
-#[command(name = "openact", version, about = "OpenAct CLI")] 
+#[command(name = "openact", version, about = "OpenAct CLI")]
 pub struct Cli {
     #[arg(long, global = true)]
     pub db_url: Option<String>,
@@ -28,10 +28,10 @@ pub struct ExecuteOverrides {
     #[arg(long)]
     pub endpoint: Option<String>,
     /// Add or override headers: key:value (repeatable)
-    #[arg(long = "header")] 
+    #[arg(long = "header")]
     pub headers: Vec<String>,
     /// Add or override query params: key=value (repeatable)
-    #[arg(long = "query")] 
+    #[arg(long = "query")]
     pub queries: Vec<String>,
     /// Provide request body (JSON string or @file)
     #[arg(long)]
@@ -69,6 +69,11 @@ pub enum Commands {
     System {
         #[command(subcommand)]
         cmd: SystemCmd,
+    },
+    /// OAuth operations
+    Oauth {
+        #[command(subcommand)]
+        cmd: OauthCmd,
     },
 }
 
@@ -153,6 +158,39 @@ pub enum SystemCmd {
     Cleanup,
 }
 
+#[derive(Subcommand, Debug)]
+pub enum OauthCmd {
+    /// Start Authorization Code flow (prints authorize_url/state/code_verifier)
+    Start {
+        /// DSL YAML file path
+        #[arg(short, long)]
+        dsl: std::path::PathBuf,
+    },
+    /// Resume with code/state
+    Resume {
+        /// DSL YAML file path
+        #[arg(short, long)]
+        dsl: std::path::PathBuf,
+        /// run_id from start
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        code: String,
+        #[arg(long)]
+        state: String,
+        /// Optionally bind the obtained auth to a connection TRN
+        #[arg(long)]
+        bind_connection: Option<String>,
+    },
+    /// Bind auth connection TRN to a connection TRN
+    Bind {
+        /// connection TRN
+        connection_trn: String,
+        /// auth connection TRN
+        auth_trn: String,
+    },
+}
+
 pub async fn run(cli: Cli) -> Result<()> {
     // Initialize storage service (prefer explicit db_url)
     let service: std::sync::Arc<StorageService> = if let Some(db) = &cli.db_url {
@@ -163,15 +201,22 @@ pub async fn run(cli: Cli) -> Result<()> {
     };
 
     match &cli.command {
-        Commands::Execute { task_trn, overrides } => {
+        Commands::Execute {
+            task_trn,
+            overrides,
+        } => {
             let (conn, mut task) = service
                 .get_execution_context(task_trn)
                 .await?
                 .ok_or_else(|| anyhow!("Task or connection not found: {}", task_trn))?;
 
             // Apply overrides (ConnectionWins 仍然最终在执行器内生效；这里只是临时覆盖 task)
-            if let Some(m) = &overrides.method { task.method = m.clone(); }
-            if let Some(ep) = &overrides.endpoint { task.api_endpoint = ep.clone(); }
+            if let Some(m) = &overrides.method {
+                task.method = m.clone();
+            }
+            if let Some(ep) = &overrides.endpoint {
+                task.api_endpoint = ep.clone();
+            }
             if !overrides.headers.is_empty() {
                 let mut headers = task.headers.unwrap_or_default();
                 for kv in &overrides.headers {
@@ -191,7 +236,11 @@ pub async fn run(cli: Cli) -> Result<()> {
                 task.query_params = Some(qs);
             }
             if let Some(body) = &overrides.body {
-                let content = if let Some(path) = body.strip_prefix('@') { std::fs::read_to_string(path)? } else { body.clone() };
+                let content = if let Some(path) = body.strip_prefix('@') {
+                    std::fs::read_to_string(path)?
+                } else {
+                    body.clone()
+                };
                 let val = parse_json_or_yaml::<serde_json::Value>(&content)?;
                 task.request_body = Some(val);
             }
@@ -205,145 +254,294 @@ pub async fn run(cli: Cli) -> Result<()> {
                 "body-only" => println!("{}", serde_json::to_string_pretty(&result.body)?),
                 _ => {
                     if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&json!({
-                            "status": result.status,
-                            "headers": result.headers,
-                            "body": result.body,
-                        }))?);
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&json!({
+                                "status": result.status,
+                                "headers": result.headers,
+                                "body": result.body,
+                            }))?
+                        );
                     } else {
                         println!("Status: {}", result.status);
                         println!("Headers:");
-                        for (k, v) in result.headers.iter() { println!("  {}: {}", k, v); }
+                        for (k, v) in result.headers.iter() {
+                            println!("  {}: {}", k, v);
+                        }
                         println!("Body:\n{}", serde_json::to_string_pretty(&result.body)?);
                     }
                 }
             }
         }
-        Commands::Connection { cmd } => {
-            match cmd {
-                ConnectionCmd::Upsert { file } => {
-                    let s = read_input(file.as_ref())?;
-                    let cfg: ConnectionConfig = parse_json_or_yaml(&s)?;
-                    service.upsert_connection(&cfg).await?;
-                    println!("upserted: {}", cfg.trn);
-                }
-                ConnectionCmd::Get { trn } => {
-                    let found = service.get_connection(trn).await?;
-                    match found {
-                        Some(c) => {
-                            if cli.json { println!("{}", serde_json::to_string_pretty(&c)?); }
-                            else { println!("TRN: {}\nname: {}\nauth_kind: {:?}", c.trn, c.name, c.authorization_type); }
+        Commands::Connection { cmd } => match cmd {
+            ConnectionCmd::Upsert { file } => {
+                let s = read_input(file.as_ref())?;
+                let cfg: ConnectionConfig = parse_json_or_yaml(&s)?;
+                service.upsert_connection(&cfg).await?;
+                println!("upserted: {}", cfg.trn);
+            }
+            ConnectionCmd::Get { trn } => {
+                let found = service.get_connection(trn).await?;
+                match found {
+                    Some(c) => {
+                        if cli.json {
+                            println!("{}", serde_json::to_string_pretty(&c)?);
+                        } else {
+                            println!(
+                                "TRN: {}\nname: {}\nauth_kind: {:?}",
+                                c.trn, c.name, c.authorization_type
+                            );
                         }
-                        None => return Err(anyhow!("connection not found: {}", trn)),
                     }
-                }
-                ConnectionCmd::List { auth_kind, limit, offset } => {
-                    let list = service.list_connections(auth_kind.as_deref(), *limit, *offset).await?;
-                    if cli.json { println!("{}", serde_json::to_string_pretty(&list)?); }
-                    else {
-                        for c in list { println!("{}\t{:?}\t{}", c.trn, c.authorization_type, c.name); }
-                    }
-                }
-                ConnectionCmd::Delete { trn, yes } => {
-                    if !*yes { println!("use --yes to confirm delete"); return Ok(()); }
-                    let ok = service.delete_connection(trn).await?;
-                    if ok { println!("deleted: {}", trn); } else { println!("not found: {}", trn); }
+                    None => return Err(anyhow!("connection not found: {}", trn)),
                 }
             }
-        }
-        Commands::Task { cmd } => {
-            match cmd {
-                TaskCmd::Upsert { file } => {
-                    let s = read_input(file.as_ref())?;
-                    let cfg: TaskConfig = parse_json_or_yaml(&s)?;
-                    service.upsert_task(&cfg).await?;
-                    println!("upserted: {}", cfg.trn);
-                }
-                TaskCmd::Get { trn } => {
-                    let found = service.get_task(trn).await?;
-                    match found {
-                        Some(t) => {
-                            if cli.json { println!("{}", serde_json::to_string_pretty(&t)?); }
-                            else { println!("TRN: {}\nname: {}\nconnection: {}\nmethod: {}\nendpoint: {}", t.trn, t.name, t.connection_trn, t.method, t.api_endpoint); }
-                        }
-                        None => return Err(anyhow!("task not found: {}", trn)),
+            ConnectionCmd::List {
+                auth_kind,
+                limit,
+                offset,
+            } => {
+                let list = service
+                    .list_connections(auth_kind.as_deref(), *limit, *offset)
+                    .await?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&list)?);
+                } else {
+                    for c in list {
+                        println!("{}\t{:?}\t{}", c.trn, c.authorization_type, c.name);
                     }
-                }
-                TaskCmd::List { connection_trn, limit, offset } => {
-                    let list = service.list_tasks(connection_trn.as_deref(), *limit, *offset).await?;
-                    if cli.json { println!("{}", serde_json::to_string_pretty(&list)?); }
-                    else {
-                        for t in list { println!("{}\t{}\t{} {}", t.trn, t.connection_trn, t.method, t.api_endpoint); }
-                    }
-                }
-                TaskCmd::Delete { trn, yes } => {
-                    if !*yes { println!("use --yes to confirm delete"); return Ok(()); }
-                    let ok = service.delete_task(trn).await?;
-                    if ok { println!("deleted: {}", trn); } else { println!("not found: {}", trn); }
                 }
             }
-        }
-        Commands::Config { cmd } => {
-            match cmd {
-                ConfigCmd::Import { connections, tasks } => {
-                    if connections.is_none() && tasks.is_none() {
-                        return Err(anyhow!("provide --connections and/or --tasks"));
-                    }
-                    let mut conns: Vec<ConnectionConfig> = Vec::new();
-                    let mut tsk: Vec<TaskConfig> = Vec::new();
-                    if let Some(p) = connections {
-                        let s = std::fs::read_to_string(p)?;
-                        conns = parse_json_or_yaml(&s)?;
-                    }
-                    if let Some(p) = tasks {
-                        let s = std::fs::read_to_string(p)?;
-                        tsk = parse_json_or_yaml(&s)?;
-                    }
-                    let (ic, it) = service.import_configurations(conns, tsk).await?;
-                    println!("imported: connections={} tasks={}", ic, it);
+            ConnectionCmd::Delete { trn, yes } => {
+                if !*yes {
+                    println!("use --yes to confirm delete");
+                    return Ok(());
                 }
-                ConfigCmd::Export { format } => {
-                    let (conns, tasks) = service.export_configurations().await?;
-                    let fmt = format.as_deref().unwrap_or(if cli.json { "json" } else { "yaml" });
-                    match fmt {
-                        "json" => {
-                            println!("{}", serde_json::to_string_pretty(&json!({
+                let ok = service.delete_connection(trn).await?;
+                if ok {
+                    println!("deleted: {}", trn);
+                } else {
+                    println!("not found: {}", trn);
+                }
+            }
+        },
+        Commands::Task { cmd } => match cmd {
+            TaskCmd::Upsert { file } => {
+                let s = read_input(file.as_ref())?;
+                let cfg: TaskConfig = parse_json_or_yaml(&s)?;
+                service.upsert_task(&cfg).await?;
+                println!("upserted: {}", cfg.trn);
+            }
+            TaskCmd::Get { trn } => {
+                let found = service.get_task(trn).await?;
+                match found {
+                    Some(t) => {
+                        if cli.json {
+                            println!("{}", serde_json::to_string_pretty(&t)?);
+                        } else {
+                            println!(
+                                "TRN: {}\nname: {}\nconnection: {}\nmethod: {}\nendpoint: {}",
+                                t.trn, t.name, t.connection_trn, t.method, t.api_endpoint
+                            );
+                        }
+                    }
+                    None => return Err(anyhow!("task not found: {}", trn)),
+                }
+            }
+            TaskCmd::List {
+                connection_trn,
+                limit,
+                offset,
+            } => {
+                let list = service
+                    .list_tasks(connection_trn.as_deref(), *limit, *offset)
+                    .await?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&list)?);
+                } else {
+                    for t in list {
+                        println!(
+                            "{}\t{}\t{} {}",
+                            t.trn, t.connection_trn, t.method, t.api_endpoint
+                        );
+                    }
+                }
+            }
+            TaskCmd::Delete { trn, yes } => {
+                if !*yes {
+                    println!("use --yes to confirm delete");
+                    return Ok(());
+                }
+                let ok = service.delete_task(trn).await?;
+                if ok {
+                    println!("deleted: {}", trn);
+                } else {
+                    println!("not found: {}", trn);
+                }
+            }
+        },
+        Commands::Config { cmd } => match cmd {
+            ConfigCmd::Import { connections, tasks } => {
+                if connections.is_none() && tasks.is_none() {
+                    return Err(anyhow!("provide --connections and/or --tasks"));
+                }
+                let mut conns: Vec<ConnectionConfig> = Vec::new();
+                let mut tsk: Vec<TaskConfig> = Vec::new();
+                if let Some(p) = connections {
+                    let s = std::fs::read_to_string(p)?;
+                    conns = parse_json_or_yaml(&s)?;
+                }
+                if let Some(p) = tasks {
+                    let s = std::fs::read_to_string(p)?;
+                    tsk = parse_json_or_yaml(&s)?;
+                }
+                let (ic, it) = service.import_configurations(conns, tsk).await?;
+                println!("imported: connections={} tasks={}", ic, it);
+            }
+            ConfigCmd::Export { format } => {
+                let (conns, tasks) = service.export_configurations().await?;
+                let fmt = format
+                    .as_deref()
+                    .unwrap_or(if cli.json { "json" } else { "yaml" });
+                match fmt {
+                    "json" => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&json!({
                                 "connections": conns,
                                 "tasks": tasks
-                            }))?);
-                        }
-                        "yaml" => {
-                            let obj = serde_json::json!({
-                                "connections": conns,
-                                "tasks": tasks
-                            });
-                            let yaml = serde_yaml::to_string(&obj)?;
-                            print!("{}", yaml);
-                        }
-                        other => return Err(anyhow!("unsupported format: {}", other)),
+                            }))?
+                        );
                     }
+                    "yaml" => {
+                        let obj = serde_json::json!({
+                            "connections": conns,
+                            "tasks": tasks
+                        });
+                        let yaml = serde_yaml::to_string(&obj)?;
+                        print!("{}", yaml);
+                    }
+                    other => return Err(anyhow!("unsupported format: {}", other)),
                 }
             }
-        }
-        Commands::System { cmd } => {
+        },
+        Commands::System { cmd } => match cmd {
+            SystemCmd::Stats => {
+                let stats = service.get_stats().await?;
+                let cache = service.get_cache_stats().await;
+                let cp = crate::executor::client_pool::get_stats();
+                if cli.json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({
+                            "storage": stats,
+                            "caches": cache,
+                            "client_pool": {
+                                "hits": cp.hits,
+                                "builds": cp.builds,
+                                "evictions": cp.evictions,
+                                "size": cp.size,
+                                "capacity": cp.capacity
+                            }
+                        }))?
+                    );
+                } else {
+                    println!("connections: {}", stats.total_connections);
+                    println!("tasks: {}", stats.total_tasks);
+                    println!("auth_connections: {}", stats.total_auth_connections);
+                    println!("api_key: {}", stats.api_key_connections);
+                    println!("basic: {}", stats.basic_connections);
+                    println!("oauth2_cc: {}", stats.oauth2_cc_connections);
+                    println!("oauth2_ac: {}", stats.oauth2_ac_connections);
+                    println!(
+                        "cache: exec_hit_rate={:.2}% conn_hit_rate={:.2}% task_hit_rate={:.2}%",
+                        cache.exec_hit_rate * 100.0,
+                        cache.conn_hit_rate * 100.0,
+                        cache.task_hit_rate * 100.0
+                    );
+                    println!(
+                        "client_pool: hits={} builds={} evictions={} size={} capacity={}",
+                        cp.hits, cp.builds, cp.evictions, cp.size, cp.capacity
+                    );
+                }
+            }
+            SystemCmd::Cleanup => {
+                let r = service.cleanup().await?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&r)?);
+                } else {
+                    println!("expired_auth_connections: {}", r.expired_auth_connections);
+                }
+            }
+        },
+        Commands::Oauth { cmd } => {
             match cmd {
-                SystemCmd::Stats => {
-                    let stats = service.get_stats().await?;
-                    if cli.json { println!("{}", serde_json::to_string_pretty(&stats)?); }
-                    else {
-                        println!("connections: {}", stats.total_connections);
-                        println!("tasks: {}", stats.total_tasks);
-                        println!("auth_connections: {}", stats.total_auth_connections);
-                        println!("api_key: {}", stats.api_key_connections);
-                        println!("basic: {}", stats.basic_connections);
-                        println!("oauth2_cc: {}", stats.oauth2_cc_connections);
-                        println!("oauth2_ac: {}", stats.oauth2_ac_connections);
+                OauthCmd::Start { dsl } => {
+                    let yaml = std::fs::read_to_string(dsl)?;
+                    let dsl: stepflow_dsl::WorkflowDSL = serde_yaml::from_str(&yaml)?;
+                    let run_store = crate::store::MemoryRunStore::default();
+                    let router = crate::authflow::actions::DefaultRouter; // not Default
+                    let res =
+                        crate::api::start_obtain(&dsl, &router, &run_store, serde_json::json!({}))?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::to_value(res)?)?
+                        );
+                    } else {
+                        println!("run_id: {}", res.run_id);
+                        println!("authorize_url: {}", res.authorize_url);
+                        println!("state: {}", res.state);
+                        if let Some(v) = res.code_verifier {
+                            println!("code_verifier: {}", v);
+                        }
                     }
                 }
-                SystemCmd::Cleanup => {
-                    let r = service.cleanup().await?;
-                    if cli.json { println!("{}", serde_json::to_string_pretty(&r)?); }
-                    else { println!("expired_auth_connections: {}", r.expired_auth_connections); }
+                OauthCmd::Resume { dsl, run_id, code, state, bind_connection } => {
+                    let yaml = std::fs::read_to_string(dsl)?;
+                    let dsl: stepflow_dsl::WorkflowDSL = serde_yaml::from_str(&yaml)?;
+                    let run_store = crate::store::MemoryRunStore::default();
+                    let router = crate::authflow::actions::DefaultRouter; // not Default
+                    let out = crate::api::resume_obtain(
+                        &dsl,
+                        &router,
+                        &run_store,
+                        crate::api::ResumeObtainArgs {
+                            run_id: run_id.clone(),
+                            code: code.clone(),
+                            state: state.clone(),
+                        },
+                    )?;
+                    // Optionally bind
+                    if let Some(conn_trn) = bind_connection {
+                        // Expect the flow to output an auth connection TRN at /states/Exchange/result or similar
+                        // Here we allow either direct string or nested field `auth_trn`
+                        let auth_trn = out.as_str()
+                            .map(|s| s.to_string())
+                            .or_else(|| out.get("auth_trn").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                            .unwrap_or_default();
+                        if !auth_trn.is_empty() {
+                            let manager = service.database();
+                            let repo = manager.connection_repository();
+                            let mut conn = repo.get_by_trn(&conn_trn).await?
+                                .ok_or_else(|| anyhow!("connection not found: {}", conn_trn))?;
+                            conn.auth_ref = Some(auth_trn.clone());
+                            repo.upsert(&conn).await?;
+                            println!("bound: connection={} -> auth_ref={}", conn_trn, auth_trn);
+                        } else {
+                            println!("[warn] cannot detect auth_trn from flow output; skip bind");
+                        }
+                    }
+                    println!("{}", serde_json::to_string_pretty(&out)?);
+                }
+                OauthCmd::Bind { connection_trn, auth_trn } => {
+                    let manager = service.database();
+                    let repo = manager.connection_repository();
+                    let mut conn = repo.get_by_trn(connection_trn).await?
+                        .ok_or_else(|| anyhow!("connection not found: {}", connection_trn))?;
+                    conn.auth_ref = Some(auth_trn.clone());
+                    repo.upsert(&conn).await?;
+                    println!("bound: connection={} -> auth_ref={}", connection_trn, auth_trn);
                 }
             }
         }
@@ -353,7 +551,9 @@ pub async fn run(cli: Cli) -> Result<()> {
 }
 
 fn read_input(path: Option<&PathBuf>) -> Result<String> {
-    if let Some(p) = path { return Ok(std::fs::read_to_string(p)?); }
+    if let Some(p) = path {
+        return Ok(std::fs::read_to_string(p)?);
+    }
     let mut buf = String::new();
     std::io::stdin().read_to_string(&mut buf)?;
     Ok(buf)
@@ -367,4 +567,3 @@ fn parse_json_or_yaml<T: serde::de::DeserializeOwned>(s: &str) -> Result<T> {
         Ok(serde_yaml::from_str(trimmed)?)
     }
 }
-

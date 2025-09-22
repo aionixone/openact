@@ -7,6 +7,7 @@
 pub mod auth_injector;
 pub mod http_executor;
 pub mod parameter_merger;
+pub mod client_pool;
 
 #[cfg(test)]
 pub mod integration_tests;
@@ -118,7 +119,7 @@ mod tests {
 
     fn make_api_key_connection() -> crate::models::ConnectionConfig {
         let mut c = crate::models::ConnectionConfig::new(
-            "trn:connection:perm".to_string(),
+            "trn:openact:default:connection/perm".to_string(),
             "conn".to_string(),
             AuthorizationType::ApiKey,
         );
@@ -141,7 +142,7 @@ mod tests {
 
         let conn = make_api_key_connection();
         let mut task = TaskConfig::new(
-            "trn:task:max".to_string(),
+            "trn:openact:default:task/max".to_string(),
             "t".to_string(),
             conn.trn.clone(),
             format!("{}{}", server.base_url(), "/big"),
@@ -170,7 +171,7 @@ mod tests {
 
         let conn = make_api_key_connection();
         let mut task = TaskConfig::new(
-            "trn:task:bin".to_string(),
+            "trn:openact:default:task/bin".to_string(),
             "t".to_string(),
             conn.trn.clone(),
             format!("{}{}", server.base_url(), "/bin"),

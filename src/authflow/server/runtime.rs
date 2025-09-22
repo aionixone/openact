@@ -58,16 +58,23 @@ pub async fn execute_workflow(state: ServerState, execution_id: String) {
                 execution.status = ExecutionStatus::Completed;
                 execution.completed_at = Some(now);
                 execution.context = Some(final_context.clone());
+                println!("[server] execution {} finished", execution_id);
                 state.broadcast_event(ExecutionEvent { event_type: "execution_completed".to_string(), execution_id: execution_id.clone(), timestamp: now, data: json!({ "status": "completed" }) });
             }
-            Ok(RunOutcome::Pending(_pending)) => {
+            Ok(RunOutcome::Pending(pending)) => {
                 execution.status = ExecutionStatus::Paused;
-                state.broadcast_event(ExecutionEvent { event_type: "execution_paused".to_string(), execution_id: execution_id.clone(), timestamp: now, data: json!({ "status": "paused" }) });
+                // Save pending info to context for later retrieval
+                execution.context = Some(pending.context.clone());
+                // Set current_state to the paused state's next_state so we resume correctly
+                execution.current_state = Some(pending.next_state.clone());
+                println!("[server] execution {} paused at {}", execution_id, pending.next_state);
+                state.broadcast_event(ExecutionEvent { event_type: "execution_paused".to_string(), execution_id: execution_id.clone(), timestamp: now, data: json!({ "status": "paused", "pending_info": pending }) });
             }
             Err(e) => {
                 execution.status = ExecutionStatus::Failed;
                 execution.error = Some(e.to_string());
                 execution.completed_at = Some(now);
+                println!("[server] execution {} failed: {}", execution_id, e);
                 state.broadcast_event(ExecutionEvent { event_type: "execution_failed".to_string(), execution_id: execution_id.clone(), timestamp: now, data: json!({ "status": "failed", "error": format!("{}", e) }) });
             }
         }

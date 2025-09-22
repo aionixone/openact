@@ -4,30 +4,15 @@
 
 use super::auth_injector::create_auth_injector;
 use super::parameter_merger::ParameterMerger;
-use crate::authflow::actions::{EnsureFreshTokenHandler, OAuth2ClientCredentialsHandler};
-use crate::authflow::engine::TaskHandler;
 use crate::models::{AuthorizationType, ConnectionConfig, TaskConfig};
-use crate::store::{StoreBackend, StoreConfig, create_connection_store};
 
-use crate::models::AuthConnection;
+// use crate::models::AuthConnection; // moved to oauth runtime
 use anyhow::{Context, Result, anyhow};
-use chrono::{DateTime, Duration, Utc};
-use reqwest::Proxy;
+use reqwest::Response;
 use reqwest::header::{AUTHORIZATION, HeaderValue};
-use reqwest::{Client, Response};
-use serde_json::json;
 use std::collections::HashMap;
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
-use tokio::sync::oneshot;
 
-// 可复用客户端池（按配置）
-// 已由 CLIENT_POOL 取代（删除保留以消除未引用字段警告）
-static CLIENT_POOL: OnceLock<Mutex<HashMap<String, Client>>> = OnceLock::new();
-static CC_TOKEN_CACHE: OnceLock<Mutex<HashMap<String, (String, DateTime<Utc>)>>> = OnceLock::new();
-static CC_INFLIGHT: OnceLock<
-    Mutex<HashMap<String, Vec<oneshot::Sender<anyhow::Result<(String, DateTime<Utc>)>>>>>,
-> = OnceLock::new();
+// HTTP Client 池已移动至 crate::executor::client_pool
 
 /// HTTP执行器：处理直接HTTP调用
 pub struct HttpExecutor {}
@@ -56,8 +41,8 @@ impl HttpExecutor {
         // 3. 构建完整URL
         let url = self.build_url(&merged.endpoint, &merged.query_params)?;
 
-        // 4. 获取对应配置的HTTP客户端
-        let client = self.get_client_for(connection, task)?;
+        // 4. 获取对应配置的HTTP客户端（委托 client_pool）
+        let client = crate::executor::client_pool::get_client_for(connection, task)?;
         // 5. 构建HTTP请求
         let mut request_builder = client
             .request(
@@ -92,14 +77,38 @@ impl HttpExecutor {
     ) -> Result<()> {
         match connection.authorization_type {
             AuthorizationType::OAuth2ClientCredentials => {
-                // OAuth2 Client Credentials: 获取或刷新token，然后注入Bearer header
-                self.handle_oauth2_client_credentials(headers, connection)
-                    .await?;
+                // OAuth2 Client Credentials: 通过 AuthRuntime 获取或刷新 token
+                use crate::oauth::runtime as oauth_rt;
+                let outcome = oauth_rt::get_cc_token(&connection.trn).await?;
+                let token = match outcome {
+                    oauth_rt::RefreshOutcome::Fresh(info)
+                    | oauth_rt::RefreshOutcome::Reused(info)
+                    | oauth_rt::RefreshOutcome::Refreshed(info) => info.access_token,
+                };
+                let auth_value = format!("Bearer {}", token);
+                let header_value = HeaderValue::from_str(&auth_value)
+                    .map_err(|_| anyhow!("Invalid access token format"))?;
+                headers.insert(AUTHORIZATION, header_value);
             }
             AuthorizationType::OAuth2AuthorizationCode => {
-                // OAuth2 Authorization Code: 从存储中获取token，必要时刷新，然后注入Bearer header
-                self.handle_oauth2_authorization_code(headers, connection)
-                    .await?;
+                // OAuth2 Authorization Code: 通过 AuthRuntime 刷新/获取 token，优先使用绑定的 auth_ref
+                use crate::oauth::runtime as oauth_rt;
+                tracing::debug!(target: "executor", trn=%connection.trn, auth_ref=?connection.auth_ref, "AC auth path dispatch");
+                let outcome = if let Some(ref auth_ref) = connection.auth_ref {
+                    oauth_rt::refresh_ac_for(&connection.trn, Some(auth_ref.as_str())).await?
+                } else {
+                    oauth_rt::refresh_ac_if_needed(&connection.trn).await?
+                };
+                let token = match outcome {
+                    oauth_rt::RefreshOutcome::Fresh(info)
+                    | oauth_rt::RefreshOutcome::Reused(info)
+                    | oauth_rt::RefreshOutcome::Refreshed(info) => info.access_token,
+                };
+                tracing::debug!(target: "executor", trn=%connection.trn, got_token=%(!token.is_empty()), "AC token obtained");
+                let auth_value = format!("Bearer {}", token);
+                let header_value = HeaderValue::from_str(&auth_value)
+                    .map_err(|_| anyhow!("Invalid access token format"))?;
+                headers.insert(AUTHORIZATION, header_value);
             }
             _ => {
                 // API Key和Basic Auth: 直接注入，无需token刷新
@@ -113,354 +122,13 @@ impl HttpExecutor {
         Ok(())
     }
 
-    /// 处理OAuth2 Client Credentials认证
-    async fn handle_oauth2_client_credentials(
-        &self,
-        headers: &mut reqwest::header::HeaderMap,
-        connection: &ConnectionConfig,
-    ) -> Result<()> {
-        // 优先从持久层读取（如果开启sqlite后端），命中则回填内存缓存
-        if let Some((token, exp)) = Self::maybe_get_db_cc_token(&connection.trn).await? {
-            Self::cache_cc_token(&connection.trn, token.clone(), exp).await;
-            let auth_value = format!("Bearer {}", token);
-            let header_value = HeaderValue::from_str(&auth_value)
-                .map_err(|_| anyhow!("Invalid access token format"))?;
-            headers.insert(AUTHORIZATION, header_value);
-            return Ok(());
-        }
+    // OAuth2 Client Credentials 分支逻辑已迁移至 oauth::runtime
 
-        // 其次从内存缓存读取（带 60s skew）
-        if let Some(token) = Self::get_cached_cc_token(&connection.trn, 60).await {
-            let auth_value = format!("Bearer {}", token);
-            let header_value = HeaderValue::from_str(&auth_value)
-                .map_err(|_| anyhow!("Invalid access token format"))?;
-            headers.insert(AUTHORIZATION, header_value);
-            return Ok(());
-        }
+    // client_key 逻辑已移动至 crate::executor::client_pool
 
-        // Singleflight: 如果已有并发获取，等待其结果
-        if let Some(rx) = Self::register_cc_inflight(&connection.trn).await? {
-            let (token, _exp) = rx.await.map_err(|_| anyhow!("inflight channel closed"))??;
-            let auth_value = format!("Bearer {}", token);
-            let header_value = HeaderValue::from_str(&auth_value)
-                .map_err(|_| anyhow!("Invalid access token format"))?;
-            headers.insert(AUTHORIZATION, header_value);
-            return Ok(());
-        }
+    // client 构建已提取至 client_pool 模块
 
-        let oauth_params = connection
-            .auth_parameters
-            .oauth_parameters
-            .as_ref()
-            .ok_or_else(|| {
-                anyhow!(
-                    "OAuth2 parameters missing for connection: {}",
-                    connection.trn
-                )
-            })?;
-
-        // 构建Client Credentials请求参数
-        let mut request_params = json!({
-            "tokenUrl": oauth_params.token_url,
-            "clientId": oauth_params.client_id,
-            "clientSecret": oauth_params.client_secret,
-        });
-
-        // 添加scope（如果有）
-        if let Some(scope) = &oauth_params.scope {
-            request_params["scopes"] = json!(scope.split_whitespace().collect::<Vec<_>>());
-        }
-
-        // 调用现有的OAuth2ClientCredentialsHandler
-        let handler = OAuth2ClientCredentialsHandler::default();
-        let result = handler
-            .execute("oauth2.client_credentials", "", &request_params)
-            .context("Failed to obtain OAuth2 Client Credentials token")?;
-
-        // 提取access_token
-        let access_token = result
-            .get("access_token")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("No access_token in OAuth2 response"))?;
-
-        // 计算过期时间（默认3600s）并写入缓存
-        let now = Utc::now();
-        let expires_in = result
-            .get("expires_in")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(3600);
-        let expires_at = now + Duration::seconds(expires_in);
-        // 先写入持久层（若启用sqlite），再写回内存缓存
-        if let Ok(backend_env) = std::env::var("OPENACT_AUTH_BACKEND") {
-            if backend_env.eq_ignore_ascii_case("sqlite") {
-                let cfg = StoreConfig {
-                    backend: StoreBackend::Sqlite,
-                    ..Default::default()
-                };
-                if let Ok(store) = create_connection_store(cfg).await {
-                    // 使用固定tenant/provider，将 connection.trn 作为 user_id 进行映射
-                    let ac = AuthConnection::new_with_params(
-                        "openact",
-                        "oauth2_cc",
-                        &connection.trn,
-                        access_token.to_string(),
-                        None,
-                        Some(expires_at),
-                        Some("Bearer".to_string()),
-                        oauth_params.scope.clone(),
-                        None,
-                    )
-                    .map_err(|e| anyhow!("failed to create AuthConnection: {}", e))?;
-                    let trn_str = ac.trn.to_string();
-                    if store.put(&trn_str, &ac).await.is_ok() {
-                        let _ = store.cleanup_expired().await;
-                    }
-                }
-            }
-        }
-        // 内存缓存写入（无论持久化是否成功）
-        Self::cache_cc_token(&connection.trn, access_token.to_string(), expires_at).await;
-        // 通知等待者
-        let _ =
-            Self::finish_cc_inflight(&connection.trn, Ok((access_token.to_string(), expires_at)))
-                .await;
-
-        // 注入Bearer token到Authorization header
-        let auth_value = format!("Bearer {}", access_token);
-        let header_value = HeaderValue::from_str(&auth_value)
-            .map_err(|_| anyhow!("Invalid access token format"))?;
-        headers.insert(AUTHORIZATION, header_value);
-
-        Ok(())
-    }
-
-    async fn get_cached_cc_token(trn: &str, skew_seconds: i64) -> Option<String> {
-        let cache = CC_TOKEN_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-        let guard = cache.lock().await;
-        if let Some((token, exp)) = guard.get(trn) {
-            if *exp > Utc::now() + Duration::seconds(skew_seconds) {
-                return Some(token.clone());
-            }
-        }
-        None
-    }
-
-    async fn cache_cc_token(trn: &str, token: String, expires_at: DateTime<Utc>) {
-        let cache = CC_TOKEN_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = cache.lock().await;
-        guard.insert(trn.to_string(), (token, expires_at));
-    }
-
-    async fn maybe_get_db_cc_token(trn: &str) -> Result<Option<(String, DateTime<Utc>)>> {
-        match std::env::var("OPENACT_AUTH_BACKEND") {
-            Ok(v) if v.eq_ignore_ascii_case("sqlite") => {
-                let cfg = StoreConfig {
-                    backend: StoreBackend::Sqlite,
-                    ..Default::default()
-                };
-                let store = create_connection_store(cfg).await?;
-                let trn_str = format!("trn:auth:openact:oauth2_cc:{}", trn); // matches AuthConnectionTrn format
-                if let Some(conn) = store.get(&trn_str).await? {
-                    if let Some(exp) = conn.expires_at {
-                        if exp > Utc::now() + Duration::seconds(60) {
-                            // skew
-                            return Ok(Some((conn.access_token, exp)));
-                        }
-                    }
-                }
-                Ok(None)
-            }
-            _ => Ok(None),
-        }
-    }
-
-    fn client_key(connection: &ConnectionConfig, task: &TaskConfig) -> String {
-        let timeout = connection
-            .timeout_config
-            .as_ref()
-            .or(task.timeout_config.as_ref());
-        let network = connection
-            .network_config
-            .as_ref()
-            .or(task.network_config.as_ref());
-        let mut key = String::from("ua=OpenAct/0.1.0;");
-        if let Some(t) = timeout {
-            key.push_str(&format!(
-                "ct={} rt={} tt={};",
-                t.connect_ms, t.read_ms, t.total_ms
-            ));
-        }
-        if let Some(n) = network {
-            if let Some(p) = &n.proxy_url {
-                key.push_str(&format!("proxy={};", p));
-            }
-            if let Some(tls) = &n.tls {
-                key.push_str(&format!("vp={};", tls.verify_peer));
-                key.push_str(&format!(
-                    "ca={};",
-                    tls.ca_pem.as_ref().map(|v| v.len()).unwrap_or(0)
-                ));
-                key.push_str(&format!("sn={};", tls.server_name.as_deref().unwrap_or("")));
-            }
-        }
-        key
-    }
-
-    fn get_client_for(&self, connection: &ConnectionConfig, task: &TaskConfig) -> Result<Client> {
-        let pool = CLIENT_POOL.get_or_init(|| Mutex::new(HashMap::new()));
-        let key = Self::client_key(connection, task);
-        // fast path: try lock and get
-        if let Ok(guard) = pool.try_lock() {
-            if let Some(c) = guard.get(&key) {
-                return Ok(c.clone());
-            }
-        }
-        // build new client
-        let mut builder = Client::builder().user_agent("OpenAct/0.1.0");
-        if let Some(t) = connection
-            .timeout_config
-            .as_ref()
-            .or(task.timeout_config.as_ref())
-        {
-            builder = builder
-                .connect_timeout(std::time::Duration::from_millis(t.connect_ms))
-                .timeout(std::time::Duration::from_millis(t.total_ms));
-        }
-        if let Some(n) = connection
-            .network_config
-            .as_ref()
-            .or(task.network_config.as_ref())
-        {
-            if let Some(p) = &n.proxy_url {
-                builder =
-                    builder.proxy(Proxy::all(p).map_err(|e| anyhow!("invalid proxy: {}", e))?);
-            }
-            if let Some(tls) = &n.tls {
-                if !tls.verify_peer {
-                    builder = builder.danger_accept_invalid_certs(true);
-                }
-                if let Some(ca) = &tls.ca_pem {
-                    let cert = reqwest::Certificate::from_pem(ca)
-                        .map_err(|e| anyhow!("invalid ca pem: {}", e))?;
-                    builder = builder.add_root_certificate(cert);
-                }
-                // mTLS: 需要同时提供 client_cert_pem 与 client_key_pem
-                if let (Some(cert_pem), Some(key_pem)) = (&tls.client_cert_pem, &tls.client_key_pem)
-                {
-                    // 将 cert 和 key 拼接为一个 PEM 文本，供 reqwest::Identity 解析
-                    let mut combined = Vec::new();
-                    combined.extend_from_slice(cert_pem);
-                    if !combined.ends_with(b"\n") {
-                        combined.extend_from_slice(b"\n");
-                    }
-                    combined.extend_from_slice(key_pem);
-                    let id = reqwest::Identity::from_pem(&combined)
-                        .map_err(|e| anyhow!("invalid client cert/key pem: {}", e))?;
-                    builder = builder.identity(id);
-                }
-            }
-        }
-        let client = builder.build().context("Failed to create HTTP client")?;
-        // store in pool (best-effort, avoid blocking in async context)
-        if let Ok(mut guard) = pool.try_lock() {
-            guard.insert(key, client.clone());
-        }
-        Ok(client)
-    }
-
-    async fn register_cc_inflight(
-        trn: &str,
-    ) -> Result<Option<oneshot::Receiver<anyhow::Result<(String, DateTime<Utc>)>>>> {
-        let map = CC_INFLIGHT.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = map.lock().await;
-        if let Some(waiters) = guard.get_mut(trn) {
-            let (tx, rx) = oneshot::channel();
-            waiters.push(tx);
-            return Ok(Some(rx));
-        } else {
-            guard.insert(trn.to_string(), Vec::new());
-            return Ok(None);
-        }
-    }
-
-    async fn finish_cc_inflight(
-        trn: &str,
-        val: anyhow::Result<(String, DateTime<Utc>)>,
-    ) -> Result<()> {
-        let map = CC_INFLIGHT.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = map.lock().await;
-        if let Some(waiters) = guard.remove(trn) {
-            for tx in waiters {
-                let _ = tx.send(
-                    val.as_ref()
-                        .map(|(t, e)| (t.clone(), *e))
-                        .map_err(|e| anyhow!("{}", e)),
-                );
-            }
-        }
-        Ok(())
-    }
-
-    /// 处理OAuth2 Authorization Code认证
-    async fn handle_oauth2_authorization_code(
-        &self,
-        headers: &mut reqwest::header::HeaderMap,
-        connection: &ConnectionConfig,
-    ) -> Result<()> {
-        let oauth_params = connection
-            .auth_parameters
-            .oauth_parameters
-            .as_ref()
-            .ok_or_else(|| {
-                anyhow!(
-                    "OAuth2 parameters missing for connection: {}",
-                    connection.trn
-                )
-            })?;
-
-        // 选择实际的存储（优先环境变量配置）
-        let backend = match std::env::var("OPENACT_AUTH_BACKEND").ok().as_deref() {
-            Some("sqlite") => StoreBackend::Sqlite,
-            _ => StoreBackend::Memory,
-        };
-        let cfg = StoreConfig {
-            backend,
-            ..Default::default()
-        };
-        let store = create_connection_store(cfg).await?;
-        // 使用现有的EnsureFreshTokenHandler来处理token刷新（接入DB或内存）
-        let ensure_handler = EnsureFreshTokenHandler { store };
-        let request_params = json!({
-            "connection_ref": connection.trn,
-            "tokenUrl": oauth_params.token_url,
-            "clientId": oauth_params.client_id,
-            "clientSecret": oauth_params.client_secret,
-            "skewSeconds": 120  // 2分钟的安全边际
-        });
-
-        let result = ensure_handler
-            .execute("ensure.fresh_token", "", &request_params)
-            .context("Failed to ensure fresh OAuth2 token")?;
-
-        // 提取access_token
-        let access_token = result
-            .get("access_token")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                anyhow!(
-                    "OAuth2 Authorization Code token not found or expired. Please re-authorize connection: {}",
-                    connection.trn
-                )
-            })?;
-
-        // 注入Bearer token到Authorization header
-        let auth_value = format!("Bearer {}", access_token);
-        let header_value = HeaderValue::from_str(&auth_value)
-            .map_err(|_| anyhow!("Invalid access token format"))?;
-        headers.insert(AUTHORIZATION, header_value);
-
-        Ok(())
-    }
+    // OAuth2 Authorization Code 分支逻辑已迁移至 oauth::runtime
 
     /// 构建完整URL（包含query参数）
     fn build_url(&self, endpoint: &str, query_params: &HashMap<String, String>) -> Result<String> {
@@ -489,12 +157,17 @@ impl Default for HttpExecutor {
 mod tests {
     use super::*;
     use crate::models::{ApiKeyAuthParameters, BasicAuthParameters};
+    use crate::models::{AuthConnection, AuthorizationType, ConnectionConfig, OAuth2Parameters};
+    use crate::store::service::StorageService;
+    use crate::store::{StoreBackend, StoreConfig, create_connection_store};
+    use chrono::Utc;
+    use httpmock::prelude::*;
     use std::collections::HashMap;
 
     #[allow(dead_code)]
     fn create_api_key_connection() -> ConnectionConfig {
         let mut connection = ConnectionConfig::new(
-            "trn:connection:api-key-test".to_string(),
+            "trn:openact:default:connection/api-key-test".to_string(),
             "API Key Test".to_string(),
             AuthorizationType::ApiKey,
         );
@@ -510,7 +183,7 @@ mod tests {
     #[allow(dead_code)]
     fn create_basic_auth_connection() -> ConnectionConfig {
         let mut connection = ConnectionConfig::new(
-            "trn:connection:basic-test".to_string(),
+            "trn:openact:default:connection/basic-test".to_string(),
             "Basic Auth Test".to_string(),
             AuthorizationType::Basic,
         );
@@ -526,9 +199,9 @@ mod tests {
     #[allow(dead_code)]
     fn create_test_task() -> TaskConfig {
         TaskConfig::new(
-            "trn:task:test".to_string(),
+            "trn:openact:default:task/test".to_string(),
             "Test Task".to_string(),
-            "trn:connection:test".to_string(),
+            "trn:openact:default:connection/test".to_string(),
             "https://api.example.com/users".to_string(),
             "GET".to_string(),
         )
@@ -575,4 +248,117 @@ mod tests {
     }
 
     // 注意：实际的HTTP请求测试需要mock服务器，这里只测试URL构建逻辑
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_oauth2_ac_with_auth_ref_and_refresh() {
+        let _ = tracing_subscriber::fmt::try_init();
+        // Reset global state for test isolation
+        crate::store::service::reset_global_storage_for_tests().await;
+        let server = MockServer::start();
+
+        // Mock token endpoint (refresh)
+        let _m_token = server.mock(|when, then| {
+            when.method(POST).path("/token");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(serde_json::json!({
+                    "access_token": "AC123",
+                    "refresh_token": "RFTOKEN2",
+                    "expires_in": 3600
+                }));
+        });
+
+        // Mock resource endpoint expecting Authorization header
+        let m_resource = server.mock(|when, then| {
+            when.method(GET)
+                .path("/resource")
+                .header("authorization", "Bearer AC123");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(serde_json::json!({"ok": true}));
+        });
+
+        // Setup DB env for runtime
+        let dir = tempfile::tempdir().unwrap();
+        let ts = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let db_path = dir.path().join(format!("test_ac_e2e_{}.db", ts));
+        unsafe {
+            std::env::set_var(
+                "OPENACT_DB_URL",
+                format!("sqlite:{}?mode=rwc", db_path.display()),
+            );
+        }
+        // no longer needed: single unified backend
+        println!("DB_URL={}", std::env::var("OPENACT_DB_URL").unwrap());
+
+        // Insert connection with auth_ref using an injected global storage service
+        let svc = StorageService::from_env().await.unwrap();
+        let service = std::sync::Arc::new(svc);
+        crate::store::service::set_global_storage_service_for_tests(service.clone()).await;
+        let mut conn = ConnectionConfig::new(
+            "trn:openact:default:connection/ac-e2e".to_string(),
+            "AC E2E".to_string(),
+            AuthorizationType::OAuth2AuthorizationCode,
+        );
+        conn.auth_parameters.oauth_parameters = Some(OAuth2Parameters {
+            client_id: "cid".to_string(),
+            client_secret: "secret".to_string(),
+            token_url: format!("{}{}", server.base_url(), "/token"),
+            scope: Some("read".to_string()),
+            redirect_uri: None,
+            use_pkce: None,
+        });
+        // Use standardized TRN and explicit auth_ref on connection
+        conn.auth_ref = Some("trn:openact:default:auth/oauth2_ac-alice".to_string());
+        service.upsert_connection(&conn).await.unwrap();
+        println!(
+            "conn.trn={} auth_ref={}",
+            conn.trn,
+            conn.auth_ref.clone().unwrap()
+        );
+
+        // Seed auth connection with a fresh access_token so runtime reuses directly
+        let cfg = StoreConfig {
+            backend: StoreBackend::Sqlite,
+            ..Default::default()
+        };
+        let store = create_connection_store(cfg).await.unwrap();
+        let ac = AuthConnection::new_with_params(
+            "openact",
+            "oauth2_ac",
+            "alice",
+            "AC123".to_string(),
+            None,
+            // Seed as fresh to trigger reuse path
+            Some(Utc::now() + chrono::Duration::seconds(600)),
+            Some("Bearer".to_string()),
+            Some("read".to_string()),
+            None,
+        )
+        .unwrap();
+        // Use standardized TRN format for runtime lookup
+        let trn_auth = "trn:openact:default:auth/oauth2_ac-alice";
+        store.put(trn_auth, &ac).await.unwrap();
+        // Ensure visibility
+        assert!(store.get(trn_auth).await.unwrap().is_some());
+
+        // **KEY FIX**: Inject the same storage service instance for OAuth runtime
+        crate::store::service::set_global_storage_service_for_tests(service.clone()).await;
+
+        // Create task for resource
+        let task = crate::models::TaskConfig::new(
+            "trn:task:ac-e2e".to_string(),
+            "t".to_string(),
+            conn.trn.clone(),
+            format!("{}{}", server.base_url(), "/resource"),
+            "GET".to_string(),
+        );
+
+        // Execute
+        let ex = crate::executor::Executor::new();
+        let res = ex.execute(&conn, &task).await.unwrap();
+        assert_eq!(res.status, 200);
+        assert_eq!(res.body.get("ok").and_then(|v| v.as_bool()), Some(true));
+        m_resource.assert();
+    }
 }

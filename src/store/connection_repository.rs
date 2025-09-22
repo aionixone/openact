@@ -70,10 +70,11 @@ impl ConnectionRepository {
             r#"
             INSERT OR REPLACE INTO connections (
                 trn, name, authorization_type, auth_params_encrypted, auth_params_nonce,
+                auth_ref,
                 default_headers_json, default_query_params_json, default_body_json,
                 network_config_json, timeout_config_json, http_policy_json,
                 key_version, created_at, updated_at, version
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             "#,
         )
         .bind(&connection.trn)
@@ -81,6 +82,7 @@ impl ConnectionRepository {
         .bind(&authorization_type_str)
         .bind(&auth_params_encrypted)
         .bind(&auth_params_nonce)
+        .bind(&connection.auth_ref)
         .bind(&default_headers_json)
         .bind(&default_query_params_json)
         .bind(&default_body_json)
@@ -103,6 +105,7 @@ impl ConnectionRepository {
         let row = sqlx::query(
             r#"
             SELECT trn, name, authorization_type, auth_params_encrypted, auth_params_nonce,
+                   auth_ref,
                    default_headers_json, default_query_params_json, default_body_json,
                    network_config_json, timeout_config_json, http_policy_json,
                    key_version, created_at, updated_at, version
@@ -144,6 +147,7 @@ impl ConnectionRepository {
                     authorization_type,
                     auth_parameters,
                     invocation_http_parameters,
+                    auth_ref: row.get("auth_ref"),
                     network_config,
                     timeout_config,
                     http_policy,
@@ -162,6 +166,7 @@ impl ConnectionRepository {
             sqlx::query(
                 r#"
                 SELECT trn, name, authorization_type, auth_params_encrypted, auth_params_nonce,
+                       auth_ref,
                        default_headers_json, default_query_params_json, default_body_json,
                        network_config_json, timeout_config_json, http_policy_json,
                        key_version, created_at, updated_at, version
@@ -177,6 +182,7 @@ impl ConnectionRepository {
             sqlx::query(
                 r#"
                 SELECT trn, name, authorization_type, auth_params_encrypted, auth_params_nonce,
+                       auth_ref,
                        default_headers_json, default_query_params_json, default_body_json,
                        network_config_json, timeout_config_json, http_policy_json,
                        key_version, created_at, updated_at, version
@@ -224,6 +230,7 @@ impl ConnectionRepository {
                 authorization_type,
                 auth_parameters,
                 invocation_http_parameters,
+                auth_ref: row.get("auth_ref"),
                 network_config,
                 timeout_config,
                 http_policy,
@@ -362,6 +369,7 @@ mod tests {
                 authorization_type TEXT NOT NULL,
                 auth_params_encrypted TEXT NOT NULL,
                 auth_params_nonce TEXT NOT NULL,
+                auth_ref TEXT,
                 default_headers_json TEXT,
                 default_query_params_json TEXT,
                 default_body_json TEXT,

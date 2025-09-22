@@ -8,7 +8,7 @@ pub trait TaskHandler: Send + Sync {
     fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PendingInfo {
     pub run_id: String,
     pub next_state: String,
@@ -60,6 +60,10 @@ pub fn run_flow(
                 resource,
                 next_state,
             } => {
+                println!(
+                    "[engine] executing state={} resource={}",
+                    state_name, resource
+                );
                 // Use stepflow-dsl TaskState fields: parameters / assign / output
                 let mapper = MappingFacade::new();
                 // Construct mapping context from current engine context
@@ -105,9 +109,27 @@ pub fn run_flow(
                 // parameters
                 let mapped_input = mapper.evaluate_arguments(&parameters, &ctx)?;
 
-                // Execute with mapped input if present; fall back to full context
-                let exec_in = mapped_input.as_ref().unwrap_or(&context);
-                let raw_out = handler.execute(&resource, &state_name, exec_in)?;
+                // Execute with context merged with mapped parameters (parameters override)
+                let exec_in_owned = if let Some(mi) = mapped_input {
+                    let mut merged = context.clone();
+                    if let (Some(mobj), Some(cobj)) = (mi.as_object(), merged.as_object_mut()) {
+                        for (k, v) in mobj.iter() {
+                            cobj.insert(k.clone(), v.clone());
+                        }
+                    }
+                    merged
+                } else {
+                    context.clone()
+                };
+                println!(
+                    "[engine] mapped params keys: {}",
+                    exec_in_owned
+                        .as_object()
+                        .map(|o| o.keys().cloned().collect::<Vec<_>>().join(","))
+                        .unwrap_or_else(|| "<non-object>".to_string())
+                );
+                let raw_out = handler.execute(&resource, &state_name, &exec_in_owned)?;
+                println!("[engine] state={} handler returned", state_name);
 
                 // assign → extend vars after execution (can access result)
                 if assign.is_some() {
@@ -305,7 +327,7 @@ pub fn run_until_pause_or_end(
         match cmd {
             Command::ExecuteTask {
                 state_name,
-                resource: _,
+                resource,
                 next_state,
             } => {
                 // Attempt to execute the task, pause if PAUSE_FOR_CALLBACK error is encountered
@@ -313,6 +335,10 @@ pub fn run_until_pause_or_end(
                 match run_flow(dsl, &state_name, context.clone(), handler, 1) {
                     Ok(out) => {
                         context = out;
+                        println!(
+                            "[engine] state {} executed ok; next={:?}",
+                            state_name, next_state
+                        );
                         if let Some(next) = next_state {
                             current = next;
                         } else if dsl.is_end_state(&state_name) {
@@ -322,6 +348,10 @@ pub fn run_until_pause_or_end(
                         }
                     }
                     Err(e) if e.to_string().contains("PAUSE_FOR_CALLBACK") => {
+                        println!(
+                            "[engine] state {} paused for callback (await)",
+                            state_name
+                        );
                         let run_id = uuid::Uuid::new_v4().to_string();
                         let await_meta = json!({
                             "expected_state": context.pointer("/vars/auth/state"),
@@ -334,7 +364,14 @@ pub fn run_until_pause_or_end(
                             await_meta,
                         }));
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        println!(
+                            "[engine] state {} error: {}",
+                            state_name,
+                            e
+                        );
+                        return Err(e);
+                    }
                 }
             }
             _ => {
