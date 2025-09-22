@@ -1,6 +1,8 @@
 #[cfg(feature = "server")]
 use openact::authflow::server::create_router_async;
 #[cfg(feature = "server")]
+use axum::Router;
+#[cfg(feature = "server")]
 use tokio::net::TcpListener;
 #[cfg(feature = "server")]
 use std::net::SocketAddr;
@@ -16,7 +18,9 @@ fn main() {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 启动 openact 服务器...");
     
-    let app = create_router_async().await;
+    let authflow_router = create_router_async().await;
+    let core_router = openact::server::router::core_api_router();
+    let app: Router = authflow_router.merge(core_router);
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
     
     println!("🌐 服务器运行在: http://{}", addr);

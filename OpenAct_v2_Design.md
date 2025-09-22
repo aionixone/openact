@@ -1169,3 +1169,29 @@ pub enum OpenActError {
 ## 总结
 
 OpenAct v2 通过整合 AWS Step Functions 的设计理念和现有 TRN 系统，提供了一个简单、强大、统一的 API 客户端解决方案。核心设计原则是简单优先、清晰分离、统一管理，确保用户能够快速上手并灵活扩展功能。
+
+## 未实现项清单（近期迭代）
+
+### 高优先级
+- [ ] 实现 HTTP API - Connections CRUD endpoints
+- [ ] 实现 HTTP API - Tasks CRUD endpoints
+- [ ] 实现 HTTP API - Task 执行端点（POST /api/v1/tasks/{trn}/execute）
+- [ ] 在服务器路由中接入新端点及处理器
+- [ ] 统一的 API 错误模型与 JSON 响应结构
+
+### 中优先级
+- [ ] 实现系统统计与清理端点（/api/v1/system/stats, /api/v1/system/cleanup）
+- [ ] CLI 增加 --server 开关，支持通过 HTTP API 执行
+- [ ] CLI CRUD/执行命令走 HTTP API
+- [ ] API 处理器的单元测试（connections、tasks、execute）
+- [ ] CLI⇄HTTP API 端到端集成测试
+
+### 低优先级（企业级能力）
+- [ ] HttpExecutor 重试策略（尊重 Retry-After）
+- [ ] 每连接限流（rate limiting）
+- [ ] 熔断器（circuit breaker）
+- [ ] 导出 Client Pool 统计到 API/CLI
+- [ ] Connection 支持 TLS 证书/私钥文件路径
+
+### 设计边界澄清
+- Authflow 仅用于复杂认证编排（AC/CC、PKCE、回调、刷新）；Task 执行走 Executor/HTTP API/CLI。
