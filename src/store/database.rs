@@ -95,125 +95,20 @@ impl DatabaseManager {
         ConnectionRepository::new(self.pool.clone(), self.encryption.clone())
     }
 
-    /// 初始化数据库schema
+    /// 初始化数据库schema - 使用迁移系统
     async fn initialize_schema(&self) -> Result<()> {
-        tracing::info!("Initializing database schema...");
+        tracing::info!("Running database migrations...");
+        
+        // 运行所有待执行的迁移
+        sqlx::migrate!("./migrations")
+            .run(&self.pool)
+            .await
+            .context("Failed to run database migrations")?;
 
-        // 创建 auth_connections 表（OAuth token存储）
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS auth_connections (
-                trn TEXT PRIMARY KEY,
-                tenant TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                user_id TEXT NOT NULL,
-                access_token_encrypted TEXT NOT NULL,
-                access_token_nonce TEXT NOT NULL,
-                refresh_token_encrypted TEXT,
-                refresh_token_nonce TEXT,
-                expires_at DATETIME,
-                token_type TEXT DEFAULT 'Bearer',
-                scope TEXT,
-                extra_data_encrypted TEXT,
-                extra_data_nonce TEXT,
-                key_version INTEGER DEFAULT 1,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                version INTEGER DEFAULT 1
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await
-        .context("Failed to create auth_connections table")?;
-
-        // 创建 connections 表（连接配置存储）
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS connections (
-                trn TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                authorization_type TEXT NOT NULL,
-                auth_params_encrypted TEXT NOT NULL,
-                auth_params_nonce TEXT NOT NULL,
-                auth_ref TEXT,
-                default_headers_json TEXT,
-                default_query_params_json TEXT,
-                default_body_json TEXT,
-                network_config_json TEXT,
-                timeout_config_json TEXT,
-                http_policy_json TEXT,
-                key_version INTEGER DEFAULT 1,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                version INTEGER DEFAULT 1
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await
-        .context("Failed to create connections table")?;
-
-        // 创建 tasks 表（任务配置存储）
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS tasks (
-                trn TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                connection_trn TEXT NOT NULL,
-                api_endpoint TEXT NOT NULL,
-                method TEXT NOT NULL,
-                headers_json TEXT,
-                query_params_json TEXT,
-                request_body_json TEXT,
-                timeout_config_json TEXT,
-                network_config_json TEXT,
-                http_policy_json TEXT,
-                response_policy_json TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                version INTEGER DEFAULT 1,
-                FOREIGN KEY (connection_trn) REFERENCES connections (trn) ON DELETE CASCADE
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await
-        .context("Failed to create tasks table")?;
-
-        // 创建索引
-        self.create_indexes().await?;
-
-        tracing::info!("Database schema initialized successfully");
+        tracing::info!("Database migrations completed successfully");
         Ok(())
     }
 
-    /// 创建数据库索引
-    async fn create_indexes(&self) -> Result<()> {
-        let indexes = vec![
-            // auth_connections indexes
-            "CREATE INDEX IF NOT EXISTS idx_auth_connections_tenant_provider ON auth_connections(tenant, provider)",
-            "CREATE INDEX IF NOT EXISTS idx_auth_connections_expires_at ON auth_connections(expires_at)",
-            
-            // connections indexes  
-            "CREATE INDEX IF NOT EXISTS idx_connections_authorization_type ON connections(authorization_type)",
-            "CREATE INDEX IF NOT EXISTS idx_connections_auth_ref ON connections(auth_ref)",
-            "CREATE INDEX IF NOT EXISTS idx_connections_name ON connections(name)",
-            
-            // tasks indexes
-            "CREATE INDEX IF NOT EXISTS idx_tasks_connection_trn ON tasks(connection_trn)",
-            "CREATE INDEX IF NOT EXISTS idx_tasks_name ON tasks(name)",
-        ];
-
-        for index_sql in indexes {
-            sqlx::query(index_sql)
-                .execute(&self.pool)
-                .await
-                .context(format!("Failed to create index: {}", index_sql))?;
-        }
-
-        Ok(())
-    }
 
     /// 健康检查
     pub async fn health_check(&self) -> Result<()> {
