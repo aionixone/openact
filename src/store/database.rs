@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use std::env;
 use std::path::Path;
 use tokio::fs;
+use tokio::sync::{OnceCell as TokioOnceCell, Mutex as TokioMutex};
 
 use crate::store::encryption::FieldEncryption;
 use super::connection_repository::ConnectionRepository;
@@ -45,17 +46,22 @@ impl DatabaseManager {
         }
 
         // 规范化数据库URL，确保具有写权限
-        let normalized_url = if database_url.starts_with("sqlite:") {
+        let mut url_owned = database_url.to_string();
+        // Ensure absolute paths use sqlite:// prefix (three slashes after scheme)
+        if url_owned.starts_with("sqlite:/") && !url_owned.starts_with("sqlite://") {
+            url_owned = url_owned.replacen("sqlite:/", "sqlite://", 1);
+        }
+        let normalized_url = if url_owned.starts_with("sqlite:") {
             // 如果已经有sqlite前缀，检查是否有mode参数
-            if database_url.contains("mode=") {
-                database_url.to_string()
+            if url_owned.contains("mode=") {
+                url_owned
             } else {
-                let separator = if database_url.contains("?") { "&" } else { "?" };
-                format!("{}{}mode=rwc", database_url, separator)
+                let separator = if url_owned.contains("?") { "&" } else { "?" };
+                format!("{}{}mode=rwc", url_owned, separator)
             }
         } else {
             // 使用 URL 形式，确保为 sqlite:// 路径，避免某些平台的权限问题
-            format!("sqlite://{}?mode=rwc", database_url)
+            format!("sqlite://{}?mode=rwc", url_owned)
         };
 
         // 创建连接池
@@ -97,16 +103,62 @@ impl DatabaseManager {
 
     /// 初始化数据库schema - 使用迁移系统
     async fn initialize_schema(&self) -> Result<()> {
+        // Global migration lock to avoid concurrent UNIQUE(_sqlx_migrations.version) errors in tests
+        static MIGRATION_LOCK: TokioOnceCell<TokioMutex<()>> = TokioOnceCell::const_new();
+        let lock = MIGRATION_LOCK
+            .get_or_init(|| async { TokioMutex::new(()) })
+            .await
+            .lock()
+            .await;
         tracing::info!("Running database migrations...");
         
         // 运行所有待执行的迁移
-        sqlx::migrate!("./migrations")
+        let migration_result = sqlx::migrate!("./migrations")
             .run(&self.pool)
-            .await
-            .context("Failed to run database migrations")?;
-
-        tracing::info!("Database migrations completed successfully");
-        Ok(())
+            .await;
+            
+        match migration_result {
+            Ok(_) => {
+                tracing::info!("Database migrations completed successfully");
+                drop(lock);
+                Ok(())
+            }
+            Err(sqlx::migrate::MigrateError::VersionMismatch(version)) => {
+                let error_msg = format!(
+                    "Database migration version mismatch (found: {}). This may happen when:\n\
+                     1. The database was created with a different version of OpenAct\n\
+                     2. Migration files have been modified\n\
+                     \n\
+                     To fix this, you can:\n\
+                     1. Delete the database file and restart (will lose all data)\n\
+                     2. Run 'openact-cli system reset-db' (if available)\n\
+                     3. Backup your data and recreate the database",
+                    version
+                );
+                drop(lock);
+                Err(anyhow::anyhow!(error_msg))
+            }
+            Err(e) if e.to_string().contains("no such column") => {
+                let error_msg = format!(
+                    "Database schema is missing expected columns: {}\n\
+                     This usually means the database needs to be updated.\n\
+                     \n\
+                     To fix this:\n\
+                     1. Backup your data if needed\n\
+                     2. Delete the database file (data/openact.db) to force recreation\n\
+                     3. Restart the application\n\
+                     \n\
+                     For development: This often happens when switching between branches with different schemas.",
+                    e
+                );
+                drop(lock);
+                Err(anyhow::anyhow!(error_msg))
+            }
+            Err(e) => {
+                drop(lock);
+                Err(anyhow::anyhow!("Failed to run database migrations: {}", e))
+            }
+        }
     }
 
 

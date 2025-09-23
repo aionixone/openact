@@ -35,16 +35,13 @@ cat > /tmp/basic_connection.json << EOF
 {
   "trn": "${CONNECTION_TRN}",
   "name": "HTTPBin Basic Auth Test",
-  "version": 1,
   "authorization_type": "basic",
   "auth_parameters": {
     "basic_auth_parameters": {
       "username": "testuser",
       "password": "testpass"
     }
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 
@@ -69,16 +66,13 @@ cat > /tmp/basic_task.json << EOF
 {
   "trn": "${TASK_TRN}",
   "name": "HTTPBin Basic Auth Test",
-  "version": 1,
   "connection_trn": "${CONNECTION_TRN}",
   "api_endpoint": "https://httpbin.org/basic-auth/testuser/testpass",
   "method": "GET",
   "headers": {
     "User-Agent": ["openact/1.0"],
     "Accept": ["application/json"]
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 
@@ -127,16 +121,13 @@ cat > /tmp/basic_wrong_connection.json << EOF
 {
   "trn": "trn:openact:${TENANT}:connection/httpbin-basic-wrong@v1",
   "name": "HTTPBin Basic Auth Wrong Credentials",
-  "version": 1,
   "authorization_type": "basic",
   "auth_parameters": {
     "basic_auth_parameters": {
       "username": "wronguser",
       "password": "wrongpass"
     }
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 
@@ -144,16 +135,13 @@ cat > /tmp/basic_wrong_task.json << EOF
 {
   "trn": "trn:openact:${TENANT}:task/httpbin-basic-auth-wrong@v1",
   "name": "HTTPBin Basic Auth Wrong Test",
-  "version": 1,
   "connection_trn": "trn:openact:${TENANT}:connection/httpbin-basic-wrong@v1",
   "api_endpoint": "https://httpbin.org/basic-auth/testuser/testpass",
   "method": "GET",
   "headers": {
     "User-Agent": ["openact/1.0"],
     "Accept": ["application/json"]
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 

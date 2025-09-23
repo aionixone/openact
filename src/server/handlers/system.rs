@@ -1,7 +1,8 @@
 #![cfg(feature = "server")]
 
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use axum::{response::IntoResponse, Json};
 use crate::app::service::OpenActService;
+use crate::interface::error::helpers;
 
 pub async fn stats() -> impl IntoResponse {
     let svc = OpenActService::from_env().await.unwrap();
@@ -19,7 +20,7 @@ pub async fn stats() -> impl IntoResponse {
             let memory = get_memory_stats();
             let version_info = get_version_info();
             
-            (StatusCode::OK, Json(serde_json::json!({
+            Json(serde_json::json!({
                 "storage": s,
                 "caches": c,
                 "client_pool": {
@@ -40,9 +41,9 @@ pub async fn stats() -> impl IntoResponse {
                     "version": version_info
                 },
                 "timestamp": chrono::Utc::now().to_rfc3339()
-            }))).into_response()
+            })).into_response()
         },
-        (Err(e), _) | (_, Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"code":"internal.storage_error","message":e.to_string()}))).into_response(),
+        (Err(e), _) | (_, Err(e)) => helpers::storage_error(e.to_string()).into_response(),
     }
 }
 
@@ -95,28 +96,34 @@ pub async fn health() -> impl IntoResponse {
         "unhealthy"
     };
     
-    let status_code = if storage_ok && cache_ok {
-        StatusCode::OK
+    if storage_ok && cache_ok {
+        Json(serde_json::json!({
+            "status": status,
+            "checks": {
+                "storage": if storage_ok { "ok" } else { "error" },
+                "cache": if cache_ok { "ok" } else { "error" }
+            },
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "version": env!("CARGO_PKG_VERSION")
+        })).into_response()
     } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    };
-    
-    (status_code, Json(serde_json::json!({
-        "status": status,
-        "checks": {
-            "storage": if storage_ok { "ok" } else { "error" },
-            "cache": if cache_ok { "ok" } else { "error" }
-        },
-        "timestamp": chrono::Utc::now().to_rfc3339(),
-        "version": env!("CARGO_PKG_VERSION")
-    }))).into_response()
+        (axum::http::StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
+            "status": status,
+            "checks": {
+                "storage": if storage_ok { "ok" } else { "error" },
+                "cache": if cache_ok { "ok" } else { "error" }
+            },
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "version": env!("CARGO_PKG_VERSION")
+        }))).into_response()
+    }
 }
 
 pub async fn cleanup() -> impl IntoResponse {
     let svc = OpenActService::from_env().await.unwrap();
     match svc.cleanup().await {
-        Ok(r) => (StatusCode::OK, Json(serde_json::json!(r))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"code":"internal.storage_error","message":e.to_string()}))).into_response(),
+        Ok(r) => Json(serde_json::json!(r)).into_response(),
+        Err(e) => helpers::storage_error(e.to_string()).into_response(),
     }
 }
 

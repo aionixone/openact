@@ -35,7 +35,6 @@ cat > /tmp/retry_connection.json << EOF
 {
   "trn": "${CONNECTION_TRN}",
   "name": "HTTPBin Retry Test Connection",
-  "version": 1,
   "authorization_type": "api_key",
   "auth_parameters": {
     "api_key_auth_parameters": {
@@ -50,9 +49,7 @@ cat > /tmp/retry_connection.json << EOF
     "backoff_multiplier": 2.0,
     "retry_status_codes": [500, 502, 503, 504, 429],
     "respect_retry_after": true
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 
@@ -76,16 +73,13 @@ cat > /tmp/status_task.json << EOF
 {
   "trn": "${TASK_TRN}",
   "name": "HTTPBin Status Code Test",
-  "version": 1,
   "connection_trn": "${CONNECTION_TRN}",
   "api_endpoint": "https://httpbin.org/status/200",
   "method": "GET",
   "headers": {
     "User-Agent": ["openact/1.0"],
     "Accept": ["application/json"]
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 
@@ -193,7 +187,6 @@ cat > /tmp/task_retry.json << EOF
 {
   "trn": "trn:openact:${TENANT}:task/httpbin-custom-retry@v1",
   "name": "HTTPBin Custom Retry Task",
-  "version": 1,
   "connection_trn": "${CONNECTION_TRN}",
   "api_endpoint": "https://httpbin.org/status/429",
   "method": "GET",
@@ -207,9 +200,7 @@ cat > /tmp/task_retry.json << EOF
     "backoff_multiplier": 1.8,
     "retry_status_codes": [429, 500, 502, 503, 504],
     "respect_retry_after": true
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 

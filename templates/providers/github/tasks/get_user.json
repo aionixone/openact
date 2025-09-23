@@ -1,0 +1,21 @@
+{
+  "provider": "github",
+  "template_type": "task",
+  "action": "get_user",
+  "template_version": "1.0",
+  "metadata": {
+    "name": "Get GitHub User Profile",
+    "description": "Retrieve authenticated user's profile information",
+    "api_reference": "https://docs.github.com/en/rest/users/users#get-the-authenticated-user",
+    "requires_connection": "github_oauth2"
+  },
+  "config": {
+    "name": "Get GitHub User Profile",
+    "api_endpoint": "https://api.github.com/user",
+    "method": "GET",
+    "headers": {
+      "Accept": ["application/vnd.github.v3+json"],
+      "X-GitHub-Api-Version": ["2022-11-28"]
+    }
+  }
+}

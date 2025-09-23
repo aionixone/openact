@@ -10,30 +10,51 @@ use super::common::{HttpParameter, NetworkConfig, TimeoutConfig, HttpPolicy, Ret
 
 /// Authorization type for connections
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
 pub enum AuthorizationType {
+    #[serde(rename = "api_key")]
     ApiKey,
+    #[serde(rename = "basic")]
     Basic,
+    #[serde(rename = "oauth2_client_credentials")]
     OAuth2ClientCredentials,
+    #[serde(rename = "oauth2_authorization_code")]
     OAuth2AuthorizationCode,
 }
 
 /// API Key authentication parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ApiKeyAuthParameters {
     pub api_key_name: String,
     pub api_key_value: String, // Will be encrypted when stored
 }
 
+impl std::fmt::Debug for ApiKeyAuthParameters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApiKeyAuthParameters")
+            .field("api_key_name", &self.api_key_name)
+            .field("api_key_value", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// Basic authentication parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BasicAuthParameters {
     pub username: String,
     pub password: String, // Will be encrypted when stored
 }
 
+impl std::fmt::Debug for BasicAuthParameters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BasicAuthParameters")
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// OAuth2 parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct OAuth2Parameters {
     pub client_id: String,
     pub client_secret: String, // Will be encrypted when stored
@@ -41,6 +62,19 @@ pub struct OAuth2Parameters {
     pub scope: Option<String>,
     pub redirect_uri: Option<String>,
     pub use_pkce: Option<bool>,
+}
+
+impl std::fmt::Debug for OAuth2Parameters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAuth2Parameters")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"[REDACTED]")
+            .field("token_url", &self.token_url)
+            .field("scope", &self.scope)
+            .field("redirect_uri", &self.redirect_uri)
+            .field("use_pkce", &self.use_pkce)
+            .finish()
+    }
 }
 
 /// Authentication parameters container
@@ -112,5 +146,49 @@ impl ConnectionConfig {
             updated_at: now,
             version: 1,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_api_key_debug_sanitization() {
+        let api_key = ApiKeyAuthParameters {
+            api_key_name: "X-API-Key".to_string(),
+            api_key_value: "secret-api-key-123".to_string(),
+        };
+        let debug_output = format!("{:?}", api_key);
+        assert!(debug_output.contains("[REDACTED]"));
+        assert!(!debug_output.contains("secret-api-key-123"));
+    }
+
+    #[test]
+    fn test_basic_auth_debug_sanitization() {
+        let basic_auth = BasicAuthParameters {
+            username: "testuser".to_string(),
+            password: "secret-password".to_string(),
+        };
+        let debug_output = format!("{:?}", basic_auth);
+        assert!(debug_output.contains("[REDACTED]"));
+        assert!(!debug_output.contains("secret-password"));
+        assert!(debug_output.contains("testuser")); // username should not be redacted
+    }
+
+    #[test]
+    fn test_oauth2_debug_sanitization() {
+        let oauth2 = OAuth2Parameters {
+            client_id: "my-client-id".to_string(),
+            client_secret: "secret-client-secret".to_string(),
+            token_url: "https://oauth.example.com/token".to_string(),
+            scope: Some("read write".to_string()),
+            redirect_uri: None,
+            use_pkce: Some(true),
+        };
+        let debug_output = format!("{:?}", oauth2);
+        assert!(debug_output.contains("[REDACTED]"));
+        assert!(!debug_output.contains("secret-client-secret"));
+        assert!(debug_output.contains("my-client-id")); // client_id should not be redacted
     }
 }

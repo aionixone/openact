@@ -39,7 +39,6 @@ cat > /tmp/github_connection.json << EOF
 {
   "trn": "${CONNECTION_TRN}",
   "name": "GitHub OAuth Connection",
-  "version": 1,
   "authorization_type": "oauth2_authorization_code",
   "auth_parameters": {
     "oauth_parameters": {
@@ -50,9 +49,7 @@ cat > /tmp/github_connection.json << EOF
       "redirect_uri": "http://localhost:8080/oauth/callback",
       "use_pkce": false
     }
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 
@@ -77,16 +74,13 @@ cat > /tmp/github_task.json << EOF
 {
   "trn": "${TASK_TRN}",
   "name": "Get GitHub User",
-  "version": 1,
   "connection_trn": "${CONNECTION_TRN}",
   "api_endpoint": "https://api.github.com/user",
   "method": "GET",
   "headers": {
     "User-Agent": ["openact/1.0"],
     "Accept": ["application/vnd.github.v3+json"]
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 

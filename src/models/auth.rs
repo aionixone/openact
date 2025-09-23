@@ -11,7 +11,7 @@ use anyhow::Result;
 use crate::store::auth_trn::AuthConnectionTrn;
 
 /// Authentication connection state, including tokens and metadata
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthConnection {
     /// TRN identifier
@@ -43,6 +43,22 @@ pub struct AuthConnection {
 
 fn default_token_type() -> String {
     "Bearer".to_string()
+}
+
+impl std::fmt::Debug for AuthConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthConnection")
+            .field("trn", &self.trn)
+            .field("access_token", &"[REDACTED]")
+            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "[REDACTED]"))
+            .field("expires_at", &self.expires_at)
+            .field("token_type", &self.token_type)
+            .field("scope", &self.scope)
+            .field("extra", &self.extra)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
+            .finish()
+    }
 }
 
 impl AuthConnection {

@@ -35,16 +35,13 @@ cat > /tmp/apikey_connection.json << EOF
 {
   "trn": "${CONNECTION_TRN}",
   "name": "HTTPBin API Key Test",
-  "version": 1,
   "authorization_type": "api_key",
   "auth_parameters": {
     "api_key_auth_parameters": {
       "api_key_name": "X-API-Key",
       "api_key_value": "demo-api-key-12345"
     }
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 
@@ -69,7 +66,6 @@ cat > /tmp/httpbin_task.json << EOF
 {
   "trn": "${TASK_TRN}",
   "name": "HTTPBin GET Test",
-  "version": 1,
   "connection_trn": "${CONNECTION_TRN}",
   "api_endpoint": "https://httpbin.org/get",
   "method": "GET",
@@ -80,9 +76,7 @@ cat > /tmp/httpbin_task.json << EOF
   "query_params": {
     "test": ["true"],
     "demo": ["api_key_example"]
-  },
-  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  }
 }
 EOF
 

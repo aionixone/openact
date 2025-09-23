@@ -10,6 +10,10 @@ pub mod logging;
 pub mod metrics;
 pub mod tracing_config;
 
+// No-op metrics implementation when metrics feature is disabled
+#[cfg(not(feature = "metrics"))]
+pub mod noop_metrics;
+
 #[cfg(feature = "server")]
 pub mod endpoints;
 

@@ -14,11 +14,11 @@ pub enum AuthInjectionError {
     #[error("Missing authentication parameters for {auth_type:?}")]
     MissingAuthParams { auth_type: AuthorizationType },
 
-    #[error("Invalid header name: {name}")]
+    #[error("Invalid header name")]
     InvalidHeaderName { name: String },
 
-    #[error("Invalid header value: {value}")]
-    InvalidHeaderValue { value: String },
+    #[error("Invalid header value (length: {value_len})")]
+    InvalidHeaderValue { value_len: usize },
 
     #[error("OAuth2 token not available for connection: {connection_trn}")]
     OAuth2TokenNotAvailable { connection_trn: String },
@@ -66,7 +66,7 @@ impl AuthInjector for ApiKeyInjector {
             // Authorization header with Bearer prefix
             let auth_value = format!("Bearer {}", key_value);
             let header_value = HeaderValue::from_str(&auth_value)
-                .map_err(|_| AuthInjectionError::InvalidHeaderValue { value: auth_value })?;
+                .map_err(|_| AuthInjectionError::InvalidHeaderValue { value_len: auth_value.len() })?;
             headers.insert(AUTHORIZATION, header_value);
         } else if key_name.starts_with("X-") || key_name.contains("-") {
             // Custom header
@@ -77,7 +77,7 @@ impl AuthInjector for ApiKeyInjector {
             })?;
             let header_value = HeaderValue::from_str(key_value).map_err(|_| {
                 AuthInjectionError::InvalidHeaderValue {
-                    value: key_value.clone(),
+                    value_len: key_value.len(),
                 }
             })?;
             headers.insert(header_name, header_value);
@@ -114,7 +114,7 @@ impl AuthInjector for BasicAuthInjector {
         let auth_value = format!("Basic {}", encoded);
 
         let header_value = HeaderValue::from_str(&auth_value)
-            .map_err(|_| AuthInjectionError::InvalidHeaderValue { value: auth_value })?;
+            .map_err(|_| AuthInjectionError::InvalidHeaderValue { value_len: auth_value.len() })?;
 
         headers.insert(AUTHORIZATION, header_value);
         Ok(())

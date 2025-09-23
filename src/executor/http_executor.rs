@@ -209,6 +209,11 @@ impl HttpExecutor {
         query_params: &mut HashMap<String, String>,
         connection: &ConnectionConfig,
     ) -> Result<()> {
+        // If Authorization header already present (e.g., via CLI override), skip auth injection
+        if headers.contains_key(AUTHORIZATION) {
+            return Ok(());
+        }
+
         match connection.authorization_type {
             AuthorizationType::OAuth2ClientCredentials => {
                 // OAuth2 Client Credentials: 通过 AuthRuntime 获取或刷新 token
@@ -301,20 +306,91 @@ impl HttpExecutor {
     }
 
     /// 解析 Retry-After 头，返回建议的延迟时间
+    /// 支持两种格式：
+    /// 1. 秒数：120
+    /// 2. HTTP-date：Wed, 21 Oct 2015 07:28:00 GMT
     fn parse_retry_after(&self, response: &Response) -> Option<Duration> {
         response
             .headers()
             .get("retry-after")
             .and_then(|value| value.to_str().ok())
-            .and_then(|s| {
-                // 尝试解析为秒数
-                if let Ok(seconds) = s.parse::<u64>() {
-                    Some(Duration::from_secs(seconds))
-                } else {
-                    // TODO: 支持 HTTP-date 格式
-                    None
+            .and_then(|s| self.parse_retry_after_value(s))
+    }
+
+    /// 解析 Retry-After 值的具体实现
+    fn parse_retry_after_value(&self, value: &str) -> Option<Duration> {
+        let trimmed = value.trim();
+        
+        // 尝试解析为秒数
+        if let Ok(seconds) = trimmed.parse::<u64>() {
+            // 限制最大值以防止过长延迟（24小时）
+            const MAX_RETRY_AFTER_SECONDS: u64 = 24 * 60 * 60;
+            let capped_seconds = seconds.min(MAX_RETRY_AFTER_SECONDS);
+            return Some(Duration::from_secs(capped_seconds));
+        }
+        
+        // 尝试解析为 HTTP-date 格式
+        self.parse_http_date(trimmed)
+    }
+
+    /// 解析 HTTP-date 格式，返回距当前时间的延迟
+    fn parse_http_date(&self, date_str: &str) -> Option<Duration> {
+        use chrono::{DateTime, Utc, NaiveDateTime};
+        
+        // 支持常见的 HTTP-date 格式：
+        // RFC 1123: Wed, 21 Oct 2015 07:28:00 GMT
+        // RFC 850: Wednesday, 21-Oct-15 07:28:00 GMT  
+        // asctime(): Wed Oct 21 07:28:00 2015
+        
+        // 尝试 RFC 1123 格式（最常用）
+        if date_str.ends_with(" GMT") {
+            let date_part = &date_str[..date_str.len() - 4]; // 移除 " GMT"
+            if let Ok(naive_time) = NaiveDateTime::parse_from_str(date_part, "%a, %d %b %Y %H:%M:%S") {
+                let target_time = DateTime::<Utc>::from_naive_utc_and_offset(naive_time, Utc);
+                let now = Utc::now();
+                
+                if target_time > now {
+                    let duration = target_time.signed_duration_since(now);
+                    if let Ok(std_duration) = duration.to_std() {
+                        const MAX_DELAY: Duration = Duration::from_secs(24 * 60 * 60);
+                        return Some(std_duration.min(MAX_DELAY));
+                    }
                 }
-            })
+            }
+        }
+        
+        // 尝试 RFC 850 格式
+        if date_str.ends_with(" GMT") && date_str.contains("-") {
+            let date_part = &date_str[..date_str.len() - 4]; // 移除 " GMT"
+            if let Ok(naive_time) = NaiveDateTime::parse_from_str(date_part, "%A, %d-%b-%y %H:%M:%S") {
+                let target_time = DateTime::<Utc>::from_naive_utc_and_offset(naive_time, Utc);
+                let now = Utc::now();
+                
+                if target_time > now {
+                    let duration = target_time.signed_duration_since(now);
+                    if let Ok(std_duration) = duration.to_std() {
+                        const MAX_DELAY: Duration = Duration::from_secs(24 * 60 * 60);
+                        return Some(std_duration.min(MAX_DELAY));
+                    }
+                }
+            }
+        }
+        
+        // 尝试 asctime 格式（无时区，假设 UTC）
+        if let Ok(naive_time) = NaiveDateTime::parse_from_str(date_str, "%a %b %d %H:%M:%S %Y") {
+            let target_time = DateTime::<Utc>::from_naive_utc_and_offset(naive_time, Utc);
+            let now = Utc::now();
+            
+            if target_time > now {
+                let duration = target_time.signed_duration_since(now);
+                if let Ok(std_duration) = duration.to_std() {
+                    const MAX_DELAY: Duration = Duration::from_secs(24 * 60 * 60);
+                    return Some(std_duration.min(MAX_DELAY));
+                }
+            }
+        }
+        
+        None
     }
 
     /// 计算延迟时间，考虑 Retry-After 头
@@ -350,7 +426,7 @@ mod tests {
     use crate::models::{ApiKeyAuthParameters, BasicAuthParameters};
     use crate::models::{AuthConnection, AuthorizationType, ConnectionConfig, OAuth2Parameters};
     use crate::store::service::StorageService;
-    use crate::store::{StoreBackend, StoreConfig, create_connection_store};
+    // removed unused create_connection_store imports after refactor to use StorageService
     use chrono::Utc;
     use httpmock::prelude::*;
     use std::collections::HashMap;
@@ -470,13 +546,14 @@ mod tests {
         });
 
         // Setup DB env for runtime
+        // Use file-based sqlite for consistent visibility across pooled connections
         let dir = tempfile::tempdir().unwrap();
         let ts = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let db_path = dir.path().join(format!("test_ac_e2e_{}.db", ts));
         unsafe {
             std::env::set_var(
                 "OPENACT_DB_URL",
-                format!("sqlite:{}?mode=rwc", db_path.display()),
+                format!("sqlite://{}?mode=rwc", db_path.display()),
             );
         }
         // no longer needed: single unified backend
@@ -509,11 +586,6 @@ mod tests {
         );
 
         // Seed auth connection with a fresh access_token so runtime reuses directly
-        let cfg = StoreConfig {
-            backend: StoreBackend::Sqlite,
-            ..Default::default()
-        };
-        let store = create_connection_store(cfg).await.unwrap();
         let ac = AuthConnection::new_with_params(
             "openact",
             "oauth2_ac",
@@ -529,9 +601,11 @@ mod tests {
         .unwrap();
         // Use standardized TRN format for runtime lookup
         let trn_auth = "trn:openact:default:auth/oauth2_ac-alice";
-        store.put(trn_auth, &ac).await.unwrap();
+        // Persist via the same StorageService to ensure identical pool/options
+        use crate::store::ConnectionStore;
+        service.put(trn_auth, &ac).await.unwrap();
         // Ensure visibility
-        assert!(store.get(trn_auth).await.unwrap().is_some());
+        assert!(service.get(trn_auth).await.unwrap().is_some());
 
         // **KEY FIX**: Inject the same storage service instance for OAuth runtime
         crate::store::service::set_global_storage_service_for_tests(service.clone()).await;
@@ -551,5 +625,129 @@ mod tests {
         assert_eq!(res.status, 200);
         assert_eq!(res.body.get("ok").and_then(|v| v.as_bool()), Some(true));
         m_resource.assert();
+    }
+
+    #[test]
+    fn test_parse_retry_after_seconds() {
+        let executor = HttpExecutor::new();
+        
+        // 测试正常的秒数
+        assert_eq!(
+            executor.parse_retry_after_value("60"),
+            Some(Duration::from_secs(60))
+        );
+        
+        // 测试带空格的秒数
+        assert_eq!(
+            executor.parse_retry_after_value("  120  "),
+            Some(Duration::from_secs(120))
+        );
+        
+        // 测试大数值（应该被限制在24小时内）
+        let max_seconds = 24 * 60 * 60;
+        assert_eq!(
+            executor.parse_retry_after_value(&(max_seconds + 1000).to_string()),
+            Some(Duration::from_secs(max_seconds))
+        );
+        
+        // 测试零值
+        assert_eq!(
+            executor.parse_retry_after_value("0"),
+            Some(Duration::from_secs(0))
+        );
+    }
+
+    #[test]
+    fn test_parse_retry_after_http_date() {
+        let executor = HttpExecutor::new();
+        
+        // 创建一个未来的时间（当前时间+60秒）
+        let future_time = chrono::Utc::now() + chrono::Duration::seconds(60);
+        
+        // 测试 RFC 1123 格式
+        let rfc1123_str = future_time.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+        let parsed = executor.parse_retry_after_value(&rfc1123_str);
+        
+        assert!(parsed.is_some());
+        let duration = parsed.unwrap();
+        // 允许几秒的误差（测试执行时间）
+        assert!(duration.as_secs() >= 55 && duration.as_secs() <= 65);
+        
+        // 测试过去的时间（应该返回 None）
+        let past_time = chrono::Utc::now() - chrono::Duration::seconds(60);
+        let past_str = past_time.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+        assert_eq!(executor.parse_retry_after_value(&past_str), None);
+        
+        // 测试 RFC 850 格式
+        let future_time_850 = chrono::Utc::now() + chrono::Duration::seconds(30);
+        let rfc850_str = future_time_850.format("%A, %d-%b-%y %H:%M:%S GMT").to_string();
+        let parsed_850 = executor.parse_retry_after_value(&rfc850_str);
+        assert!(parsed_850.is_some());
+        
+        // 测试 asctime 格式
+        let future_time_asc = chrono::Utc::now() + chrono::Duration::seconds(90);
+        let asctime_str = future_time_asc.format("%a %b %d %H:%M:%S %Y").to_string();
+        let parsed_asc = executor.parse_retry_after_value(&asctime_str);
+        assert!(parsed_asc.is_some());
+        let duration_asc = parsed_asc.unwrap();
+        assert!(duration_asc.as_secs() >= 85 && duration_asc.as_secs() <= 95);
+    }
+
+    #[test]
+    fn test_parse_retry_after_invalid_formats() {
+        let executor = HttpExecutor::new();
+        
+        // 测试无效的字符串
+        assert_eq!(executor.parse_retry_after_value("invalid"), None);
+        assert_eq!(executor.parse_retry_after_value(""), None);
+        assert_eq!(executor.parse_retry_after_value("abc123"), None);
+        
+        // 测试无效的日期格式
+        assert_eq!(executor.parse_retry_after_value("32 Oct 2023 10:00:00 GMT"), None);
+        assert_eq!(executor.parse_retry_after_value("Mon, 32 Oct 2023 10:00:00 GMT"), None);
+        
+        // 测试负数（应该解析失败）
+        assert_eq!(executor.parse_retry_after_value("-10"), None);
+    }
+
+    #[test]
+    fn test_parse_retry_after_max_delay_cap() {
+        let executor = HttpExecutor::new();
+        
+        // 测试超过24小时的日期（应该被限制）
+        let far_future = chrono::Utc::now() + chrono::Duration::hours(48);
+        let far_future_str = far_future.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+        let parsed = executor.parse_retry_after_value(&far_future_str);
+        
+        assert!(parsed.is_some());
+        let duration = parsed.unwrap();
+        // 应该被限制在24小时内
+        assert_eq!(duration, Duration::from_secs(24 * 60 * 60));
+    }
+
+    #[test]
+    fn test_parse_http_date_edge_cases() {
+        let executor = HttpExecutor::new();
+        
+        // 测试不同的星期几缩写
+        let future = chrono::Utc::now() + chrono::Duration::seconds(300);
+        
+        // 测试所有可能的格式变体
+        let formats = vec![
+            "%a, %d %b %Y %H:%M:%S GMT",  // RFC 1123
+            "%A, %d-%b-%y %H:%M:%S GMT",  // RFC 850
+            "%a %b %d %H:%M:%S %Y",       // asctime
+        ];
+        
+        for format in formats {
+            let formatted = future.format(format).to_string();
+            let parsed = executor.parse_http_date(&formatted);
+            if parsed.is_some() {
+                let duration = parsed.unwrap();
+                // 允许一些时间差异
+                assert!(duration.as_secs() >= 290 && duration.as_secs() <= 310, 
+                    "Failed for format: {} with duration: {:?}", format, duration);
+            }
+        }
     }
 }

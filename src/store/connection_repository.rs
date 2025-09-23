@@ -113,7 +113,7 @@ impl ConnectionRepository {
             SELECT trn, name, authorization_type, auth_params_encrypted, auth_params_nonce,
                    auth_ref,
                    default_headers_json, default_query_params_json, default_body_json,
-                   network_config_json, timeout_config_json, http_policy_json,
+                   network_config_json, timeout_config_json, http_policy_json, retry_policy_json,
                    key_version, created_at, updated_at, version
             FROM connections WHERE trn = ?1
             "#,
@@ -176,7 +176,7 @@ impl ConnectionRepository {
                 SELECT trn, name, authorization_type, auth_params_encrypted, auth_params_nonce,
                        auth_ref,
                        default_headers_json, default_query_params_json, default_body_json,
-                       network_config_json, timeout_config_json, http_policy_json,
+                       network_config_json, timeout_config_json, http_policy_json, retry_policy_json,
                        key_version, created_at, updated_at, version
                 FROM connections WHERE authorization_type = ?1
                 ORDER BY created_at DESC
@@ -192,7 +192,7 @@ impl ConnectionRepository {
                 SELECT trn, name, authorization_type, auth_params_encrypted, auth_params_nonce,
                        auth_ref,
                        default_headers_json, default_query_params_json, default_body_json,
-                       network_config_json, timeout_config_json, http_policy_json,
+                       network_config_json, timeout_config_json, http_policy_json, retry_policy_json,
                        key_version, created_at, updated_at, version
                 FROM connections
                 ORDER BY created_at DESC
@@ -386,6 +386,7 @@ mod tests {
                 network_config_json TEXT,
                 timeout_config_json TEXT,
                 http_policy_json TEXT,
+                retry_policy_json TEXT,
                 key_version INTEGER DEFAULT 1,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

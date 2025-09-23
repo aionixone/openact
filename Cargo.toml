@@ -26,6 +26,7 @@ metrics-exporter-prometheus = { version = "0.15", optional = true }
 indexmap = { version = "2.2", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+opener = "0.7"
 oauth2 = { version = "4", default-features = false, features = ["reqwest"] }
 futures = "0.3"
 rand = "0.8"

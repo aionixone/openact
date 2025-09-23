@@ -30,4 +30,5 @@ pub mod app;
 #[cfg(feature = "server")]
 pub mod server;
 pub mod observability;
+pub mod templates;
 

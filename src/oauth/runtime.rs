@@ -391,13 +391,13 @@ async fn refresh_ac_impl(connection_trn: &str, auth_ref: Option<&str>) -> Result
                     .unwrap_or(3600);
                 let expires_at = Utc::now() + Duration::seconds(expires_in);
 
-                // persist back - reuse the original TRN parts to maintain consistency
+                // persist back - reuse the fetched key (ac_trn) to avoid TRN form mismatch
                 let mut updated = existing.clone();
                 updated.access_token = access_token.clone();
                 updated.refresh_token = new_refresh_token.clone();
                 updated.expires_at = Some(expires_at);
                 updated.updated_at = Utc::now();
-                let trn_auth = updated.trn.to_string();
+                let trn_auth = ac_trn.clone();
                 let _ = store.put(&trn_auth, &updated).await;
                 tracing::info!(target: "oauth_runtime", ac_refresh_direct_ok=true, trn=%connection_trn, auth_trn=%ac_trn, "refreshed ac token via refresh_token");
                 return Ok(RefreshOutcome::Refreshed(TokenInfo {
@@ -480,7 +480,7 @@ mod tests {
         unsafe {
             std::env::set_var(
                 "OPENACT_DB_URL",
-                format!("sqlite:{}?mode=rwc", db_path.display()),
+                format!("sqlite://{}?mode=rwc", db_path.display()),
             );
         }
         // unified backend; no separate auth backend flag
@@ -579,7 +579,7 @@ mod tests {
         unsafe {
             std::env::set_var(
                 "OPENACT_DB_URL",
-                format!("sqlite:{}?mode=rwc", db_path.display()),
+                format!("sqlite://{}?mode=rwc", db_path.display()),
             );
         }
         unsafe {
@@ -624,16 +624,8 @@ mod tests {
         // Reset global state for test isolation
         crate::store::service::reset_global_storage_for_tests().await;
         
-        // Setup DB env
-        let dir = tempdir().unwrap();
-        let ts = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let db_path = dir.path().join(format!("test_ac_direct_{}.db", ts));
-        unsafe {
-            std::env::set_var(
-                "OPENACT_DB_URL",
-                format!("sqlite:{}?mode=rwc", db_path.display()),
-            );
-        }
+        // Setup DB env (use in-memory to avoid readonly FS issues)
+        unsafe { std::env::set_var("OPENACT_DB_URL", "sqlite::memory:"); }
         unsafe {
             std::env::set_var("OPENACT_AUTH_BACKEND", "sqlite");
         }
