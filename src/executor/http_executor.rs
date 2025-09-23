@@ -8,13 +8,13 @@ use crate::models::common::RetryPolicy;
 use crate::models::{AuthorizationType, ConnectionConfig, TaskConfig};
 
 // use crate::models::AuthConnection; // moved to oauth runtime
+use crate::observability::{logging, metrics, tracing_config};
 use anyhow::{Context, Result, anyhow};
 use reqwest::Response;
 use reqwest::header::{AUTHORIZATION, HeaderValue};
 use std::collections::HashMap;
 use std::time::Duration;
 use tracing::instrument;
-use crate::observability::{logging, metrics, tracing_config};
 
 // HTTP Client 池已移动至 crate::executor::client_pool
 
@@ -55,10 +55,10 @@ impl HttpExecutor {
     ) -> Result<Response> {
         let request_id = crate::observability::generate_request_id();
         let start_time = logging::log_task_start(&request_id, &task.trn, &connection.trn);
-        
+
         // Execute with retry logic
         let result = self.execute_with_retry(connection, task, &request_id).await;
-        
+
         // Log and record metrics
         match &result {
             Ok(response) => {
@@ -71,7 +71,10 @@ impl HttpExecutor {
                     start_time.elapsed(),
                     0,
                 );
-                tracing_config::enrich_span_with_response(status, start_time.elapsed().as_millis() as u64);
+                tracing_config::enrich_span_with_response(
+                    status,
+                    start_time.elapsed().as_millis() as u64,
+                );
             }
             Err(error) => {
                 logging::log_error(&request_id, error, Some("Task execution failed"));
@@ -79,7 +82,7 @@ impl HttpExecutor {
                 tracing_config::enrich_span_with_error(error);
             }
         }
-        
+
         result
     }
 
@@ -94,12 +97,13 @@ impl HttpExecutor {
         let effective_retry_policy = self.merge_retry_policies(connection, task);
 
         let mut last_error = None;
+        let mut retry_after_delay: Option<Duration> = None;
 
         for attempt in 0..=effective_retry_policy.max_retries {
             // 延迟（除了第一次尝试）
             if attempt > 0 {
                 let delay = self
-                    .calculate_delay(&effective_retry_policy, attempt, None)
+                    .calculate_delay(&effective_retry_policy, attempt, retry_after_delay)
                     .await;
                 if !delay.is_zero() {
                     logging::log_retry_attempt(
@@ -122,13 +126,13 @@ impl HttpExecutor {
                         && attempt < effective_retry_policy.max_retries
                     {
                         // 解析 Retry-After 头以供下次重试使用
-                        let retry_after = self.parse_retry_after(&response);
+                        retry_after_delay = self.parse_retry_after(&response);
                         last_error = Some(anyhow!(
                             "HTTP {} (attempt {}/{}) - will retry after {:?}",
                             response.status(),
                             attempt + 1,
                             effective_retry_policy.max_retries + 1,
-                            retry_after
+                            retry_after_delay
                         ));
                         continue;
                     }
@@ -320,7 +324,7 @@ impl HttpExecutor {
     /// 解析 Retry-After 值的具体实现
     fn parse_retry_after_value(&self, value: &str) -> Option<Duration> {
         let trimmed = value.trim();
-        
+
         // 尝试解析为秒数
         if let Ok(seconds) = trimmed.parse::<u64>() {
             // 限制最大值以防止过长延迟（24小时）
@@ -328,27 +332,29 @@ impl HttpExecutor {
             let capped_seconds = seconds.min(MAX_RETRY_AFTER_SECONDS);
             return Some(Duration::from_secs(capped_seconds));
         }
-        
+
         // 尝试解析为 HTTP-date 格式
         self.parse_http_date(trimmed)
     }
 
     /// 解析 HTTP-date 格式，返回距当前时间的延迟
     fn parse_http_date(&self, date_str: &str) -> Option<Duration> {
-        use chrono::{DateTime, Utc, NaiveDateTime};
-        
+        use chrono::{DateTime, NaiveDateTime, Utc};
+
         // 支持常见的 HTTP-date 格式：
         // RFC 1123: Wed, 21 Oct 2015 07:28:00 GMT
-        // RFC 850: Wednesday, 21-Oct-15 07:28:00 GMT  
+        // RFC 850: Wednesday, 21-Oct-15 07:28:00 GMT
         // asctime(): Wed Oct 21 07:28:00 2015
-        
+
         // 尝试 RFC 1123 格式（最常用）
         if date_str.ends_with(" GMT") {
             let date_part = &date_str[..date_str.len() - 4]; // 移除 " GMT"
-            if let Ok(naive_time) = NaiveDateTime::parse_from_str(date_part, "%a, %d %b %Y %H:%M:%S") {
+            if let Ok(naive_time) =
+                NaiveDateTime::parse_from_str(date_part, "%a, %d %b %Y %H:%M:%S")
+            {
                 let target_time = DateTime::<Utc>::from_naive_utc_and_offset(naive_time, Utc);
                 let now = Utc::now();
-                
+
                 if target_time > now {
                     let duration = target_time.signed_duration_since(now);
                     if let Ok(std_duration) = duration.to_std() {
@@ -358,14 +364,16 @@ impl HttpExecutor {
                 }
             }
         }
-        
+
         // 尝试 RFC 850 格式
         if date_str.ends_with(" GMT") && date_str.contains("-") {
             let date_part = &date_str[..date_str.len() - 4]; // 移除 " GMT"
-            if let Ok(naive_time) = NaiveDateTime::parse_from_str(date_part, "%A, %d-%b-%y %H:%M:%S") {
+            if let Ok(naive_time) =
+                NaiveDateTime::parse_from_str(date_part, "%A, %d-%b-%y %H:%M:%S")
+            {
                 let target_time = DateTime::<Utc>::from_naive_utc_and_offset(naive_time, Utc);
                 let now = Utc::now();
-                
+
                 if target_time > now {
                     let duration = target_time.signed_duration_since(now);
                     if let Ok(std_duration) = duration.to_std() {
@@ -375,12 +383,12 @@ impl HttpExecutor {
                 }
             }
         }
-        
+
         // 尝试 asctime 格式（无时区，假设 UTC）
         if let Ok(naive_time) = NaiveDateTime::parse_from_str(date_str, "%a %b %d %H:%M:%S %Y") {
             let target_time = DateTime::<Utc>::from_naive_utc_and_offset(naive_time, Utc);
             let now = Utc::now();
-            
+
             if target_time > now {
                 let duration = target_time.signed_duration_since(now);
                 if let Ok(std_duration) = duration.to_std() {
@@ -389,7 +397,7 @@ impl HttpExecutor {
                 }
             }
         }
-        
+
         None
     }
 
@@ -630,26 +638,26 @@ mod tests {
     #[test]
     fn test_parse_retry_after_seconds() {
         let executor = HttpExecutor::new();
-        
+
         // 测试正常的秒数
         assert_eq!(
             executor.parse_retry_after_value("60"),
             Some(Duration::from_secs(60))
         );
-        
+
         // 测试带空格的秒数
         assert_eq!(
             executor.parse_retry_after_value("  120  "),
             Some(Duration::from_secs(120))
         );
-        
+
         // 测试大数值（应该被限制在24小时内）
         let max_seconds = 24 * 60 * 60;
         assert_eq!(
             executor.parse_retry_after_value(&(max_seconds + 1000).to_string()),
             Some(Duration::from_secs(max_seconds))
         );
-        
+
         // 测试零值
         assert_eq!(
             executor.parse_retry_after_value("0"),
@@ -660,30 +668,32 @@ mod tests {
     #[test]
     fn test_parse_retry_after_http_date() {
         let executor = HttpExecutor::new();
-        
+
         // 创建一个未来的时间（当前时间+60秒）
         let future_time = chrono::Utc::now() + chrono::Duration::seconds(60);
-        
+
         // 测试 RFC 1123 格式
         let rfc1123_str = future_time.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let parsed = executor.parse_retry_after_value(&rfc1123_str);
-        
+
         assert!(parsed.is_some());
         let duration = parsed.unwrap();
         // 允许几秒的误差（测试执行时间）
         assert!(duration.as_secs() >= 55 && duration.as_secs() <= 65);
-        
+
         // 测试过去的时间（应该返回 None）
         let past_time = chrono::Utc::now() - chrono::Duration::seconds(60);
         let past_str = past_time.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         assert_eq!(executor.parse_retry_after_value(&past_str), None);
-        
+
         // 测试 RFC 850 格式
         let future_time_850 = chrono::Utc::now() + chrono::Duration::seconds(30);
-        let rfc850_str = future_time_850.format("%A, %d-%b-%y %H:%M:%S GMT").to_string();
+        let rfc850_str = future_time_850
+            .format("%A, %d-%b-%y %H:%M:%S GMT")
+            .to_string();
         let parsed_850 = executor.parse_retry_after_value(&rfc850_str);
         assert!(parsed_850.is_some());
-        
+
         // 测试 asctime 格式
         let future_time_asc = chrono::Utc::now() + chrono::Duration::seconds(90);
         let asctime_str = future_time_asc.format("%a %b %d %H:%M:%S %Y").to_string();
@@ -696,16 +706,22 @@ mod tests {
     #[test]
     fn test_parse_retry_after_invalid_formats() {
         let executor = HttpExecutor::new();
-        
+
         // 测试无效的字符串
         assert_eq!(executor.parse_retry_after_value("invalid"), None);
         assert_eq!(executor.parse_retry_after_value(""), None);
         assert_eq!(executor.parse_retry_after_value("abc123"), None);
-        
+
         // 测试无效的日期格式
-        assert_eq!(executor.parse_retry_after_value("32 Oct 2023 10:00:00 GMT"), None);
-        assert_eq!(executor.parse_retry_after_value("Mon, 32 Oct 2023 10:00:00 GMT"), None);
-        
+        assert_eq!(
+            executor.parse_retry_after_value("32 Oct 2023 10:00:00 GMT"),
+            None
+        );
+        assert_eq!(
+            executor.parse_retry_after_value("Mon, 32 Oct 2023 10:00:00 GMT"),
+            None
+        );
+
         // 测试负数（应该解析失败）
         assert_eq!(executor.parse_retry_after_value("-10"), None);
     }
@@ -713,12 +729,12 @@ mod tests {
     #[test]
     fn test_parse_retry_after_max_delay_cap() {
         let executor = HttpExecutor::new();
-        
+
         // 测试超过24小时的日期（应该被限制）
         let far_future = chrono::Utc::now() + chrono::Duration::hours(48);
         let far_future_str = far_future.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let parsed = executor.parse_retry_after_value(&far_future_str);
-        
+
         assert!(parsed.is_some());
         let duration = parsed.unwrap();
         // 应该被限制在24小时内
@@ -728,26 +744,83 @@ mod tests {
     #[test]
     fn test_parse_http_date_edge_cases() {
         let executor = HttpExecutor::new();
-        
+
         // 测试不同的星期几缩写
         let future = chrono::Utc::now() + chrono::Duration::seconds(300);
-        
+
         // 测试所有可能的格式变体
         let formats = vec![
-            "%a, %d %b %Y %H:%M:%S GMT",  // RFC 1123
-            "%A, %d-%b-%y %H:%M:%S GMT",  // RFC 850
-            "%a %b %d %H:%M:%S %Y",       // asctime
+            "%a, %d %b %Y %H:%M:%S GMT", // RFC 1123
+            "%A, %d-%b-%y %H:%M:%S GMT", // RFC 850
+            "%a %b %d %H:%M:%S %Y",      // asctime
         ];
-        
+
         for format in formats {
             let formatted = future.format(format).to_string();
             let parsed = executor.parse_http_date(&formatted);
             if parsed.is_some() {
                 let duration = parsed.unwrap();
                 // 允许一些时间差异
-                assert!(duration.as_secs() >= 290 && duration.as_secs() <= 310, 
-                    "Failed for format: {} with duration: {:?}", format, duration);
+                assert!(
+                    duration.as_secs() >= 290 && duration.as_secs() <= 310,
+                    "Failed for format: {} with duration: {:?}",
+                    format,
+                    duration
+                );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_retry_after_integration() {
+        use crate::models::RetryPolicy;
+
+        let executor = HttpExecutor::new();
+
+        // 测试延迟计算逻辑（无需实际网络请求）
+        let retry_policy = RetryPolicy {
+            max_retries: 3,
+            base_delay_ms: 100,
+            max_delay_ms: 5000,
+            backoff_multiplier: 2.0,
+            retry_status_codes: vec![429, 500, 502, 503, 504],
+            respect_retry_after: true,
+        };
+
+        // 测试没有 Retry-After 时的延迟
+        let delay_no_retry_after = executor.calculate_delay(&retry_policy, 1, None).await;
+        assert_eq!(delay_no_retry_after, Duration::from_millis(100)); // 100 * 2^0 = 100ms (attempt 1)
+
+        // 测试有 Retry-After 时的延迟（服务器建议更短）
+        let server_delay = Duration::from_millis(50);
+        let delay_with_retry_after = executor
+            .calculate_delay(&retry_policy, 1, Some(server_delay))
+            .await;
+        assert_eq!(delay_with_retry_after, server_delay);
+
+        // 测试 Retry-After 超过最大延迟时（应该被限制）
+        let long_server_delay = Duration::from_millis(10000);
+        let delay_capped = executor
+            .calculate_delay(&retry_policy, 1, Some(long_server_delay))
+            .await;
+        assert_eq!(delay_capped, Duration::from_millis(5000)); // max_delay_ms
+
+        // 测试第二次重试的延迟计算
+        let delay_attempt_2 = executor.calculate_delay(&retry_policy, 2, None).await;
+        assert_eq!(delay_attempt_2, Duration::from_millis(200)); // 100 * 2^1 = 200ms (attempt 2)
+
+        // 测试禁用 respect_retry_after 时
+        let retry_policy_no_respect = RetryPolicy {
+            max_retries: 3,
+            base_delay_ms: 100,
+            max_delay_ms: 5000,
+            backoff_multiplier: 2.0,
+            retry_status_codes: vec![429, 500, 502, 503, 504],
+            respect_retry_after: false,
+        };
+        let delay_ignored = executor
+            .calculate_delay(&retry_policy_no_respect, 1, Some(Duration::from_millis(50)))
+            .await;
+        assert_eq!(delay_ignored, Duration::from_millis(100)); // 应该忽略 Retry-After，使用策略延迟
     }
 }

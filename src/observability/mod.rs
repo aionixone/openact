@@ -8,6 +8,7 @@
 
 pub mod logging;
 pub mod metrics;
+pub mod sanitization;
 pub mod tracing_config;
 
 // No-op metrics implementation when metrics feature is disabled

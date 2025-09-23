@@ -164,18 +164,22 @@ pub fn log_retry_attempt(
     );
 }
 
-/// Log error with context
+/// Log error with context (with sanitization)
 pub fn log_error(request_id: &str, error: &anyhow::Error, context: Option<&str>) {
+    use crate::observability::sanitization::sanitize_error_message;
+    
+    let sanitized_error = sanitize_error_message(&error.to_string());
+    
     match context {
         Some(ctx) => tracing::error!(
             request_id = %request_id,
-            error = %error,
+            error = %sanitized_error,
             context = %ctx,
             "Operation failed"
         ),
         None => tracing::error!(
             request_id = %request_id,
-            error = %error,
+            error = %sanitized_error,
             "Operation failed"
         ),
     }

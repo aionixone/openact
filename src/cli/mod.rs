@@ -2004,6 +2004,10 @@ mod cli_integration_tests {
     async fn make_service() -> OpenActService {
         // Use in-memory for isolation and avoid FS permissions in CI
         let db = DatabaseManager::new("sqlite::memory:").await.unwrap();
+        // Set a test encryption key for StorageService
+        unsafe {
+            std::env::set_var("OPENACT_MASTER_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        }
         let storage = std::sync::Arc::new(StorageService::new(db));
         OpenActService::from_storage(storage)
     }
