@@ -4,8 +4,10 @@
 pub mod dsl;
 pub mod engine;
 pub mod actions;
-pub mod callback;
+// moved to crate::server::authflow::* (behind features)
+#[cfg(feature = "callback")]
+pub use crate::server::authflow::callback as callback;
 #[cfg(feature = "server")]
-pub mod server;
+pub use crate::server::authflow as server;
 
 

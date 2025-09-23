@@ -10,7 +10,7 @@ use axum::extract::ws::Message;
 use futures::{SinkExt, StreamExt};
 
 #[cfg(feature = "server")]
-use crate::authflow::server::ServerState;
+use crate::server::authflow::state::ServerState;
 
 #[cfg(feature = "server")]
 pub async fn websocket_handler(ws: WebSocketUpgrade, State(state): State<ServerState>) -> Response {

@@ -5,7 +5,7 @@
 
 set -e
 
-BASE_URL="http://localhost:8080/api/v1"
+BASE_URL="http://localhost:8080/api/v1/authflow"
 
 echo "🚀 GitHub OAuth2 完整流程测试"
 echo "=============================="
@@ -186,7 +186,7 @@ echo "🚀 步骤 2: 启动 OAuth2 流程执行..."
 EXECUTION_RESPONSE=$(curl -s -X POST "$BASE_URL/executions" \
   -H "Content-Type: application/json" \
   -d "{
-    \"workflowId\": \"$WORKFLOW_ID\",
+    \"workflow_id\": \"$WORKFLOW_ID\",
     \"flow\": \"OAuth\",
     \"input\": {
       \"tenant\": \"test-tenant\",
@@ -200,7 +200,7 @@ EXECUTION_RESPONSE=$(curl -s -X POST "$BASE_URL/executions" \
     }
   }")
 
-EXECUTION_ID=$(echo "$EXECUTION_RESPONSE" | jq -r '.executionId')
+EXECUTION_ID=$(echo "$EXECUTION_RESPONSE" | jq -r '.execution_id')
 if [ "$EXECUTION_ID" = "null" ] || [ -z "$EXECUTION_ID" ]; then
     echo "❌ 启动执行失败:"
     echo "$EXECUTION_RESPONSE" | jq '.'

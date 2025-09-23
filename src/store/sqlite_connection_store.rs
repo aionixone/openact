@@ -60,22 +60,36 @@ pub struct SqliteConnectionStore {
 impl SqliteConnectionStore {
     /// Create a new SQLite connection store
     pub async fn new(config: SqliteConfig) -> Result<Self> {
+        // Normalize URL: ensure mode=rwc and handle query string when touching filesystem
+        let normalized_url = if config.database_url.starts_with("sqlite:") {
+            if config.database_url.contains("mode=") {
+                config.database_url.clone()
+            } else {
+                let sep = if config.database_url.contains('?') { "&" } else { "?" };
+                format!("{}{}mode=rwc", config.database_url, sep)
+            }
+        } else {
+            format!("sqlite://{}?mode=rwc", config.database_url)
+        };
+
         // Ensure the database file exists (if it's a file database)
-        if config.database_url.starts_with("sqlite:") && !config.database_url.contains(":memory:") {
-            let db_path = config.database_url.strip_prefix("sqlite:").unwrap_or(&config.database_url);
-            if let Some(parent) = std::path::Path::new(db_path).parent() {
+        if normalized_url.starts_with("sqlite:") && !normalized_url.contains(":memory:") {
+            let mut path_part = normalized_url.strip_prefix("sqlite:").unwrap_or(&normalized_url);
+            // strip query string
+            if let Some((p, _)) = path_part.split_once('?') { path_part = p; }
+            if let Some(parent) = std::path::Path::new(path_part).parent() {
                 std::fs::create_dir_all(parent)
                     .map_err(|e| anyhow!("Failed to create database directory: {}", e))?;
             }
             // Create an empty file (if it doesn't exist)
-            if !std::path::Path::new(db_path).exists() {
-                std::fs::File::create(db_path)
+            if !std::path::Path::new(path_part).exists() {
+                std::fs::File::create(path_part)
                     .map_err(|e| anyhow!("Failed to create database file: {}", e))?;
             }
         }
 
         // Create connection pool
-        let pool = SqlitePool::connect(&config.database_url).await
+        let pool = SqlitePool::connect(&normalized_url).await
             .map_err(|e| anyhow!("Failed to connect to SQLite database: {}", e))?;
 
         // Initialize encryption service

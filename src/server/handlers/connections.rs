@@ -63,7 +63,7 @@ pub async fn get(Path(trn): Path<String>) -> impl IntoResponse {
 
 pub async fn update(
     Path(trn): Path<String>,
-    Json(mut body): Json<ConnectionConfig>,
+    Json(body): Json<ConnectionConfig>,
 ) -> impl IntoResponse {
     if body.trn != trn {
         return (

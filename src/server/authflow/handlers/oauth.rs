@@ -12,10 +12,10 @@ use serde_json::json;
 use std::time::SystemTime;
 
 #[cfg(feature = "server")]
-use crate::authflow::server::ServerState;
+use crate::server::authflow::state::ServerState;
 #[cfg(feature = "server")]
-use crate::authflow::server::ExecutionStatus;
-use crate::authflow::server::runtime::execute_workflow;
+use crate::server::authflow::state::ExecutionStatus;
+use crate::server::authflow::runtime::execute_workflow;
 
 #[cfg(feature = "server")]
 #[derive(Debug, Deserialize)]

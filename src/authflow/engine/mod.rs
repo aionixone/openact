@@ -327,7 +327,7 @@ pub fn run_until_pause_or_end(
         match cmd {
             Command::ExecuteTask {
                 state_name,
-                resource,
+                resource: _,
                 next_state,
             } => {
                 // Attempt to execute the task, pause if PAUSE_FOR_CALLBACK error is encountered

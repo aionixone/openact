@@ -1,7 +1,7 @@
 #[cfg(feature = "server")]
 use axum::{Router, routing::{get, post}};
 #[cfg(feature = "server")]
-use crate::authflow::server::ServerState;
+use crate::server::authflow::state::ServerState;
 
 #[cfg(feature = "server")]
 pub fn create_router() -> Router {
@@ -71,6 +71,11 @@ pub fn create_router_with_state(state: ServerState) -> Router {
         // OAuth2 callback endpoint (authflow namespace only)
         .route(
             "/api/v1/authflow/callback",
+            get(crate::authflow::server::handlers::oauth::oauth_callback),
+        )
+        // Top-level OAuth callback alias for compatibility
+        .route(
+            "/oauth/callback",
             get(crate::authflow::server::handlers::oauth::oauth_callback),
         )
         .with_state(state)

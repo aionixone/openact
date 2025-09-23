@@ -8,9 +8,9 @@ use axum::response::{IntoResponse, Json};
 use serde_json::json;
 
 #[cfg(feature = "server")]
-use crate::authflow::server::ExecutionStatus;
+use crate::server::authflow::state::ExecutionStatus;
 #[cfg(feature = "server")]
-use crate::authflow::server::ServerState;
+use crate::server::authflow::state::ServerState;
 
 /// Get specific execution information
 #[cfg(feature = "server")]
@@ -174,7 +174,7 @@ pub async fn list_executions(State(state): State<ServerState>) -> impl IntoRespo
 #[cfg(feature = "server")]
 pub async fn start_execution(
     State(state): State<ServerState>,
-    Json(req): Json<crate::authflow::server::StartExecutionRequest>,
+    Json(req): Json<crate::server::authflow::dto::StartExecutionRequest>,
 ) -> impl IntoResponse {
     // Check if workflow exists
     let workflow = {
@@ -207,7 +207,7 @@ pub async fn start_execution(
     let execution_id = uuid::Uuid::new_v4().to_string();
     let now = std::time::SystemTime::now();
 
-    use crate::authflow::server::ExecutionInfo;
+    use crate::server::authflow::state::ExecutionInfo;
     let execution = ExecutionInfo {
         execution_id: execution_id.clone(),
         workflow_id: req.workflow_id.clone(),
@@ -247,7 +247,7 @@ pub async fn start_execution(
 pub async fn resume_execution(
     State(state): State<ServerState>,
     Path(id): Path<String>,
-    Json(req): Json<crate::authflow::server::ResumeExecutionRequest>,
+    Json(req): Json<crate::server::authflow::dto::ResumeExecutionRequest>,
 ) -> impl IntoResponse {
     // Check if execution exists (allow Running/Paused, prohibit Completed/Failed/Cancelled)
     {

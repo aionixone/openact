@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 
 #[cfg(feature = "server")]
-use crate::authflow::server::ServerState;
+use crate::server::authflow::state::ServerState;
 
 #[cfg(feature = "server")]
 pub async fn list_workflows(State(state): State<ServerState>) -> impl IntoResponse {
@@ -20,7 +20,7 @@ pub async fn list_workflows(State(state): State<ServerState>) -> impl IntoRespon
 #[cfg(feature = "server")]
 pub async fn create_workflow(
     State(state): State<ServerState>,
-    Json(req): Json<crate::authflow::server::CreateWorkflowRequest>,
+    Json(req): Json<crate::server::authflow::dto::CreateWorkflowRequest>,
 ) -> impl IntoResponse {
     let normalized_json = crate::authflow::server::utils::normalize_dsl_json(req.dsl);
     let parsed: crate::authflow::dsl::OpenactDsl = match serde_json::from_value(normalized_json) {
@@ -42,7 +42,7 @@ pub async fn create_workflow(
     }
     let workflow_id = uuid::Uuid::new_v4().to_string();
     let now = std::time::SystemTime::now();
-    use crate::authflow::server::{WorkflowConfig, WorkflowStatus};
+    use crate::server::authflow::state::{WorkflowConfig, WorkflowStatus};
     let workflow = WorkflowConfig {
         id: workflow_id.clone(),
         name: req.name,

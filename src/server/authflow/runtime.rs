@@ -1,5 +1,5 @@
 #[cfg(feature = "server")]
-use crate::authflow::server::{ServerState, ExecutionStatus, ExecutionEvent};
+use crate::server::authflow::state::{ServerState, ExecutionStatus, ExecutionEvent};
 #[cfg(feature = "server")]
 use serde_json::json;
 #[cfg(feature = "server")]

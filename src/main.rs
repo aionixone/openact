@@ -1,6 +1,4 @@
 #[cfg(feature = "server")]
-use openact::authflow::server::create_router_async;
-#[cfg(feature = "server")]
 use axum::Router;
 #[cfg(feature = "server")]
 use tokio::net::TcpListener;

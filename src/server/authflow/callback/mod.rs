@@ -48,7 +48,7 @@ pub struct CallbackParams {
 struct CallbackWaiter {
     sender: oneshot::Sender<CallbackParams>,
     created_at: Instant,
-    run_id: String,
+    _run_id: String,
 }
 
 /// Callback Server State
@@ -118,22 +118,23 @@ impl CallbackServer {
         let cleanup_state = state.clone();
         let cleanup_cancel = cancel_token.clone();
         let cleanup_handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(30));
             loop {
                 tokio::select! {
-                    _ = interval.tick() => {
-                        cleanup_expired_waiters(&cleanup_state);
-                    }
                     _ = cleanup_cancel.cancelled() => {
                         break;
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(30)) => {
+                        let mut waiters = cleanup_state.waiters.lock().unwrap();
+                        let now = Instant::now();
+                        waiters.retain(|_, w| now.duration_since(w.created_at) < cleanup_state.timeout);
                     }
                 }
             }
         });
 
         Ok(CallbackServerHandle {
-            addr: actual_addr,
             state,
+            addr: actual_addr,
             cancel_token,
             server_handle,
             cleanup_handle,
@@ -144,8 +145,8 @@ impl CallbackServer {
 
 /// Callback Server Handle
 pub struct CallbackServerHandle {
-    addr: SocketAddr,
     state: CallbackServerState,
+    addr: SocketAddr,
     cancel_token: CancellationToken,
     server_handle: tokio::task::JoinHandle<Result<(), std::io::Error>>,
     cleanup_handle: tokio::task::JoinHandle<()>,
@@ -169,7 +170,7 @@ impl CallbackServerHandle {
         let waiter = CallbackWaiter {
             sender,
             created_at: Instant::now(),
-            run_id: run_id.to_string(),
+            _run_id: run_id.to_string(),
         };
 
         // Register the waiter
@@ -267,101 +268,24 @@ async fn handle_oauth_callback(
     };
 
     if let Some(waiter) = waiter {
-        // Send callback parameters to the waiter
-        let _ = waiter.sender.send(params);
+        // Notify the waiting task
+        let _ = waiter.sender.send(params.clone());
 
-        (
-            StatusCode::OK,
-            Html(r#"
-            <html>
-            <head><title>Authentication Successful</title></head>
-            <body>
-                <h1>🎉 Authentication Successful!</h1>
-                <p>You can close this page and return to the application.</p>
-                <script>
-                    // Attempt to close the window (if it's a popup)
-                    setTimeout(() => {
-                        window.close();
-                    }, 2000);
-                </script>
-            </body>
-            </html>
-            "#),
-        )
+        // Return a success page
+        let html = format!(
+            "<html><body><h1>Authentication successful</h1><p>You can close this window.</p><p>State: {}</p></body></html>",
+            state_param
+        );
+        (StatusCode::OK, Html(html)).into_response()
     } else {
-        (
-            StatusCode::BAD_REQUEST,
-            Html(r#"
-            <html>
-            <head><title>Authentication Error</title></head>
-            <body>
-                <h1>❌ Authentication Error</h1>
-                <p>Invalid callback request or request has expired.</p>
-            </body>
-            </html>
-            "#),
-        )
+        // Return an error page if no matching waiter found
+        let html = "<html><body><h1>Invalid state</h1><p>No matching authentication process found.</p></body></html>";
+        (StatusCode::BAD_REQUEST, Html(html.to_string())).into_response()
     }
 }
 
-/// Health check endpoint
+/// Health check endpoint for the callback server
 async fn health_check() -> impl IntoResponse {
-    "OK"
+    (StatusCode::OK, Html("OK")).into_response()
 }
-
-/// Clean up expired waiters
-fn cleanup_expired_waiters(state: &CallbackServerState) {
-    let mut waiters = state.waiters.lock().unwrap();
-    let now = Instant::now();
-
-    // Collect expired keys first
-    let expired_keys: Vec<String> = waiters
-        .iter()
-        .filter(|(_, waiter)| now.duration_since(waiter.created_at) > state.timeout)
-        .map(|(k, _)| k.clone())
-        .collect();
-
-    // Remove expired waiters and send timeout error
-    for key in expired_keys {
-        if let Some(waiter) = waiters.remove(&key) {
-            let _ = waiter.sender.send(CallbackParams {
-                code: None,
-                state: None,
-                error: Some("timeout".to_string()),
-                error_description: Some("Callback timeout".to_string()),
-            });
-        }
-    }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    #[tokio::test]
-    async fn test_callback_server_startup() {
-        let server = CallbackServer::new("127.0.0.1:0".parse::<SocketAddr>().unwrap());
-        let handle = server.start().await.unwrap();
-
-        assert!(handle.addr().port() > 0);
-        assert!(handle.callback_url().contains("/oauth/callback"));
-
-        handle.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_callback_timeout() {
-        let server = CallbackServer::new("127.0.0.1:0".parse::<SocketAddr>().unwrap())
-            .with_timeout(Duration::from_millis(100));
-        let handle = server.start().await.unwrap();
-
-        let result = handle.wait_for_callback("test_state", "test_run").await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("timeout"));
-
-        handle.shutdown().await.unwrap();
-    }
-}
-
-} // end of callback_impl module

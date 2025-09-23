@@ -94,8 +94,18 @@ impl ServerState {
     }
 
     pub async fn from_env() -> Self {
-        // For brevity, reuse new(); env wiring remains in mod/router
-        Self::new()
+        let (tx, _rx) = broadcast::channel(100);
+        // Use persistent connection store and ActionRouter for full functionality
+        let storage_service = crate::store::service::StorageService::global().await;
+        let connection_store: Arc<dyn crate::store::ConnectionStore> = storage_service.clone();
+        Self {
+            workflows: Arc::new(RwLock::new(HashMap::new())),
+            executions: Arc::new(RwLock::new(HashMap::new())),
+            connection_store: connection_store.clone(),
+            run_store: Arc::new(crate::store::MemoryRunStore::default()),
+            task_handler: Arc::new(crate::authflow::actions::ActionRouter::new(connection_store)),
+            ws_broadcaster: tx,
+        }
     }
 
     pub fn broadcast_event(&self, event: ExecutionEvent) {
