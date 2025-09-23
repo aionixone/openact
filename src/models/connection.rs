@@ -6,7 +6,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::common::{HttpParameter, NetworkConfig, TimeoutConfig, HttpPolicy};
+use super::common::{HttpParameter, NetworkConfig, TimeoutConfig, HttpPolicy, RetryPolicy};
 
 /// Authorization type for connections
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -81,6 +81,8 @@ pub struct ConnectionConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http_policy: Option<HttpPolicy>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_policy: Option<RetryPolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_ref: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -104,6 +106,7 @@ impl ConnectionConfig {
             network_config: None,
             timeout_config: None,
             http_policy: None,
+            retry_policy: None,
             auth_ref: None,
             created_at: now,
             updated_at: now,

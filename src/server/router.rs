@@ -9,8 +9,13 @@ pub fn core_api_router() -> Router {
         .route("/api/v1/tasks", get(crate::server::handlers::tasks::list).post(crate::server::handlers::tasks::create))
         .route("/api/v1/tasks/{trn..}", get(crate::server::handlers::tasks::get).put(crate::server::handlers::tasks::update).delete(crate::server::handlers::tasks::del))
         .route("/api/v1/tasks/{trn..}/execute", post(crate::server::handlers::execute::execute))
+        .route("/api/v1/system/health", get(crate::server::handlers::system::health))
         .route("/api/v1/system/stats", get(crate::server::handlers::system::stats))
         .route("/api/v1/system/cleanup", post(crate::server::handlers::system::cleanup))
+        // Observability endpoints
+        .route("/health", get(crate::observability::endpoints::detailed_health))
+        .route("/metrics", get(crate::observability::endpoints::metrics_endpoint))
+        .route("/debug", get(crate::observability::endpoints::debug_info))
 }
 
 

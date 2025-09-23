@@ -152,14 +152,75 @@ impl ParameterMerger {
         // 选择策略：task优先于connection；若都无则默认
         let policy = task.http_policy.as_ref().or(connection.http_policy.as_ref()).cloned().unwrap_or_default();
 
+        // 0) 验证头部总数限制
+        if headers.len() > policy.max_total_headers {
+            return Err(anyhow!("Too many headers: {} exceeds limit of {}", headers.len(), policy.max_total_headers));
+        }
+
         // 1) 删除禁止头
-        for key in policy.denied_headers.iter() {
-            if let Ok(name) = HeaderName::from_bytes(key.as_bytes()) {
-                headers.remove(name);
+        let denied_headers_lower: Vec<String> = policy.denied_headers.iter().map(|h| h.to_lowercase()).collect();
+        let mut headers_to_remove = Vec::new();
+        for name in headers.keys() {
+            let name_str = name.as_str().to_lowercase();
+            if denied_headers_lower.contains(&name_str) {
+                headers_to_remove.push(name.clone());
+            }
+        }
+        for name in headers_to_remove {
+            headers.remove(name);
+        }
+
+        // 2) 验证头部值长度和内容
+        let mut invalid_headers = Vec::new();
+        for (name, value) in headers.iter() {
+            let value_str = value.to_str().unwrap_or("");
+            
+            // 检查头部值长度
+            if value_str.len() > policy.max_header_value_length {
+                if policy.drop_forbidden_headers {
+                    invalid_headers.push(name.clone());
+                    continue;
+                } else {
+                    return Err(anyhow!("Header '{}' value too long: {} exceeds limit of {}", 
+                        name.as_str(), value_str.len(), policy.max_header_value_length));
+                }
+            }
+
+            // 检查Content-Type是否允许
+            if name.as_str().to_lowercase() == "content-type" && !policy.allowed_content_types.is_empty() {
+                let content_type = value_str.split(';').next().unwrap_or("").trim().to_lowercase();
+                if !policy.allowed_content_types.iter().any(|ct| ct.to_lowercase() == content_type) {
+                    if policy.drop_forbidden_headers {
+                        invalid_headers.push(name.clone());
+                        continue;
+                    } else {
+                        return Err(anyhow!("Content-Type '{}' not allowed", content_type));
+                    }
+                }
+            }
+
+            // 检查恶意头部值
+            if Self::is_malicious_header_value(value_str) {
+                if policy.drop_forbidden_headers {
+                    invalid_headers.push(name.clone());
+                    continue;
+                } else {
+                    return Err(anyhow!("Malicious header value detected in '{}'", name.as_str()));
+                }
             }
         }
 
-        // 2) 保留头名单：若 task 显式提供了保留头，则以 task 的值为准，覆盖 ConnectionWins 结果
+        // 移除违规头部
+        for name in invalid_headers {
+            headers.remove(name);
+        }
+
+        // 3) 头部名称标准化
+        if policy.normalize_header_names {
+            Self::normalize_header_names(headers)?;
+        }
+
+        // 4) 保留头名单：若 task 显式提供了保留头，则以 task 的值为准，覆盖 ConnectionWins 结果
         if let Some(task_headers) = &task.headers {
             for rkey in policy.reserved_headers.iter() {
                 let rkey_lc = rkey.to_lowercase();
@@ -174,13 +235,16 @@ impl ParameterMerger {
             }
         }
 
-        // 3) 多值追加头：如果头存在多个值，合并为逗号分隔
+        // 5) 多值追加头：如果头存在多个值，合并为逗号分隔
         for key in policy.multi_value_append_headers.iter() {
             if let Ok(name) = HeaderName::from_bytes(key.as_bytes()) {
                 if let Some(val) = headers.get(&name) {
                     let s = val.to_str().unwrap_or("");
-                    // 标准化：用逗号分隔；去重简单略过
-                    let joined = s.split(',').map(|v| v.trim()).collect::<Vec<_>>().join(", ");
+                    // 标准化：用逗号分隔，去重并排序
+                    let mut values: Vec<&str> = s.split(',').map(|v| v.trim()).filter(|v| !v.is_empty()).collect();
+                    values.sort();
+                    values.dedup();
+                    let joined = values.join(", ");
                     if let Ok(new_val) = HeaderValue::from_str(&joined) {
                         headers.insert(name.clone(), new_val);
                     }
@@ -188,6 +252,51 @@ impl ParameterMerger {
             }
         }
 
+        Ok(())
+    }
+
+    /// 检查头部值是否包含恶意内容
+    fn is_malicious_header_value(value: &str) -> bool {
+        // 检查CRLF注入
+        if value.contains('\r') || value.contains('\n') {
+            return true;
+        }
+        
+        // 检查控制字符
+        if value.chars().any(|c| c.is_control() && c != '\t') {
+            return true;
+        }
+        
+        // 检查可疑脚本标签
+        let value_lower = value.to_lowercase();
+        if value_lower.contains("<script") || value_lower.contains("javascript:") || value_lower.contains("data:") {
+            return true;
+        }
+        
+        false
+    }
+
+    /// 标准化头部名称（转换为小写）
+    fn normalize_header_names(headers: &mut HeaderMap) -> Result<()> {
+        let mut headers_to_update = Vec::new();
+        
+        // 收集需要标准化的头部
+        for (name, value) in headers.iter() {
+            let name_str = name.as_str();
+            let normalized = name_str.to_lowercase();
+            if name_str != normalized {
+                headers_to_update.push((name.clone(), value.clone(), normalized));
+            }
+        }
+        
+        // 更新头部名称
+        for (old_name, value, normalized) in headers_to_update {
+            headers.remove(&old_name);
+            if let Ok(new_name) = HeaderName::from_bytes(normalized.as_bytes()) {
+                headers.insert(new_name, value);
+            }
+        }
+        
         Ok(())
     }
 }
@@ -263,6 +372,105 @@ mod tests {
         // Attach default policy (denies host; multi-append includes accept)
         task.http_policy = Some(HttpPolicy::default());
         task
+    }
+
+    #[test]
+    fn test_http_policy_security_validation() {
+        let connection = create_test_connection();
+        let mut task = create_test_task();
+        
+        // Test malicious header value detection
+        task.headers = Some(std::collections::HashMap::from([
+            ("test-header".to_string(), vec!["value\r\ninjected".to_string()]),
+        ]));
+        
+        let result = ParameterMerger::merge(&connection, &task);
+        
+        // Should either drop the header or return error based on policy
+        if let Ok(merged) = result {
+            assert!(!merged.headers.contains_key("test-header"));
+        } else {
+            // Error is also acceptable if drop_forbidden_headers is false
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn test_http_policy_header_limits() {
+        let connection = create_test_connection();
+        let mut task = create_test_task();
+        
+        // Test header value length limit
+        let long_value = "x".repeat(10000); // Exceeds default 8KB limit
+        task.headers = Some(std::collections::HashMap::from([
+            ("test-header".to_string(), vec![long_value]),
+        ]));
+        
+        let result = ParameterMerger::merge(&connection, &task);
+        
+        if let Ok(merged) = result {
+            assert!(!merged.headers.contains_key("test-header"));
+        } else {
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn test_http_policy_content_type_validation() {
+        let mut connection = create_test_connection();
+        let mut task = create_test_task();
+        
+        // Remove connection headers to avoid interference
+        if let Some(ref mut params) = connection.invocation_http_parameters {
+            params.header_parameters = vec![];
+        }
+        
+        // Create a custom policy with strict content type validation
+        let mut policy = HttpPolicy::default();
+        policy.allowed_content_types = vec!["application/json".to_string()];
+        task.http_policy = Some(policy);
+        
+        // Test forbidden content type
+        task.headers = Some(std::collections::HashMap::from([
+            ("content-type".to_string(), vec!["application/evil".to_string()]),
+        ]));
+        
+        let result = ParameterMerger::merge(&connection, &task);
+        
+        assert!(result.is_ok());
+        let merged = result.unwrap();
+        
+        // Content-type should be removed because it's not in allowed list
+        assert!(!merged.headers.contains_key("content-type"));
+    }
+
+    #[test]
+    fn test_http_policy_header_normalization() {
+        let connection = create_test_connection();
+        let mut task = create_test_task();
+        
+        // Test header name normalization
+        task.headers = Some(std::collections::HashMap::from([
+            ("Content-Type".to_string(), vec!["application/json".to_string()]),
+            ("ACCEPT".to_string(), vec!["application/json".to_string()]),
+        ]));
+        
+        let result = ParameterMerger::merge(&connection, &task);
+        
+        assert!(result.is_ok());
+        let merged = result.unwrap();
+        
+        // Headers should be normalized to lowercase (if policy is enabled)
+        if task.http_policy.as_ref().map_or(true, |p| p.normalize_header_names) {
+            assert!(merged.headers.contains_key("content-type"));
+            assert!(merged.headers.contains_key("accept"));
+        }
+        
+        // Verify that headers exist with some case
+        let has_content_type = merged.headers.contains_key("content-type") || merged.headers.contains_key("Content-Type");
+        let has_accept = merged.headers.contains_key("accept") || merged.headers.contains_key("ACCEPT");
+        assert!(has_content_type);
+        assert!(has_accept);
     }
 
     #[test]

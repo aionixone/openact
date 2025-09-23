@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use crate::models::common::RetryPolicy;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ExecuteOverridesDto {
@@ -13,6 +14,8 @@ pub struct ExecuteOverridesDto {
     pub query: Option<HashMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_policy: Option<RetryPolicy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

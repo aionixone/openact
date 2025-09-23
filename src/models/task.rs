@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::common::{MultiValue, TimeoutConfig, NetworkConfig, HttpPolicy, ResponsePolicy};
+use super::common::{MultiValue, TimeoutConfig, NetworkConfig, HttpPolicy, ResponsePolicy, RetryPolicy};
 
 /// HTTP Task configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +30,8 @@ pub struct TaskConfig {
     pub http_policy: Option<HttpPolicy>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_policy: Option<ResponsePolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_policy: Option<RetryPolicy>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub version: i64,
@@ -52,6 +54,7 @@ impl TaskConfig {
             network_config: None,
             http_policy: None,
             response_policy: None,
+            retry_policy: None,
             created_at: now,
             updated_at: now,
             version: 1,

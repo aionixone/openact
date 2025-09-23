@@ -44,6 +44,7 @@ impl OpenActService {
             if let Some(h) = ov.headers { let mut headers = task.headers.unwrap_or_default(); for (k, vs) in h { headers.insert(k, vs); } task.headers = Some(headers); }
             if let Some(q) = ov.query { let mut qs = task.query_params.unwrap_or_default(); for (k, vs) in q { qs.insert(k, vs); } task.query_params = Some(qs); }
             if let Some(b) = ov.body { task.request_body = Some(b); }
+            if let Some(rp) = ov.retry_policy { task.retry_policy = Some(rp); }
         }
 
         let executor = Executor::new();

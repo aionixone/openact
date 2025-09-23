@@ -2,6 +2,7 @@
 
 use crate::app::service::OpenActService;
 use crate::models::TaskConfig;
+use crate::utils::trn;
 use axum::{
     Json,
     extract::{Path, Query},
@@ -45,6 +46,12 @@ pub async fn create(Json(body): Json<TaskConfig>) -> impl IntoResponse {
 }
 
 pub async fn get(Path(trn): Path<String>) -> impl IntoResponse {
+    if let Err(e) = trn::validate_trn(&trn) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"code":"validation.invalid_trn","message":e.to_string()})),
+        ).into_response();
+    }
     let svc = OpenActService::from_env().await.unwrap();
     match svc.get_task(&trn).await {
         Ok(Some(task)) => (StatusCode::OK, Json(serde_json::json!(task))).into_response(),
@@ -65,6 +72,12 @@ pub async fn update(
     Path(trn): Path<String>,
     Json(body): Json<TaskConfig>,
 ) -> impl IntoResponse {
+    if let Err(e) = trn::validate_trn(&trn) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"code":"validation.invalid_trn","message":e.to_string()})),
+        ).into_response();
+    }
     if body.trn != trn {
         return (
             StatusCode::BAD_REQUEST,
@@ -84,6 +97,12 @@ pub async fn update(
 }
 
 pub async fn del(Path(trn): Path<String>) -> impl IntoResponse {
+    if let Err(e) = trn::validate_trn(&trn) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"code":"validation.invalid_trn","message":e.to_string()})),
+        ).into_response();
+    }
     let svc = OpenActService::from_env().await.unwrap();
     match svc.delete_task(&trn).await {
         Ok(true) => (StatusCode::NO_CONTENT, Json(serde_json::Value::Null)).into_response(),

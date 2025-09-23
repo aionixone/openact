@@ -4,6 +4,7 @@
 
 use super::auth_injector::create_auth_injector;
 use super::parameter_merger::ParameterMerger;
+use crate::models::common::RetryPolicy;
 use crate::models::{AuthorizationType, ConnectionConfig, TaskConfig};
 
 // use crate::models::AuthConnection; // moved to oauth runtime
@@ -12,50 +13,10 @@ use reqwest::Response;
 use reqwest::header::{AUTHORIZATION, HeaderValue};
 use std::collections::HashMap;
 use std::time::Duration;
+use tracing::instrument;
+use crate::observability::{logging, metrics, tracing_config};
 
 // HTTP Client 池已移动至 crate::executor::client_pool
-
-/// 重试策略配置
-#[derive(Debug, Clone)]
-pub struct RetryPolicy {
-    /// 最大重试次数（不包括初始尝试）
-    pub max_retries: u32,
-    /// 基础延迟时间
-    pub base_delay: Duration,
-    /// 最大延迟时间
-    pub max_delay: Duration,
-    /// 指数退避倍数
-    pub backoff_multiplier: f64,
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self {
-            max_retries: 0,  // 默认不重试，保持当前行为
-            base_delay: Duration::from_millis(100),
-            max_delay: Duration::from_secs(30),
-            backoff_multiplier: 2.0,
-        }
-    }
-}
-
-impl RetryPolicy {
-    /// 计算第n次重试的延迟时间
-    pub fn delay_for_attempt(&self, attempt: u32) -> Duration {
-        if attempt == 0 {
-            return Duration::ZERO;
-        }
-        
-        let delay_ms = (self.base_delay.as_millis() as f64 * self.backoff_multiplier.powi(attempt as i32 - 1)) as u64;
-        let delay = Duration::from_millis(delay_ms);
-        
-        if delay > self.max_delay {
-            self.max_delay
-        } else {
-            delay
-        }
-    }
-}
 
 /// HTTP执行器：处理直接HTTP调用
 pub struct HttpExecutor {
@@ -70,66 +31,125 @@ impl HttpExecutor {
             retry_policy: RetryPolicy::default(),
         }
     }
-    
+
     /// 创建带自定义重试策略的HTTP执行器
     pub fn with_retry_policy(retry_policy: RetryPolicy) -> Self {
         Self { retry_policy }
     }
 
     /// 执行HTTP请求
+    #[instrument(
+        level = "info",
+        skip(self, connection, task),
+        fields(
+            task_trn = %task.trn,
+            connection_trn = %connection.trn,
+            http_method = %task.method,
+            endpoint = %task.api_endpoint
+        )
+    )]
     pub async fn execute(
         &self,
         connection: &ConnectionConfig,
         task: &TaskConfig,
     ) -> Result<Response> {
-        self.execute_with_retry(connection, task).await
+        let request_id = crate::observability::generate_request_id();
+        let start_time = logging::log_task_start(&request_id, &task.trn, &connection.trn);
+        
+        // Execute with retry logic
+        let result = self.execute_with_retry(connection, task, &request_id).await;
+        
+        // Log and record metrics
+        match &result {
+            Ok(response) => {
+                let status = response.status().as_u16();
+                logging::log_task_end(&request_id, &task.trn, status, start_time, 0);
+                metrics::record_task_execution(
+                    &task.trn,
+                    &connection.trn,
+                    status,
+                    start_time.elapsed(),
+                    0,
+                );
+                tracing_config::enrich_span_with_response(status, start_time.elapsed().as_millis() as u64);
+            }
+            Err(error) => {
+                logging::log_error(&request_id, error, Some("Task execution failed"));
+                metrics::record_error("task_execution_failed", "http_executor");
+                tracing_config::enrich_span_with_error(error);
+            }
+        }
+        
+        result
     }
-    
+
     /// 执行HTTP请求（带重试逻辑）
     async fn execute_with_retry(
         &self,
         connection: &ConnectionConfig,
         task: &TaskConfig,
+        request_id: &str,
     ) -> Result<Response> {
+        // 合并重试策略：任务级 > 连接级 > 默认
+        let effective_retry_policy = self.merge_retry_policies(connection, task);
+
         let mut last_error = None;
-        
-        for attempt in 0..=self.retry_policy.max_retries {
+
+        for attempt in 0..=effective_retry_policy.max_retries {
             // 延迟（除了第一次尝试）
             if attempt > 0 {
-                let delay = self.retry_policy.delay_for_attempt(attempt);
+                let delay = self
+                    .calculate_delay(&effective_retry_policy, attempt, None)
+                    .await;
                 if !delay.is_zero() {
+                    logging::log_retry_attempt(
+                        request_id,
+                        &task.trn,
+                        attempt,
+                        effective_retry_policy.max_retries,
+                        delay.as_millis() as u64,
+                        "Retrying due to retriable error",
+                    );
+                    metrics::record_retry_attempt(&task.trn, attempt, delay, "retriable_error");
                     tokio::time::sleep(delay).await;
                 }
             }
-            
+
             match self.execute_single_request(connection, task).await {
                 Ok(response) => {
                     // 检查是否需要重试（基于状态码）
-                    if self.should_retry_response(&response) && attempt < self.retry_policy.max_retries {
+                    if self.should_retry_response(&response, &effective_retry_policy)
+                        && attempt < effective_retry_policy.max_retries
+                    {
+                        // 解析 Retry-After 头以供下次重试使用
+                        let retry_after = self.parse_retry_after(&response);
                         last_error = Some(anyhow!(
-                            "HTTP {} (attempt {}/{})", 
-                            response.status(), 
-                            attempt + 1, 
-                            self.retry_policy.max_retries + 1
+                            "HTTP {} (attempt {}/{}) - will retry after {:?}",
+                            response.status(),
+                            attempt + 1,
+                            effective_retry_policy.max_retries + 1,
+                            retry_after
                         ));
                         continue;
                     }
+
+                    // 请求成功 (attempt: {}次重试)
                     return Ok(response);
                 }
                 Err(e) => {
                     last_error = Some(e);
-                    
-                    // 如果这是最后一次尝试，返回错误
-                    if attempt >= self.retry_policy.max_retries {
-                        break;
+
+                    if attempt < effective_retry_policy.max_retries {
+                        // 请求失败，将重试 (attempt {}/{})
+                        continue;
                     }
                 }
             }
         }
-        
+
         Err(last_error.unwrap_or_else(|| anyhow!("HTTP request failed with no error details")))
     }
-    
+
     /// 执行单次HTTP请求
     async fn execute_single_request(
         &self,
@@ -150,7 +170,7 @@ impl HttpExecutor {
 
         // 4. 获取对应配置的HTTP客户端（委托 client_pool）
         let client = crate::executor::client_pool::get_client_for(connection, task)?;
-        
+
         // 5. 构建HTTP请求
         let mut request_builder = client
             .request(
@@ -175,20 +195,11 @@ impl HttpExecutor {
 
         Ok(response)
     }
-    
+
     /// 判断是否应该基于响应重试
-    fn should_retry_response(&self, response: &Response) -> bool {
-        // 只对可重试的状态码进行重试
-        match response.status().as_u16() {
-            // 5xx 服务器错误
-            500..=599 => true,
-            // 429 Too Many Requests
-            429 => true,
-            // 408 Request Timeout  
-            408 => true,
-            // 其他状态码不重试
-            _ => false,
-        }
+    fn should_retry_response(&self, response: &Response, retry_policy: &RetryPolicy) -> bool {
+        // 使用重试策略中配置的状态码
+        retry_policy.should_retry_status(response.status().as_u16())
     }
 
     /// 注入认证信息（包括OAuth2 token自动刷新）
@@ -267,6 +278,63 @@ impl HttpExecutor {
             .join("&");
 
         Ok(format!("{}{}{}", endpoint, separator, query_string))
+    }
+
+    /// 合并重试策略：任务级 > 连接级 > 默认
+    fn merge_retry_policies(
+        &self,
+        connection: &ConnectionConfig,
+        task: &TaskConfig,
+    ) -> RetryPolicy {
+        // 任务级优先
+        if let Some(ref task_policy) = task.retry_policy {
+            return task_policy.clone();
+        }
+
+        // 连接级次之
+        if let Some(ref conn_policy) = connection.retry_policy {
+            return conn_policy.clone();
+        }
+
+        // 默认策略
+        self.retry_policy.clone()
+    }
+
+    /// 解析 Retry-After 头，返回建议的延迟时间
+    fn parse_retry_after(&self, response: &Response) -> Option<Duration> {
+        response
+            .headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|s| {
+                // 尝试解析为秒数
+                if let Ok(seconds) = s.parse::<u64>() {
+                    Some(Duration::from_secs(seconds))
+                } else {
+                    // TODO: 支持 HTTP-date 格式
+                    None
+                }
+            })
+    }
+
+    /// 计算延迟时间，考虑 Retry-After 头
+    async fn calculate_delay(
+        &self,
+        retry_policy: &RetryPolicy,
+        attempt: u32,
+        retry_after: Option<Duration>,
+    ) -> Duration {
+        let policy_delay = retry_policy.delay_for_attempt(attempt);
+
+        if retry_policy.respect_retry_after {
+            if let Some(server_delay) = retry_after {
+                // 使用服务器建议的延迟时间，但不超过最大延迟
+                let max_delay = Duration::from_millis(retry_policy.max_delay_ms);
+                return server_delay.min(max_delay);
+            }
+        }
+
+        policy_delay
     }
 }
 

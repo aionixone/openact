@@ -59,14 +59,19 @@ impl TaskRepository {
             .map(|rp| serde_json::to_string(rp))
             .transpose()?;
 
+        let retry_policy_json = task.retry_policy
+            .as_ref()
+            .map(|rp| serde_json::to_string(rp))
+            .transpose()?;
+
         sqlx::query(
             r#"
             INSERT OR REPLACE INTO tasks (
                 trn, name, connection_trn, api_endpoint, method,
                 headers_json, query_params_json, request_body_json,
-                timeout_config_json, network_config_json, http_policy_json, response_policy_json,
+                timeout_config_json, network_config_json, http_policy_json, response_policy_json, retry_policy_json,
                 created_at, updated_at, version
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             "#,
         )
         .bind(&task.trn)
@@ -81,6 +86,7 @@ impl TaskRepository {
         .bind(&network_config_json)
         .bind(&http_policy_json)
         .bind(&response_policy_json)
+        .bind(&retry_policy_json)
         .bind(&task.created_at)
         .bind(&Utc::now()) // Always update updated_at
         .bind(&task.version)
@@ -222,6 +228,7 @@ impl TaskRepository {
         let network_config = self.parse_optional_json(&row, "network_config_json")?;
         let http_policy = self.parse_optional_json(&row, "http_policy_json")?;
         let response_policy = self.parse_optional_json(&row, "response_policy_json")?;
+        let retry_policy = self.parse_optional_json(&row, "retry_policy_json")?;
 
         Ok(TaskConfig {
             trn: row.get("trn"),
@@ -236,6 +243,7 @@ impl TaskRepository {
             network_config,
             http_policy,
             response_policy,
+            retry_policy,
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
             version: row.get("version"),

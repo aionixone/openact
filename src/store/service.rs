@@ -709,7 +709,7 @@ impl ConnectionStore for StorageService {
 }
 
 /// 存储统计信息
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct StorageStats {
     pub total_connections: i64,
     pub total_tasks: i64,
@@ -727,7 +727,7 @@ pub struct CleanupResult {
 }
 
 /// 缓存统计
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct CacheStats {
     pub exec_lookups: u64,
     pub exec_hits: u64,

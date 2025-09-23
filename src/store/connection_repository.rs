@@ -63,6 +63,11 @@ impl ConnectionRepository {
             .map(|hp| serde_json::to_string(hp))
             .transpose()?;
 
+        let retry_policy_json = connection.retry_policy
+            .as_ref()
+            .map(|rp| serde_json::to_string(rp))
+            .transpose()?;
+
         let authorization_type_str = serde_json::to_string(&connection.authorization_type)?
             .trim_matches('"').to_string(); // Remove quotes from enum
 
@@ -72,9 +77,9 @@ impl ConnectionRepository {
                 trn, name, authorization_type, auth_params_encrypted, auth_params_nonce,
                 auth_ref,
                 default_headers_json, default_query_params_json, default_body_json,
-                network_config_json, timeout_config_json, http_policy_json,
+                network_config_json, timeout_config_json, http_policy_json, retry_policy_json,
                 key_version, created_at, updated_at, version
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
             "#,
         )
         .bind(&connection.trn)
@@ -89,6 +94,7 @@ impl ConnectionRepository {
         .bind(&network_config_json)
         .bind(&timeout_config_json)
         .bind(&http_policy_json)
+        .bind(&retry_policy_json)
         .bind(key_version)
         .bind(&connection.created_at)
         .bind(&Utc::now()) // Always update updated_at
@@ -140,6 +146,7 @@ impl ConnectionRepository {
                 let network_config = self.parse_optional_json(&row, "network_config_json")?;
                 let timeout_config = self.parse_optional_json(&row, "timeout_config_json")?;
                 let http_policy = self.parse_optional_json(&row, "http_policy_json")?;
+                let retry_policy = self.parse_optional_json(&row, "retry_policy_json")?;
 
                 Ok(Some(ConnectionConfig {
                     trn: row.get("trn"),
@@ -151,6 +158,7 @@ impl ConnectionRepository {
                     network_config,
                     timeout_config,
                     http_policy,
+                    retry_policy,
                     created_at: row.get("created_at"),
                     updated_at: row.get("updated_at"),
                     version: row.get("version"),
@@ -223,6 +231,7 @@ impl ConnectionRepository {
             let network_config = self.parse_optional_json(&row, "network_config_json")?;
             let timeout_config = self.parse_optional_json(&row, "timeout_config_json")?;
             let http_policy = self.parse_optional_json(&row, "http_policy_json")?;
+            let retry_policy = self.parse_optional_json(&row, "retry_policy_json")?;
 
             connections.push(ConnectionConfig {
                 trn: row.get("trn"),
@@ -234,6 +243,7 @@ impl ConnectionRepository {
                 network_config,
                 timeout_config,
                 http_policy,
+                retry_policy,
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),
                 version: row.get("version"),

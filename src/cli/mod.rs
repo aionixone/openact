@@ -1,3 +1,5 @@
+use crate::interface::dto::{ExecuteOverridesDto, ExecuteRequestDto, ExecuteResponseDto};
+use crate::models::common::RetryPolicy;
 use crate::models::{ConnectionConfig, TaskConfig};
 use crate::store::{DatabaseManager, StorageService};
 use anyhow::{Result, anyhow};
@@ -15,8 +17,88 @@ pub struct Cli {
     #[arg(long, global = true, default_value_t = false)]
     pub json: bool,
 
+    /// Use HTTP server mode instead of local execution (e.g. http://127.0.0.1:8080)
+    #[arg(long, global = true)]
+    pub server: Option<String>,
+
     #[command(subcommand)]
     pub command: Commands,
+}
+
+async fn execute_via_server(
+    base: &str,
+    task_trn: &str,
+    overrides: &ExecuteOverrides,
+    json_out: bool,
+) -> Result<()> {
+    // Build request DTO
+    let mut hdr: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for kv in &overrides.headers {
+        if let Some((k, v)) = kv.split_once(':') {
+            hdr.insert(k.trim().to_string(), vec![v.trim().to_string()]);
+        }
+    }
+    let mut qs: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for kv in &overrides.queries {
+        if let Some((k, v)) = kv.split_once('=') {
+            qs.insert(k.trim().to_string(), vec![v.trim().to_string()]);
+        }
+    }
+    let body_json = if let Some(b) = &overrides.body {
+        let content = if let Some(path) = b.strip_prefix('@') {
+            std::fs::read_to_string(path)?
+        } else {
+            b.clone()
+        };
+        Some(parse_json_or_yaml::<serde_json::Value>(&content)?)
+    } else {
+        None
+    };
+
+    // 构建重试策略
+    let retry_policy = build_retry_policy_from_overrides(overrides)?;
+    
+    let req = ExecuteRequestDto {
+        overrides: Some(ExecuteOverridesDto {
+            method: overrides.method.clone(),
+            endpoint: overrides.endpoint.clone(),
+            headers: if hdr.is_empty() { None } else { Some(hdr) },
+            query: if qs.is_empty() { None } else { Some(qs) },
+            body: body_json,
+            retry_policy,
+        }),
+        output: Some(overrides.output.clone()),
+    };
+
+    let url = format!(
+        "{}/api/v1/tasks/{}/execute",
+        base.trim_end_matches('/'),
+        urlencoding::encode(task_trn)
+    );
+    let resp = reqwest::Client::new().post(&url).json(&req).send().await?;
+    let status = resp.status();
+    let bytes = resp.bytes().await?;
+    if !status.is_success() {
+        let text = String::from_utf8_lossy(&bytes);
+        return Err(anyhow!("server error {}: {}", status, text));
+    }
+    let dto: ExecuteResponseDto = serde_json::from_slice(&bytes)?;
+    if json_out {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "status": dto.status, "headers": dto.headers, "body": dto.body
+            }))?
+        );
+    } else {
+        println!("Status: {}", dto.status);
+        println!("Headers:");
+        for (k, v) in dto.headers.iter() {
+            println!("  {}: {}", k, v);
+        }
+        println!("Body:\n{}", serde_json::to_string_pretty(&dto.body)?);
+    }
+    Ok(())
 }
 
 #[derive(Args, Debug, Default)]
@@ -39,6 +121,15 @@ pub struct ExecuteOverrides {
     /// Output control: status-only, headers-only, body-only
     #[arg(long, default_value = "")]
     pub output: String,
+    /// Override maximum retry attempts (0-10)
+    #[arg(long)]
+    pub max_retries: Option<u32>,
+    /// Override base delay in milliseconds (10-10000)
+    #[arg(long)]
+    pub retry_delay_ms: Option<u64>,
+    /// Override retry policy: aggressive|conservative|custom
+    #[arg(long)]
+    pub retry_policy: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -205,6 +296,10 @@ pub async fn run(cli: Cli) -> Result<()> {
             task_trn,
             overrides,
         } => {
+            // If --server is provided, proxy via HTTP API
+            if let Some(base) = &cli.server {
+                return execute_via_server(base, task_trn, overrides, cli.json).await;
+            }
             let (conn, mut task) = service
                 .get_execution_context(task_trn)
                 .await?
@@ -244,6 +339,11 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let val = parse_json_or_yaml::<serde_json::Value>(&content)?;
                 task.request_body = Some(val);
             }
+            
+            // 应用重试策略覆盖
+            if let Some(retry_policy) = build_retry_policy_from_overrides(overrides)? {
+                task.retry_policy = Some(retry_policy);
+            }
 
             let executor = crate::executor::Executor::new();
             let result = executor.execute(&conn, &task).await?;
@@ -275,12 +375,57 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         Commands::Connection { cmd } => match cmd {
             ConnectionCmd::Upsert { file } => {
+                if let Some(base) = &cli.server {
+                    let s = read_input(file.as_ref())?;
+                    let cfg: ConnectionConfig = parse_json_or_yaml(&s)?;
+                    let url = format!("{}/api/v1/connections", base.trim_end_matches('/'));
+                    let resp = reqwest::Client::new().post(&url).json(&cfg).send().await?;
+                    let status = resp.status();
+                    let body = resp.bytes().await?;
+                    if !status.is_success() {
+                        return Err(anyhow!(
+                            "server error {}: {}",
+                            status,
+                            String::from_utf8_lossy(&body)
+                        ));
+                    }
+                    println!("upserted: {}", cfg.trn);
+                    return Ok(());
+                }
                 let s = read_input(file.as_ref())?;
                 let cfg: ConnectionConfig = parse_json_or_yaml(&s)?;
                 service.upsert_connection(&cfg).await?;
                 println!("upserted: {}", cfg.trn);
             }
             ConnectionCmd::Get { trn } => {
+                if let Some(base) = &cli.server {
+                    let url = format!(
+                        "{}/api/v1/connections/{}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(trn)
+                    );
+                    let resp = reqwest::Client::new().get(&url).send().await?;
+                    let status = resp.status();
+                    let body = resp.bytes().await?;
+                    if !status.is_success() {
+                        return Err(anyhow!(
+                            "server error {}: {}",
+                            status,
+                            String::from_utf8_lossy(&body)
+                        ));
+                    }
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::from_slice::<
+                                serde_json::Value,
+                            >(&body)?)?
+                        );
+                    } else {
+                        println!("{}", String::from_utf8_lossy(&body));
+                    }
+                    return Ok(());
+                }
                 let found = service.get_connection(trn).await?;
                 match found {
                     Some(c) => {
@@ -301,6 +446,48 @@ pub async fn run(cli: Cli) -> Result<()> {
                 limit,
                 offset,
             } => {
+                if let Some(base) = &cli.server {
+                    let mut url = format!("{}/api/v1/connections", base.trim_end_matches('/'));
+                    let mut first = true;
+                    if let Some(k) = auth_kind {
+                        url.push_str(if first { "?" } else { "&" });
+                        first = false;
+                        url.push_str("auth_type=");
+                        url.push_str(&urlencoding::encode(k));
+                    }
+                    if let Some(v) = limit {
+                        url.push_str(if first { "?" } else { "&" });
+                        first = false;
+                        url.push_str("limit=");
+                        url.push_str(&v.to_string());
+                    }
+                    if let Some(v) = offset {
+                        url.push_str(if first { "?" } else { "&" });
+                        url.push_str("offset=");
+                        url.push_str(&v.to_string());
+                    }
+                    let resp = reqwest::Client::new().get(&url).send().await?;
+                    let status = resp.status();
+                    let body = resp.bytes().await?;
+                    if !status.is_success() {
+                        return Err(anyhow!(
+                            "server error {}: {}",
+                            status,
+                            String::from_utf8_lossy(&body)
+                        ));
+                    }
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::from_slice::<
+                                serde_json::Value,
+                            >(&body)?)?
+                        );
+                    } else {
+                        println!("{}", String::from_utf8_lossy(&body));
+                    }
+                    return Ok(());
+                }
                 let list = service
                     .list_connections(auth_kind.as_deref(), *limit, *offset)
                     .await?;
@@ -317,6 +504,29 @@ pub async fn run(cli: Cli) -> Result<()> {
                     println!("use --yes to confirm delete");
                     return Ok(());
                 }
+                if let Some(base) = &cli.server {
+                    let url = format!(
+                        "{}/api/v1/connections/{}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(trn)
+                    );
+                    let resp = reqwest::Client::new().delete(&url).send().await?;
+                    let status = resp.status();
+                    let body = resp.bytes().await?;
+                    if status.as_u16() == 204 {
+                        println!("deleted: {}", trn);
+                        return Ok(());
+                    }
+                    if !status.is_success() {
+                        return Err(anyhow!(
+                            "server error {}: {}",
+                            status,
+                            String::from_utf8_lossy(&body)
+                        ));
+                    }
+                    println!("deleted: {}", trn);
+                    return Ok(());
+                }
                 let ok = service.delete_connection(trn).await?;
                 if ok {
                     println!("deleted: {}", trn);
@@ -327,12 +537,57 @@ pub async fn run(cli: Cli) -> Result<()> {
         },
         Commands::Task { cmd } => match cmd {
             TaskCmd::Upsert { file } => {
+                if let Some(base) = &cli.server {
+                    let s = read_input(file.as_ref())?;
+                    let cfg: TaskConfig = parse_json_or_yaml(&s)?;
+                    let url = format!("{}/api/v1/tasks", base.trim_end_matches('/'));
+                    let resp = reqwest::Client::new().post(&url).json(&cfg).send().await?;
+                    let status = resp.status();
+                    let body = resp.bytes().await?;
+                    if !status.is_success() {
+                        return Err(anyhow!(
+                            "server error {}: {}",
+                            status,
+                            String::from_utf8_lossy(&body)
+                        ));
+                    }
+                    println!("upserted: {}", cfg.trn);
+                    return Ok(());
+                }
                 let s = read_input(file.as_ref())?;
                 let cfg: TaskConfig = parse_json_or_yaml(&s)?;
                 service.upsert_task(&cfg).await?;
                 println!("upserted: {}", cfg.trn);
             }
             TaskCmd::Get { trn } => {
+                if let Some(base) = &cli.server {
+                    let url = format!(
+                        "{}/api/v1/tasks/{}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(trn)
+                    );
+                    let resp = reqwest::Client::new().get(&url).send().await?;
+                    let status = resp.status();
+                    let body = resp.bytes().await?;
+                    if !status.is_success() {
+                        return Err(anyhow!(
+                            "server error {}: {}",
+                            status,
+                            String::from_utf8_lossy(&body)
+                        ));
+                    }
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::from_slice::<
+                                serde_json::Value,
+                            >(&body)?)?
+                        );
+                    } else {
+                        println!("{}", String::from_utf8_lossy(&body));
+                    }
+                    return Ok(());
+                }
                 let found = service.get_task(trn).await?;
                 match found {
                     Some(t) => {
@@ -353,6 +608,44 @@ pub async fn run(cli: Cli) -> Result<()> {
                 limit,
                 offset,
             } => {
+                if let Some(base) = &cli.server {
+                    let mut url = format!("{}/api/v1/tasks", base.trim_end_matches('/'));
+                    let mut params = Vec::new();
+                    if let Some(k) = connection_trn {
+                        params.push(format!("connection_trn={}", urlencoding::encode(k)));
+                    }
+                    if let Some(v) = limit {
+                        params.push(format!("limit={}", v));
+                    }
+                    if let Some(v) = offset {
+                        params.push(format!("offset={}", v));
+                    }
+                    if !params.is_empty() {
+                        url.push('?');
+                        url.push_str(&params.join("&"));
+                    }
+                    let resp = reqwest::Client::new().get(&url).send().await?;
+                    let status = resp.status();
+                    let body = resp.bytes().await?;
+                    if !status.is_success() {
+                        return Err(anyhow!(
+                            "server error {}: {}",
+                            status,
+                            String::from_utf8_lossy(&body)
+                        ));
+                    }
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::from_slice::<
+                                serde_json::Value,
+                            >(&body)?)?
+                        );
+                    } else {
+                        println!("{}", String::from_utf8_lossy(&body));
+                    }
+                    return Ok(());
+                }
                 let list = service
                     .list_tasks(connection_trn.as_deref(), *limit, *offset)
                     .await?;
@@ -370,6 +663,29 @@ pub async fn run(cli: Cli) -> Result<()> {
             TaskCmd::Delete { trn, yes } => {
                 if !*yes {
                     println!("use --yes to confirm delete");
+                    return Ok(());
+                }
+                if let Some(base) = &cli.server {
+                    let url = format!(
+                        "{}/api/v1/tasks/{}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(trn)
+                    );
+                    let resp = reqwest::Client::new().delete(&url).send().await?;
+                    let status = resp.status();
+                    let body = resp.bytes().await?;
+                    if status.as_u16() == 204 {
+                        println!("deleted: {}", trn);
+                        return Ok(());
+                    }
+                    if !status.is_success() {
+                        return Err(anyhow!(
+                            "server error {}: {}",
+                            status,
+                            String::from_utf8_lossy(&body)
+                        ));
+                    }
+                    println!("deleted: {}", trn);
                     return Ok(());
                 }
                 let ok = service.delete_task(trn).await?;
@@ -497,7 +813,13 @@ pub async fn run(cli: Cli) -> Result<()> {
                         }
                     }
                 }
-                OauthCmd::Resume { dsl, run_id, code, state, bind_connection } => {
+                OauthCmd::Resume {
+                    dsl,
+                    run_id,
+                    code,
+                    state,
+                    bind_connection,
+                } => {
                     let yaml = std::fs::read_to_string(dsl)?;
                     let dsl: stepflow_dsl::WorkflowDSL = serde_yaml::from_str(&yaml)?;
                     let run_store = crate::store::MemoryRunStore::default();
@@ -516,14 +838,21 @@ pub async fn run(cli: Cli) -> Result<()> {
                     if let Some(conn_trn) = bind_connection {
                         // Expect the flow to output an auth connection TRN at /states/Exchange/result or similar
                         // Here we allow either direct string or nested field `auth_trn`
-                        let auth_trn = out.as_str()
+                        let auth_trn = out
+                            .as_str()
                             .map(|s| s.to_string())
-                            .or_else(|| out.get("auth_trn").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                            .or_else(|| {
+                                out.get("auth_trn")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string())
+                            })
                             .unwrap_or_default();
                         if !auth_trn.is_empty() {
                             let manager = service.database();
                             let repo = manager.connection_repository();
-                            let mut conn = repo.get_by_trn(&conn_trn).await?
+                            let mut conn = repo
+                                .get_by_trn(&conn_trn)
+                                .await?
                                 .ok_or_else(|| anyhow!("connection not found: {}", conn_trn))?;
                             conn.auth_ref = Some(auth_trn.clone());
                             repo.upsert(&conn).await?;
@@ -534,14 +863,22 @@ pub async fn run(cli: Cli) -> Result<()> {
                     }
                     println!("{}", serde_json::to_string_pretty(&out)?);
                 }
-                OauthCmd::Bind { connection_trn, auth_trn } => {
+                OauthCmd::Bind {
+                    connection_trn,
+                    auth_trn,
+                } => {
                     let manager = service.database();
                     let repo = manager.connection_repository();
-                    let mut conn = repo.get_by_trn(connection_trn).await?
+                    let mut conn = repo
+                        .get_by_trn(connection_trn)
+                        .await?
                         .ok_or_else(|| anyhow!("connection not found: {}", connection_trn))?;
                     conn.auth_ref = Some(auth_trn.clone());
                     repo.upsert(&conn).await?;
-                    println!("bound: connection={} -> auth_ref={}", connection_trn, auth_trn);
+                    println!(
+                        "bound: connection={} -> auth_ref={}",
+                        connection_trn, auth_trn
+                    );
                 }
             }
         }
@@ -566,4 +903,36 @@ fn parse_json_or_yaml<T: serde::de::DeserializeOwned>(s: &str) -> Result<T> {
     } else {
         Ok(serde_yaml::from_str(trimmed)?)
     }
+}
+
+/// 从CLI参数构建重试策略
+fn build_retry_policy_from_overrides(overrides: &ExecuteOverrides) -> Result<Option<RetryPolicy>> {
+    // 如果没有任何重试相关参数，返回None
+    if overrides.max_retries.is_none() && overrides.retry_delay_ms.is_none() && overrides.retry_policy.is_none() {
+        return Ok(None);
+    }
+    
+    // 基础策略
+    let mut policy = match overrides.retry_policy.as_deref() {
+        Some("aggressive") => RetryPolicy::aggressive(),
+        Some("conservative") => RetryPolicy::conservative(),
+        _ => RetryPolicy::default(),
+    };
+    
+    // 应用覆盖参数
+    if let Some(max_retries) = overrides.max_retries {
+        if max_retries > 10 {
+            return Err(anyhow!("max_retries cannot exceed 10"));
+        }
+        policy.max_retries = max_retries;
+    }
+    
+    if let Some(delay_ms) = overrides.retry_delay_ms {
+        if delay_ms < 10 || delay_ms > 10000 {
+            return Err(anyhow!("retry_delay_ms must be between 10 and 10000"));
+        }
+        policy.base_delay_ms = delay_ms;
+    }
+    
+    Ok(Some(policy))
 }
