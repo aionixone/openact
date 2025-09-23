@@ -18,59 +18,59 @@ pub async fn create_router_async() -> Router {
 #[cfg(feature = "server")]
 pub fn create_router_with_state(state: ServerState) -> Router {
     Router::new()
-        // Workflow management
+        // Workflow management (authflow namespace only)
         .route(
-            "/api/v1/workflows",
+            "/api/v1/authflow/workflows",
             get(crate::authflow::server::handlers::workflows::list_workflows)
                 .post(crate::authflow::server::handlers::workflows::create_workflow),
         )
         .route(
-            "/api/v1/workflows/{id}",
+            "/api/v1/authflow/workflows/{id}",
             get(crate::authflow::server::handlers::workflows::get_workflow),
         )
         .route(
-            "/api/v1/workflows/{id}/graph",
+            "/api/v1/authflow/workflows/{id}/graph",
             get(crate::authflow::server::handlers::workflows::get_workflow_graph),
         )
         .route(
-            "/api/v1/workflows/{id}/validate",
+            "/api/v1/authflow/workflows/{id}/validate",
             post(crate::authflow::server::handlers::workflows::validate_workflow),
         )
-        // Execution management
+        // Execution management (authflow namespace only)
         .route(
-            "/api/v1/executions",
+            "/api/v1/authflow/executions",
             get(crate::authflow::server::handlers::executions::list_executions)
                 .post(crate::authflow::server::handlers::executions::start_execution),
         )
         .route(
-            "/api/v1/executions/{id}",
+            "/api/v1/authflow/executions/{id}",
             get(crate::authflow::server::handlers::executions::get_execution),
         )
         .route(
-            "/api/v1/executions/{id}/resume",
+            "/api/v1/authflow/executions/{id}/resume",
             post(crate::authflow::server::handlers::executions::resume_execution),
         )
         .route(
-            "/api/v1/executions/{id}/cancel",
+            "/api/v1/authflow/executions/{id}/cancel",
             post(crate::authflow::server::handlers::executions::cancel_execution),
         )
         .route(
-            "/api/v1/executions/{id}/trace",
+            "/api/v1/authflow/executions/{id}/trace",
             get(crate::authflow::server::handlers::executions::get_execution_trace),
         )
-        // WebSocket real-time updates
+        // WebSocket real-time updates (authflow namespace only)
         .route(
-            "/api/v1/ws/executions",
+            "/api/v1/authflow/ws/executions",
             get(crate::authflow::server::handlers::ws::websocket_handler),
         )
-        // System management
+        // System management (authflow namespace only)
         .route(
-            "/api/v1/health",
+            "/api/v1/authflow/health",
             get(crate::authflow::server::handlers::health::health_check),
         )
-        // OAuth2 callback endpoint (auto resume)
+        // OAuth2 callback endpoint (authflow namespace only)
         .route(
-            "/oauth/callback",
+            "/api/v1/authflow/callback",
             get(crate::authflow::server::handlers::oauth::oauth_callback),
         )
         .with_state(state)

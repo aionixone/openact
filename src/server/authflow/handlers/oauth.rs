@@ -14,7 +14,8 @@ use std::time::SystemTime;
 #[cfg(feature = "server")]
 use crate::authflow::server::ServerState;
 #[cfg(feature = "server")]
-use super::super::{ExecutionStatus, execute_workflow};
+use crate::authflow::server::ExecutionStatus;
+use crate::authflow::server::runtime::execute_workflow;
 
 #[cfg(feature = "server")]
 #[derive(Debug, Deserialize)]

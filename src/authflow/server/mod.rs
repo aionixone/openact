@@ -30,22 +30,18 @@ use std::{
 };
 #[cfg(feature = "server")]
 use tokio::sync::broadcast;
-pub mod dto;
+// moved to crate::server::authflow::dto
+pub use crate::server::authflow::dto;
 #[cfg(feature = "server")]
 // use chrono::{DateTime, Utc};
 
 // Facade submodules for incremental refactor
-pub mod router;
-pub mod runtime;
-pub mod state;
-pub mod utils;
-pub mod handlers {
-    pub mod executions;
-    pub mod health;
-    pub mod oauth;
-    pub mod workflows;
-    pub mod ws;
-}
+// moved to crate::server::authflow::router
+pub use crate::server::authflow::router;
+// moved to crate::server::authflow::{runtime,state,utils,dto}
+pub use crate::server::authflow::{runtime, state, utils, dto};
+// moved to crate::server::authflow::handlers
+pub use crate::server::authflow::handlers;
 
 /// Workflow server state
 #[cfg(feature = "server")]
@@ -244,9 +240,7 @@ impl ServerState {
     }
 }
 
-pub use crate::authflow::server::router::{
-    create_router, create_router_async, create_router_with_state,
-};
+pub use crate::server::authflow::router::{create_router, create_router_async, create_router_with_state};
 
 #[cfg(feature = "server")]
 async fn execute_workflow(state: ServerState, execution_id: String) {

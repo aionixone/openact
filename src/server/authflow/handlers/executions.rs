@@ -1,16 +1,16 @@
 #[cfg(feature = "server")]
 use axum::extract::{Path, State};
 #[cfg(feature = "server")]
-use axum::response::{IntoResponse, Json};
-#[cfg(feature = "server")]
 use axum::http::StatusCode;
+#[cfg(feature = "server")]
+use axum::response::{IntoResponse, Json};
 #[cfg(feature = "server")]
 use serde_json::json;
 
 #[cfg(feature = "server")]
-use crate::authflow::server::ServerState;
+use crate::authflow::server::ExecutionStatus;
 #[cfg(feature = "server")]
-use super::super::ExecutionStatus;
+use crate::authflow::server::ServerState;
 
 /// Get specific execution information
 #[cfg(feature = "server")]
@@ -29,38 +29,63 @@ pub async fn get_execution(
                     // Extract authorization URL from context if available
                     let mut pending = serde_json::Map::new();
                     if let Some(auth_result) = context.pointer("/states/StartAuth/result") {
-                        if let Some(authorize_url) = auth_result.get("authorize_url").and_then(|v| v.as_str()) {
-                            pending.insert("authorize_url".to_string(), serde_json::Value::String(authorize_url.to_string()));
+                        if let Some(authorize_url) =
+                            auth_result.get("authorize_url").and_then(|v| v.as_str())
+                        {
+                            pending.insert(
+                                "authorize_url".to_string(),
+                                serde_json::Value::String(authorize_url.to_string()),
+                            );
                         }
                         if let Some(state_val) = auth_result.get("state").and_then(|v| v.as_str()) {
-                            pending.insert("state".to_string(), serde_json::Value::String(state_val.to_string()));
+                            pending.insert(
+                                "state".to_string(),
+                                serde_json::Value::String(state_val.to_string()),
+                            );
                         }
-                        if let Some(verifier) = auth_result.get("code_verifier").and_then(|v| v.as_str()) {
-                            pending.insert("code_verifier".to_string(), serde_json::Value::String(verifier.to_string()));
+                        if let Some(verifier) =
+                            auth_result.get("code_verifier").and_then(|v| v.as_str())
+                        {
+                            pending.insert(
+                                "code_verifier".to_string(),
+                                serde_json::Value::String(verifier.to_string()),
+                            );
                         }
                     }
                     // Fallback to vars if needed (state/code_verifier saved via assign)
                     if let Some(vars) = context.get("vars") {
                         if !pending.contains_key("state") {
-                            if let Some(state_val) = vars.get("auth_state").and_then(|v| v.as_str()) {
-                                pending.insert("state".to_string(), serde_json::Value::String(state_val.to_string()));
+                            if let Some(state_val) = vars.get("auth_state").and_then(|v| v.as_str())
+                            {
+                                pending.insert(
+                                    "state".to_string(),
+                                    serde_json::Value::String(state_val.to_string()),
+                                );
                             }
                         }
                         if !pending.contains_key("code_verifier") {
-                            if let Some(verifier) = vars.get("code_verifier").and_then(|v| v.as_str()) {
-                                pending.insert("code_verifier".to_string(), serde_json::Value::String(verifier.to_string()));
+                            if let Some(verifier) =
+                                vars.get("code_verifier").and_then(|v| v.as_str())
+                            {
+                                pending.insert(
+                                    "code_verifier".to_string(),
+                                    serde_json::Value::String(verifier.to_string()),
+                                );
                             }
                         }
                     }
                     if !pending.is_empty() {
                         if let Some(response_obj) = response.as_object_mut() {
-                            response_obj.insert("pending_info".to_string(), serde_json::Value::Object(pending));
+                            response_obj.insert(
+                                "pending_info".to_string(),
+                                serde_json::Value::Object(pending),
+                            );
                         }
                     }
                 }
             }
             Json(response).into_response()
-        },
+        }
         None => (
             StatusCode::NOT_FOUND,
             Json(json!({
@@ -112,7 +137,10 @@ pub async fn get_execution_trace(
     // Add current state (if running or paused)
     let mut current_trace = trace;
     if let Some(current_state) = &execution.current_state {
-        if matches!(execution.status, ExecutionStatus::Running | ExecutionStatus::Paused) {
+        if matches!(
+            execution.status,
+            ExecutionStatus::Running | ExecutionStatus::Paused
+        ) {
             current_trace.push(json!({
                 "state": current_state,
                 "status": "active",
@@ -146,7 +174,7 @@ pub async fn list_executions(State(state): State<ServerState>) -> impl IntoRespo
 #[cfg(feature = "server")]
 pub async fn start_execution(
     State(state): State<ServerState>,
-    Json(req): Json<super::super::StartExecutionRequest>,
+    Json(req): Json<crate::authflow::server::StartExecutionRequest>,
 ) -> impl IntoResponse {
     // Check if workflow exists
     let workflow = {
@@ -179,7 +207,8 @@ pub async fn start_execution(
     let execution_id = uuid::Uuid::new_v4().to_string();
     let now = std::time::SystemTime::now();
 
-    let execution = super::super::ExecutionInfo {
+    use crate::authflow::server::ExecutionInfo;
+    let execution = ExecutionInfo {
         execution_id: execution_id.clone(),
         workflow_id: req.workflow_id.clone(),
         flow: req.flow.clone(),
@@ -202,9 +231,15 @@ pub async fn start_execution(
     // Start asynchronous execution
     let state_clone = state.clone();
     let execution_id_clone = execution_id.clone();
-    tokio::spawn(async move { crate::authflow::server::runtime::execute_workflow(state_clone, execution_id_clone).await; });
+    tokio::spawn(async move {
+        crate::authflow::server::runtime::execute_workflow(state_clone, execution_id_clone).await;
+    });
 
-    (StatusCode::CREATED, Json(serde_json::to_value(execution).unwrap())).into_response()
+    (
+        StatusCode::CREATED,
+        Json(serde_json::to_value(execution).unwrap()),
+    )
+        .into_response()
 }
 
 /// Resume paused execution
@@ -212,7 +247,7 @@ pub async fn start_execution(
 pub async fn resume_execution(
     State(state): State<ServerState>,
     Path(id): Path<String>,
-    Json(req): Json<super::super::ResumeExecutionRequest>,
+    Json(req): Json<crate::authflow::server::ResumeExecutionRequest>,
 ) -> impl IntoResponse {
     // Check if execution exists (allow Running/Paused, prohibit Completed/Failed/Cancelled)
     {
@@ -221,7 +256,9 @@ pub async fn resume_execution(
             Some(execution) => {
                 if matches!(
                     execution.status,
-                    ExecutionStatus::Completed | ExecutionStatus::Failed | ExecutionStatus::Cancelled
+                    ExecutionStatus::Completed
+                        | ExecutionStatus::Failed
+                        | ExecutionStatus::Cancelled
                 ) {
                     return (
                         StatusCode::BAD_REQUEST,
@@ -258,8 +295,12 @@ pub async fn resume_execution(
             execution.updated_at = std::time::SystemTime::now();
             let mut new_ctx = execution.context.clone().unwrap_or_else(|| json!({}));
             if let serde_json::Value::Object(ref mut map) = new_ctx {
-                if let Some(code) = req.input.get("code").cloned() { map.insert("code".to_string(), code); }
-                if let Some(state_val) = req.input.get("state").cloned() { map.insert("state".to_string(), state_val); }
+                if let Some(code) = req.input.get("code").cloned() {
+                    map.insert("code".to_string(), code);
+                }
+                if let Some(state_val) = req.input.get("state").cloned() {
+                    map.insert("state".to_string(), state_val);
+                }
             }
             execution.context = Some(new_ctx);
         }
@@ -268,7 +309,9 @@ pub async fn resume_execution(
     // Start asynchronous resume execution
     let state_clone = state.clone();
     let execution_id_clone = id.clone();
-    tokio::spawn(async move { crate::authflow::server::runtime::execute_workflow(state_clone, execution_id_clone).await; });
+    tokio::spawn(async move {
+        crate::authflow::server::runtime::execute_workflow(state_clone, execution_id_clone).await;
+    });
 
     Json(json!({ "message": "Execution resumed", "executionId": id })).into_response()
 }
@@ -317,5 +360,3 @@ pub async fn cancel_execution(
             .into_response(),
     }
 }
-
-

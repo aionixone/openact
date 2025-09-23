@@ -20,7 +20,7 @@ pub async fn list_workflows(State(state): State<ServerState>) -> impl IntoRespon
 #[cfg(feature = "server")]
 pub async fn create_workflow(
     State(state): State<ServerState>,
-    Json(req): Json<super::super::CreateWorkflowRequest>,
+    Json(req): Json<crate::authflow::server::CreateWorkflowRequest>,
 ) -> impl IntoResponse {
     let normalized_json = crate::authflow::server::utils::normalize_dsl_json(req.dsl);
     let parsed: crate::authflow::dsl::OpenactDsl = match serde_json::from_value(normalized_json) {
@@ -42,12 +42,13 @@ pub async fn create_workflow(
     }
     let workflow_id = uuid::Uuid::new_v4().to_string();
     let now = std::time::SystemTime::now();
-    let workflow = super::super::WorkflowConfig {
+    use crate::authflow::server::{WorkflowConfig, WorkflowStatus};
+    let workflow = WorkflowConfig {
         id: workflow_id.clone(),
         name: req.name,
         description: req.description,
         dsl: parsed,
-        status: super::super::WorkflowStatus::Active,
+        status: WorkflowStatus::Active,
         created_at: now,
         updated_at: now,
     };
