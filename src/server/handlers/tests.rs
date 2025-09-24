@@ -284,6 +284,7 @@ mod http_handler_tests {
     use serde_json::json;
     use tower::ServiceExt;
 
+    #[allow(dead_code)]
     pub async fn setup_test_service() -> OpenActService {
         // 为每个测试创建唯一的数据库文件，避免内存数据库的连接问题
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -312,6 +313,7 @@ mod http_handler_tests {
     }
 
     /// 创建注入了服务状态的测试路由器（新版本）
+    #[allow(dead_code)]
     pub async fn create_test_router_with_service() -> Router {
         let service = setup_test_service().await;
         
