@@ -190,6 +190,85 @@ mod dto_validation_tests {
 }
 
 // Test TRN validation edge cases
+// Shared test helper functions
+#[cfg(feature = "server")]
+async fn create_shared_test_router() -> axum::Router {
+    use crate::app::service::OpenActService;
+    use crate::server::handlers;
+    use crate::store::{DatabaseManager, StorageService};
+    use axum::Router;
+    
+    // Setup test service
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let test_id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let test_db_file = format!("/tmp/openact_test_handler_{}.db", test_id);
+    
+    let _ = std::fs::remove_file(&test_db_file);
+    let test_db_url = format!("sqlite://{}", test_db_file);
+    
+    unsafe {
+        std::env::set_var(
+            "OPENACT_MASTER_KEY",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+        std::env::set_var("OPENACT_DB_URL", &test_db_url);
+    }
+    
+    let db = DatabaseManager::new(&test_db_url).await.unwrap();
+    let storage = std::sync::Arc::new(StorageService::new(db));
+    let service = OpenActService::from_storage(storage);
+    
+    Router::new()
+        .route(
+            "/api/v1/connections",
+            axum::routing::post(handlers::connections::create)
+                .get(handlers::connections::list),
+        )
+        .route(
+            "/api/v1/connections/{trn}",
+            axum::routing::get(handlers::connections::get)
+                .put(handlers::connections::update),
+        )
+        .route(
+            "/api/v1/connections/{trn}/status",
+            axum::routing::get(handlers::connections::status),
+        )
+        .route(
+            "/api/v1/tasks",
+            axum::routing::post(handlers::tasks::create)
+                .get(handlers::tasks::list),
+        )
+        .route(
+            "/api/v1/tasks/{trn}",
+            axum::routing::get(handlers::tasks::get)
+                .put(handlers::tasks::update),
+        )
+        // System endpoints
+        .route(
+            "/api/v1/system/stats",
+            axum::routing::get(handlers::system::stats),
+        )
+        .route(
+            "/api/v1/system/health",
+            axum::routing::get(handlers::system::health),
+        )
+        .route(
+            "/api/v1/system/cleanup",
+            axum::routing::post(handlers::system::cleanup),
+        )
+        // Execute endpoints
+        .route(
+            "/api/v1/tasks/{trn}/execute",
+            axum::routing::post(handlers::execute::execute),
+        )
+        .route(
+            "/api/v1/execute/adhoc",
+            axum::routing::post(handlers::execute::execute_adhoc),
+        )
+        .with_state(service)
+}
+
 // HTTP Handler Integration Tests
 #[cfg(feature = "server")]
 mod http_handler_tests {
@@ -205,7 +284,7 @@ mod http_handler_tests {
     use serde_json::json;
     use tower::ServiceExt;
 
-    async fn setup_test_service() -> OpenActService {
+    pub async fn setup_test_service() -> OpenActService {
         // 为每个测试创建唯一的数据库文件，避免内存数据库的连接问题
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -233,7 +312,7 @@ mod http_handler_tests {
     }
 
     /// 创建注入了服务状态的测试路由器（新版本）
-    async fn create_test_router_with_service() -> Router {
+    pub async fn create_test_router_with_service() -> Router {
         let service = setup_test_service().await;
         
         Router::new()
@@ -261,13 +340,26 @@ mod http_handler_tests {
                 axum::routing::get(handlers::tasks::get)
                     .put(handlers::tasks::update),
             )
+            // System endpoints
+            .route(
+                "/api/v1/system/stats",
+                axum::routing::get(handlers::system::stats),
+            )
+            .route(
+                "/api/v1/system/health",
+                axum::routing::get(handlers::system::health),
+            )
+            .route(
+                "/api/v1/system/cleanup",
+                axum::routing::post(handlers::system::cleanup),
+            )
             .with_state(service)
     }
 
 
     #[tokio::test]
     async fn test_connection_create_success() {
-        let app = create_test_router_with_service().await;
+        let app = super::create_shared_test_router().await;
 
         let req_body = json!(create_test_connection_request());
         let request = Request::builder()
@@ -292,7 +384,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_connection_create_invalid_trn() {
-        let app = create_test_router_with_service().await;
+        let app = super::create_shared_test_router().await;
 
         let mut req = create_test_connection_request();
         req.trn = "invalid-trn".to_string();
@@ -318,7 +410,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_connection_get_not_found() {
-        let app = create_test_router_with_service().await;
+        let app = super::create_shared_test_router().await;
 
         let request = Request::builder()
             .method("GET")
@@ -346,7 +438,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_connection_get_invalid_trn() {
-        let app = create_test_router_with_service().await;
+        let app = super::create_shared_test_router().await;
 
         let request = Request::builder()
             .method("GET")
@@ -366,7 +458,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_task_create_success() {
-        let app = create_test_router_with_service().await;
+        let app = super::create_shared_test_router().await;
 
         // First create the required connection
         let conn_req = json!(create_test_connection_request());
@@ -404,7 +496,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_task_create_invalid_connection_trn() {
-        let app = create_test_router_with_service().await;
+        let app = super::create_shared_test_router().await;
 
         let mut req = create_test_task_request();
         req.connection_trn = "invalid-conn-trn".to_string();
@@ -429,7 +521,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_connections_list_empty() {
-        let app = create_test_router_with_service().await;
+        let app = super::create_shared_test_router().await;
 
         let request = Request::builder()
             .method("GET")
@@ -455,7 +547,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_tasks_list_empty() {
-        let app = create_test_router_with_service().await;
+        let app = super::create_shared_test_router().await;
 
         let request = Request::builder()
             .method("GET")
@@ -534,5 +626,199 @@ mod trn_validation_tests {
         let (tenant, id) = trn::parse_task_trn(task_trn).unwrap();
         assert_eq!(tenant, "my-tenant");
         assert_eq!(id, "my-task@v1");
+    }
+
+    // System HTTP handler tests  
+    #[tokio::test]
+    async fn test_system_stats_success() {
+        use tower::ServiceExt;
+        let app = super::create_shared_test_router().await;
+        
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/api/v1/system/stats")
+            .body(axum::body::Body::empty())
+            .unwrap();
+            
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        
+        // Basic structure verification
+        assert!(json.get("storage").is_some());
+        assert!(json.get("caches").is_some());
+        assert!(json.get("client_pool").is_some());
+        assert!(json.get("timestamp").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_system_health_success() {
+        use tower::ServiceExt;
+        let app = super::create_shared_test_router().await;
+        
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/api/v1/system/health")
+            .body(axum::body::Body::empty())
+            .unwrap();
+            
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        
+        // Health response structure
+        assert!(json.get("status").is_some());
+        assert!(json.get("timestamp").is_some());
+        assert!(json.get("components").is_some());
+        
+        let status = json["status"].as_str().unwrap();
+        assert!(status == "healthy" || status == "unhealthy");
+    }
+
+    #[tokio::test]
+    async fn test_system_cleanup_success() {
+        use tower::ServiceExt;
+        let app = super::create_shared_test_router().await;
+        
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/system/cleanup")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::empty())
+            .unwrap();
+            
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        
+        // Cleanup response structure
+        assert!(json.get("message").is_some());
+        assert!(json.get("cleaned_count").is_some());
+        assert!(json.get("timestamp").is_some());
+        
+        let message = json["message"].as_str().unwrap();
+        assert!(message.contains("cleanup"));
+    }
+
+    // Execute HTTP handler tests
+    #[tokio::test]
+    async fn test_execute_invalid_trn() {
+        use tower::ServiceExt;
+        let app = super::create_shared_test_router().await;
+        
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/tasks/invalid-trn/execute")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(r#"{"overrides": {}}"#))
+            .unwrap();
+            
+        let response = app.oneshot(request).await.unwrap();
+        // Invalid TRN format validation returns 400 Bad Request
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error_code"], "validation.invalid_trn");
+    }
+
+    #[tokio::test]
+    async fn test_execute_adhoc_missing_connection_trn() {
+        use tower::ServiceExt;
+        let app = super::create_shared_test_router().await;
+        
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/execute/adhoc")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(r#"{"method": "GET", "endpoint": "https://api.example.com"}"#))
+            .unwrap();
+            
+        let response = app.oneshot(request).await.unwrap();
+        // Missing required field results in 422 Unprocessable Entity
+        assert_eq!(response.status(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn test_execute_adhoc_invalid_connection_trn() {
+        use tower::ServiceExt;
+        let app = super::create_shared_test_router().await;
+        
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/execute/adhoc")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(r#"{"connection_trn": "invalid-trn", "method": "GET", "endpoint": "https://api.example.com"}"#))
+            .unwrap();
+            
+        let response = app.oneshot(request).await.unwrap();
+        // Invalid TRN format validation returns 400 Bad Request
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error_code"], "validation.invalid_connection_trn");
+    }
+
+    #[tokio::test]
+    async fn test_execute_adhoc_empty_method() {
+        use tower::ServiceExt;
+        let app = super::create_shared_test_router().await;
+        
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/execute/adhoc")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(r#"{"connection_trn": "trn:openact:test:connection/test@v1", "method": "", "endpoint": "https://api.example.com"}"#))
+            .unwrap();
+            
+        let response = app.oneshot(request).await.unwrap();
+        // Empty method validation returns 400 Bad Request
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error_code"], "validation.missing_method");
+    }
+
+    #[tokio::test]
+    async fn test_execute_adhoc_empty_endpoint() {
+        use tower::ServiceExt;
+        let app = super::create_shared_test_router().await;
+        
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/v1/execute/adhoc")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(r#"{"connection_trn": "trn:openact:test:connection/test@v1", "method": "GET", "endpoint": ""}"#))
+            .unwrap();
+            
+        let response = app.oneshot(request).await.unwrap();
+        // Empty endpoint validation returns 400 Bad Request
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error_code"], "validation.missing_endpoint");
     }
 }
