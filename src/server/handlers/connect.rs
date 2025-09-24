@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
+#[cfg(feature = "openapi")]
+#[allow(unused_imports)] // Used in utoipa path examples
+use serde_json::json;
 
 use crate::app::service::OpenActService;
 use crate::interface::dto::{AdhocExecuteRequestDto, ExecuteResponseDto};
@@ -76,9 +79,67 @@ pub struct ConnectResult {
     description = "Create a connection and initiate OAuth flow in one step",
     request_body = ConnectRequest,
     responses(
-        (status = 200, description = "OAuth flow initiated successfully", body = ConnectAcStartResponse),
-        (status = 400, description = "Invalid request or unsupported connect mode", body = crate::interface::error::ApiError),
-        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+        (status = 200, description = "OAuth flow initiated successfully", body = ConnectAcStartResponse,
+            examples(
+                ("authorization_code_flow" = (summary = "Authorization Code flow initiated", value = json!({
+                    "run_id": "run_abcd1234",
+                    "authorization_url": "https://github.com/login/oauth/authorize?client_id=xyz&state=abcd1234&scope=repo",
+                    "next_hints": [
+                        "Open authorization URL in browser",
+                        "Complete authorization to obtain access token",
+                        "Poll status or wait for callback"
+                    ]
+                }))),
+                ("client_credentials_flow" = (summary = "Client Credentials flow completed", value = json!({
+                    "message": "Connection created and authenticated successfully",
+                    "connection_trn": "trn:openact:my-tenant:connection/github-api@v1",
+                    "auth_trn": "trn:openact:my-tenant:auth_connection/auth_xyz789",
+                    "test_result": {
+                        "status": "success",
+                        "response_code": 200,
+                        "test_endpoint": "/user"
+                    },
+                    "next_hints": [
+                        "Connection ready to use",
+                        "Create tasks using this connection",
+                        "Test connection with ad-hoc requests"
+                    ]
+                })))
+            )
+        ),
+        (status = 400, description = "Invalid request or unsupported connect mode", body = crate::interface::error::ApiError,
+            examples(
+                ("invalid_mode" = (summary = "Unsupported connect mode", value = json!({
+                    "error_code": "validation.invalid_input",
+                    "message": "Unsupported connect mode: 'custom'",
+                    "hints": ["Supported modes: 'cc' (Client Credentials), 'ac' (Authorization Code)"]
+                }))),
+                ("missing_secrets" = (summary = "Missing required secrets", value = json!({
+                    "error_code": "validation.invalid_input",
+                    "message": "Missing required secrets for OAuth configuration",
+                    "hints": ["Provide client_id and client_secret", "Check template requirements"]
+                }))),
+                ("invalid_template" = (summary = "Invalid provider template", value = json!({
+                    "error_code": "validation.invalid_input",
+                    "message": "Provider template 'unknown' not found",
+                    "hints": ["Check available providers", "Use valid provider template"]
+                })))
+            )
+        ),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError,
+            examples(
+                ("template_load_failed" = (summary = "Template loading failed", value = json!({
+                    "error_code": "internal.storage_error",
+                    "message": "Failed to load provider template",
+                    "hints": ["Check template file exists", "Verify template format"]
+                }))),
+                ("oauth_init_failed" = (summary = "OAuth initialization failed", value = json!({
+                    "error_code": "internal.execution_failed",
+                    "message": "Failed to initialize OAuth flow",
+                    "hints": ["Check OAuth provider configuration", "Verify network connectivity"]
+                })))
+            )
+        )
     )
 ))]
 pub async fn connect(

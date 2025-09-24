@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 #[cfg(feature = "openapi")]
-#[allow(unused_imports)] // Used in schema examples via json! macro
+#[allow(unused_imports)] // Used in schema examples and utoipa path examples
 use serde_json::json;
 
 /// Client pool statistics
@@ -188,8 +188,45 @@ pub struct CleanupResponse {
     summary = "System statistics",
     description = "Get detailed system statistics including storage, cache, client pool, and memory usage",
     responses(
-        (status = 200, description = "System statistics", body = SystemStatsResponse),
-        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+        (status = 200, description = "System statistics", body = SystemStatsResponse,
+            example = json!({
+                "storage": {
+                    "connection_count": 15,
+                    "task_count": 42,
+                    "auth_connection_count": 8,
+                    "database_size_mb": 12.5,
+                    "last_backup": "2025-01-15T10:30:00Z"
+                },
+                "caches": {
+                    "connection_cache_hits": 1250,
+                    "connection_cache_misses": 15,
+                    "template_cache_hits": 890,
+                    "template_cache_misses": 8
+                },
+                "client_pool": {
+                    "active_connections": 5,
+                    "idle_connections": 3,
+                    "total_requests": 2156,
+                    "failed_requests": 12,
+                    "average_response_time_ms": 145.7
+                },
+                "timestamp": "2025-01-15T14:25:30Z"
+            })
+        ),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError,
+            examples(
+                ("storage_error" = (summary = "Database connection failed", value = json!({
+                    "error_code": "internal.storage_error",
+                    "message": "Failed to query database statistics",
+                    "hints": ["Check database connectivity", "Contact administrator"]
+                }))),
+                ("cache_error" = (summary = "Cache system unavailable", value = json!({
+                    "error_code": "internal.storage_error",
+                    "message": "Cache statistics unavailable",
+                    "hints": ["Cache system may be restarting", "Statistics partially available"]
+                })))
+            )
+        )
     )
 ))]
 pub async fn stats(State(svc): State<OpenActService>) -> impl IntoResponse {
@@ -259,8 +296,54 @@ fn get_version_info() -> VersionInfo {
     summary = "Health check",
     description = "Get system health status including storage and cache connectivity",
     responses(
-        (status = 200, description = "System is healthy", body = HealthResponse),
-        (status = 503, description = "System is unhealthy", body = HealthResponse)
+        (status = 200, description = "System is healthy", body = HealthResponse,
+            example = json!({
+                "status": "healthy",
+                "timestamp": "2025-01-15T14:25:30Z",
+                "components": {
+                    "storage": {
+                        "status": "healthy",
+                        "response_time_ms": 12
+                    },
+                    "cache": {
+                        "status": "healthy",
+                        "response_time_ms": 3
+                    }
+                }
+            })
+        ),
+        (status = 503, description = "System is unhealthy", body = HealthResponse,
+            examples(
+                ("storage_unhealthy" = (summary = "Storage connection failed", value = json!({
+                    "status": "unhealthy",
+                    "timestamp": "2025-01-15T14:25:30Z",
+                    "components": {
+                        "storage": {
+                            "status": "unhealthy",
+                            "error": "Connection timeout"
+                        },
+                        "cache": {
+                            "status": "healthy",
+                            "response_time_ms": 3
+                        }
+                    }
+                }))),
+                ("multiple_failures" = (summary = "Multiple components unhealthy", value = json!({
+                    "status": "unhealthy", 
+                    "timestamp": "2025-01-15T14:25:30Z",
+                    "components": {
+                        "storage": {
+                            "status": "unhealthy",
+                            "error": "Database unavailable"
+                        },
+                        "cache": {
+                            "status": "unhealthy",
+                            "error": "Cache service down"
+                        }
+                    }
+                })))
+            )
+        )
     ),
     security(
         // 健康检查无需认证
@@ -318,8 +401,34 @@ pub async fn health(State(svc): State<OpenActService>) -> impl IntoResponse {
     summary = "System cleanup",
     description = "Perform system cleanup operations including cache clearing and resource optimization",
     responses(
-        (status = 200, description = "Cleanup completed successfully", body = CleanupResponse),
-        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+        (status = 200, description = "Cleanup completed successfully", body = CleanupResponse,
+            examples(
+                ("successful_cleanup" = (summary = "Cleanup completed with items removed", value = json!({
+                    "message": "System cleanup completed successfully",
+                    "cleaned_count": 15,
+                    "timestamp": "2025-01-15T14:25:30Z"
+                }))),
+                ("no_cleanup_needed" = (summary = "No items to clean", value = json!({
+                    "message": "System cleanup completed successfully",
+                    "cleaned_count": 0,
+                    "timestamp": "2025-01-15T14:25:30Z"
+                })))
+            )
+        ),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError,
+            examples(
+                ("cleanup_failed" = (summary = "Cleanup operation failed", value = json!({
+                    "error_code": "internal.storage_error",
+                    "message": "Failed to perform cleanup operations",
+                    "hints": ["Retry cleanup operation", "Check database connectivity"]
+                }))),
+                ("partial_cleanup" = (summary = "Cleanup partially completed", value = json!({
+                    "error_code": "internal.storage_error",
+                    "message": "Cleanup completed with errors in some operations",
+                    "hints": ["Some items may not have been cleaned", "Check system logs"]
+                })))
+            )
+        )
     )
 ))]
 pub async fn cleanup(State(svc): State<OpenActService>) -> impl IntoResponse {
