@@ -31,8 +31,7 @@ mod callback_impl {
     use crate::app::service::OpenActService;
     use crate::server::handlers::connect::{AcResultRecord, insert_ac_result};
     use crate::{
-        api::{ResumeObtainArgs, resume_obtain},
-        authflow::engine::TaskHandler,
+        authflow::{engine::TaskHandler, workflow::{ResumeObtainArgs, resume_obtain}},
         store::RunStore,
     };
 
@@ -320,7 +319,7 @@ mod callback_impl {
             let _ = waiter.sender.send(params.clone());
 
             // Return a success page
-            let link_html = if let Some(mut url) = params.redirect.clone() {
+            let link_html = if let Some(url) = params.redirect.clone() {
                 // Append run_id and optional connection_trn
                 let sep = if url.contains('?') { '&' } else { '?' };
                 let mut full = format!("{}{}run_id={}", url, sep, waiter._run_id);

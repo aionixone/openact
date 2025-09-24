@@ -5,8 +5,6 @@
 #[cfg(feature = "server")]
 use axum::{http::StatusCode, response::IntoResponse, Json};
 
-#[cfg(feature = "server")]
-use crate::observability::metrics;
 
 /// Health check endpoint with detailed status
 #[cfg(feature = "server")]
@@ -44,7 +42,6 @@ pub async fn detailed_health() -> impl IntoResponse {
 /// Metrics endpoint (Prometheus format when metrics feature is enabled)
 #[cfg(all(feature = "server", feature = "metrics"))]
 pub async fn metrics_endpoint() -> impl IntoResponse {
-    use metrics_exporter_prometheus::PrometheusHandle;
     
     // This would require setting up the Prometheus recorder
     // For now, return a placeholder
@@ -54,7 +51,7 @@ pub async fn metrics_endpoint() -> impl IntoResponse {
 /// Metrics endpoint (JSON format when metrics feature is disabled)
 #[cfg(all(feature = "server", not(feature = "metrics")))]
 pub async fn metrics_endpoint() -> impl IntoResponse {
-    let metrics_snapshot = metrics::get_metrics_snapshot();
+    let metrics_snapshot = crate::observability::metrics::get_metrics_snapshot();
     (StatusCode::OK, Json(metrics_snapshot))
 }
 

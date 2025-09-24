@@ -15,7 +15,7 @@ pub fn core_api_router_with_state(service: OpenActService) -> Router {
     crate::server::init_background_tasks();
 
     #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
-    let mut router = Router::new()
+    let router = Router::new()
         .route(
             "/api/v1/connections",
             get(crate::server::handlers::connections::list)
