@@ -1,0 +1,4792 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenAct API",
+    "description": "OpenAct - Open Authentication & Action Orchestration Platform",
+    "contact": {
+      "name": "OpenAct Team",
+      "url": "https://github.com/aionixone/openact"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    },
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000/api/v1",
+      "description": "Local development server"
+    },
+    {
+      "url": "/api/v1",
+      "description": "Relative path for current server"
+    }
+  ],
+  "paths": {
+    "/api/v1/authflow/executions": {
+      "get": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "List executions",
+        "description": "Retrieve a list of all authflow executions",
+        "operationId": "authflow_list_executions",
+        "responses": {
+          "200": {
+            "description": "List of executions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionListResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Start execution",
+        "description": "Start a new authflow execution with specified workflow and parameters",
+        "operationId": "authflow_start_execution",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Execution started successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionCreatedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid execution request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authflow/executions/{id}": {
+      "get": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Get execution",
+        "description": "Retrieve specific authflow execution status and details",
+        "operationId": "authflow_get_execution",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Execution ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Execution found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authflow/executions/{id}/cancel": {
+      "post": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Cancel execution",
+        "description": "Cancel a running or paused authflow execution",
+        "operationId": "authflow_cancel_execution",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Execution ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Execution cancelled successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Execution cannot be cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authflow/executions/{id}/resume": {
+      "post": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Resume execution",
+        "description": "Resume a paused authflow execution with additional input",
+        "operationId": "authflow_resume_execution",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Execution ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Execution resumed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid resume request or execution not pausable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authflow/executions/{id}/trace": {
+      "get": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Get execution trace",
+        "description": "Retrieve detailed execution trace and step history",
+        "operationId": "authflow_get_execution_trace",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Execution ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Execution trace data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionTraceResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authflow/health": {
+      "get": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "AuthFlow health check",
+        "description": "Check the health and status of the AuthFlow service",
+        "operationId": "authflow_health_check",
+        "responses": {
+          "200": {
+            "description": "AuthFlow service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authflow/workflows": {
+      "get": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "List workflows",
+        "description": "Retrieve a list of all authflow workflows",
+        "operationId": "authflow_list_workflows",
+        "responses": {
+          "200": {
+            "description": "List of workflows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowListResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Create workflow",
+        "description": "Create a new authflow workflow with DSL definition",
+        "operationId": "authflow_create_workflow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkflowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Workflow created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid DSL or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authflow/workflows/{id}": {
+      "get": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Get workflow",
+        "description": "Retrieve a specific workflow by ID",
+        "operationId": "authflow_get_workflow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Workflow ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authflow/workflows/{id}/graph": {
+      "get": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Get workflow graph",
+        "description": "Retrieve the visual graph representation of a workflow",
+        "operationId": "authflow_get_workflow_graph",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Workflow ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow graph data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowGraphResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/authflow/workflows/{id}/validate": {
+      "post": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Validate workflow",
+        "description": "Validate a workflow's DSL definition and configuration",
+        "operationId": "authflow_validate_workflow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Workflow ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow validation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connect": {
+      "post": {
+        "tags": [
+          "connect"
+        ],
+        "summary": "One-click connect",
+        "description": "Create a connection and initiate OAuth flow in one step",
+        "operationId": "connect_one_click",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OAuth flow initiated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectAcStartResponse"
+                },
+                "examples": {
+                  "authorization_code_flow": {
+                    "summary": "Authorization Code flow initiated",
+                    "value": {
+                      "run_id": "run_abcd1234",
+                      "authorization_url": "https://github.com/login/oauth/authorize?client_id=xyz&state=abcd1234&scope=repo",
+                      "next_hints": [
+                        "Open authorization URL in browser",
+                        "Complete authorization to obtain access token",
+                        "Poll status or wait for callback"
+                      ]
+                    }
+                  },
+                  "client_credentials_flow": {
+                    "summary": "Client Credentials flow completed",
+                    "value": {
+                      "message": "Connection created and authenticated successfully",
+                      "connection_trn": "trn:openact:my-tenant:connection/github-api@v1",
+                      "auth_trn": "trn:openact:my-tenant:auth_connection/auth_xyz789",
+                      "test_result": {
+                        "status": "success",
+                        "response_code": 200,
+                        "test_endpoint": "/user"
+                      },
+                      "next_hints": [
+                        "Connection ready to use",
+                        "Create tasks using this connection",
+                        "Test connection with ad-hoc requests"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unsupported connect mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "invalid_mode": {
+                    "summary": "Unsupported connect mode",
+                    "value": {
+                      "error_code": "validation.invalid_input",
+                      "message": "Unsupported connect mode: 'custom'",
+                      "hints": [
+                        "Supported modes: 'cc' (Client Credentials), 'ac' (Authorization Code)"
+                      ]
+                    }
+                  },
+                  "invalid_template": {
+                    "summary": "Invalid provider template",
+                    "value": {
+                      "error_code": "validation.invalid_input",
+                      "message": "Provider template 'unknown' not found",
+                      "hints": [
+                        "Check available providers",
+                        "Use valid provider template"
+                      ]
+                    }
+                  },
+                  "missing_secrets": {
+                    "summary": "Missing required secrets",
+                    "value": {
+                      "error_code": "validation.invalid_input",
+                      "message": "Missing required secrets for OAuth configuration",
+                      "hints": [
+                        "Provide client_id and client_secret",
+                        "Check template requirements"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "oauth_init_failed": {
+                    "summary": "OAuth initialization failed",
+                    "value": {
+                      "error_code": "internal.execution_failed",
+                      "message": "Failed to initialize OAuth flow",
+                      "hints": [
+                        "Check OAuth provider configuration",
+                        "Verify network connectivity"
+                      ]
+                    }
+                  },
+                  "template_load_failed": {
+                    "summary": "Template loading failed",
+                    "value": {
+                      "error_code": "internal.storage_error",
+                      "message": "Failed to load provider template",
+                      "hints": [
+                        "Check template file exists",
+                        "Verify template format"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connect/ac/resume": {
+      "post": {
+        "tags": [
+          "connect"
+        ],
+        "summary": "Resume OAuth Authorization Code flow",
+        "description": "Resume an OAuth2 Authorization Code flow with authorization code",
+        "operationId": "connect_ac_resume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectAcResumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OAuth flow completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid authorization code or state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "OAuth flow not found or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connect/ac/status": {
+      "get": {
+        "tags": [
+          "connect"
+        ],
+        "summary": "Check OAuth Authorization Code status",
+        "description": "Poll the status of an OAuth2 Authorization Code flow",
+        "operationId": "connect_ac_status",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "query",
+            "description": "OAuth flow run ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth flow status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "OAuth flow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connect/device-code": {
+      "post": {
+        "tags": [
+          "connect"
+        ],
+        "summary": "Device Code OAuth flow",
+        "description": "Complete OAuth2 Device Code flow synchronously",
+        "operationId": "connect_device_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Device Code flow completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceCodeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid device code request or polling failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connections": {
+      "get": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "List connections",
+        "description": "Retrieve a list of connections with optional filtering",
+        "operationId": "connections_list",
+        "parameters": [
+          {
+            "name": "auth_type",
+            "in": "query",
+            "description": "Filter by authorization type (api_key, basic, oauth2_client_credentials, oauth2_authorization_code)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of connections to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Number of connections to skip for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of connections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConnectionConfig"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Missing or invalid authentication",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden - Insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Create connection",
+        "description": "Create a new connection configuration",
+        "operationId": "connections_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Connection created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionConfig"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid connection data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connections/{trn}": {
+      "get": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Get connection by TRN",
+        "description": "Retrieve a specific connection configuration by its TRN",
+        "operationId": "connections_get",
+        "parameters": [
+          {
+            "name": "trn",
+            "in": "path",
+            "description": "Connection TRN identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionConfig"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid TRN format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Update connection",
+        "description": "Update an existing connection configuration",
+        "operationId": "connections_update",
+        "parameters": [
+          {
+            "name": "trn",
+            "in": "path",
+            "description": "Connection TRN identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Connection updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionConfig"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid TRN format or data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Delete connection",
+        "description": "Delete a connection configuration",
+        "operationId": "connections_delete",
+        "parameters": [
+          {
+            "name": "trn",
+            "in": "path",
+            "description": "Connection TRN identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Connection deleted successfully"
+          },
+          "400": {
+            "description": "Invalid TRN format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connections/{trn}/status": {
+      "get": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Get connection status",
+        "description": "Get authentication status for a connection (no network call)",
+        "operationId": "connections_get_status",
+        "parameters": [
+          {
+            "name": "trn",
+            "in": "path",
+            "description": "Connection TRN identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionStatusDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid TRN format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connections/{trn}/test": {
+      "post": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Test connection",
+        "description": "Test a connection by performing a network request to verify authentication",
+        "operationId": "connections_test",
+        "parameters": [
+          {
+            "name": "trn",
+            "in": "path",
+            "description": "Connection TRN identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Connection test successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecuteResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid TRN format or test request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/execute/adhoc": {
+      "post": {
+        "tags": [
+          "execution"
+        ],
+        "summary": "Execute ad-hoc action",
+        "description": "Execute an ad-hoc action using an existing connection without creating a persistent task",
+        "operationId": "execute_adhoc",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdhocExecuteRequestDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ad-hoc action executed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecuteResponseDto"
+                },
+                "example": {
+                  "status": 200,
+                  "headers": {
+                    "content-type": "application/json",
+                    "x-ratelimit-remaining": "99"
+                  },
+                  "body": {
+                    "users": [
+                      {
+                        "id": 1,
+                        "name": "John"
+                      }
+                    ]
+                  },
+                  "execution_time_ms": 180
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid connection TRN or execution parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "invalid_connection_trn": {
+                    "summary": "Invalid connection TRN",
+                    "value": {
+                      "error_code": "validation.invalid_connection_trn",
+                      "message": "Invalid TRN format: missing required components",
+                      "hints": [
+                        "Use format: trn:openact:tenant:connection/id@version"
+                      ]
+                    }
+                  },
+                  "missing_endpoint": {
+                    "summary": "Missing API endpoint",
+                    "value": {
+                      "error_code": "validation.missing_endpoint",
+                      "message": "API endpoint is required",
+                      "hints": [
+                        "Provide full URL including protocol"
+                      ]
+                    }
+                  },
+                  "missing_method": {
+                    "summary": "Missing HTTP method",
+                    "value": {
+                      "error_code": "validation.missing_method",
+                      "message": "HTTP method is required",
+                      "hints": [
+                        "Provide method: GET, POST, PUT, DELETE, etc."
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error_code": "not_found.connection",
+                  "message": "not found",
+                  "hints": [
+                    "Verify connection TRN",
+                    "Check connection exists in tenant"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request body format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error_code": "validation.invalid_request_body",
+                  "message": "Failed to deserialize request body",
+                  "hints": [
+                    "Check JSON format",
+                    "Ensure all required fields are present"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error or execution failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "auth_failed": {
+                    "summary": "Authentication failed",
+                    "value": {
+                      "error_code": "internal.execution_failed",
+                      "message": "Invalid API credentials",
+                      "hints": [
+                        "Check connection configuration",
+                        "Verify API key/token validity"
+                      ]
+                    }
+                  },
+                  "execution_failed": {
+                    "summary": "HTTP request failed",
+                    "value": {
+                      "error_code": "internal.execution_failed",
+                      "message": "Connection timeout",
+                      "hints": [
+                        "Check target service availability",
+                        "Retry with shorter timeout"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/cleanup": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "System cleanup",
+        "description": "Perform system cleanup operations including cache clearing and resource optimization",
+        "operationId": "system_cleanup",
+        "responses": {
+          "200": {
+            "description": "Cleanup completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupResponse"
+                },
+                "examples": {
+                  "no_cleanup_needed": {
+                    "summary": "No items to clean",
+                    "value": {
+                      "message": "System cleanup completed successfully",
+                      "cleaned_count": 0,
+                      "timestamp": "2025-01-15T14:25:30Z"
+                    }
+                  },
+                  "successful_cleanup": {
+                    "summary": "Cleanup completed with items removed",
+                    "value": {
+                      "message": "System cleanup completed successfully",
+                      "cleaned_count": 15,
+                      "timestamp": "2025-01-15T14:25:30Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "cleanup_failed": {
+                    "summary": "Cleanup operation failed",
+                    "value": {
+                      "error_code": "internal.storage_error",
+                      "message": "Failed to perform cleanup operations",
+                      "hints": [
+                        "Retry cleanup operation",
+                        "Check database connectivity"
+                      ]
+                    }
+                  },
+                  "partial_cleanup": {
+                    "summary": "Cleanup partially completed",
+                    "value": {
+                      "error_code": "internal.storage_error",
+                      "message": "Cleanup completed with errors in some operations",
+                      "hints": [
+                        "Some items may not have been cleaned",
+                        "Check system logs"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Health check",
+        "description": "Get system health status including storage and cache connectivity",
+        "operationId": "system_health_check",
+        "responses": {
+          "200": {
+            "description": "System is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "status": "healthy",
+                  "timestamp": "2025-01-15T14:25:30Z",
+                  "components": {
+                    "storage": {
+                      "status": "healthy",
+                      "response_time_ms": 12
+                    },
+                    "cache": {
+                      "status": "healthy",
+                      "response_time_ms": 3
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System is unhealthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "examples": {
+                  "multiple_failures": {
+                    "summary": "Multiple components unhealthy",
+                    "value": {
+                      "status": "unhealthy",
+                      "timestamp": "2025-01-15T14:25:30Z",
+                      "components": {
+                        "storage": {
+                          "status": "unhealthy",
+                          "error": "Database unavailable"
+                        },
+                        "cache": {
+                          "status": "unhealthy",
+                          "error": "Cache service down"
+                        }
+                      }
+                    }
+                  },
+                  "storage_unhealthy": {
+                    "summary": "Storage connection failed",
+                    "value": {
+                      "status": "unhealthy",
+                      "timestamp": "2025-01-15T14:25:30Z",
+                      "components": {
+                        "storage": {
+                          "status": "unhealthy",
+                          "error": "Connection timeout"
+                        },
+                        "cache": {
+                          "status": "healthy",
+                          "response_time_ms": 3
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/api/v1/system/stats": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "System statistics",
+        "description": "Get detailed system statistics including storage, cache, client pool, and memory usage",
+        "operationId": "system_get_stats",
+        "responses": {
+          "200": {
+            "description": "System statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatsResponse"
+                },
+                "example": {
+                  "storage": {
+                    "connection_count": 15,
+                    "task_count": 42,
+                    "auth_connection_count": 8,
+                    "database_size_mb": 12.5,
+                    "last_backup": "2025-01-15T10:30:00Z"
+                  },
+                  "caches": {
+                    "connection_cache_hits": 1250,
+                    "connection_cache_misses": 15,
+                    "template_cache_hits": 890,
+                    "template_cache_misses": 8
+                  },
+                  "client_pool": {
+                    "active_connections": 5,
+                    "idle_connections": 3,
+                    "total_requests": 2156,
+                    "failed_requests": 12,
+                    "average_response_time_ms": 145.7
+                  },
+                  "timestamp": "2025-01-15T14:25:30Z"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "cache_error": {
+                    "summary": "Cache system unavailable",
+                    "value": {
+                      "error_code": "internal.storage_error",
+                      "message": "Cache statistics unavailable",
+                      "hints": [
+                        "Cache system may be restarting",
+                        "Statistics partially available"
+                      ]
+                    }
+                  },
+                  "storage_error": {
+                    "summary": "Database connection failed",
+                    "value": {
+                      "error_code": "internal.storage_error",
+                      "message": "Failed to query database statistics",
+                      "hints": [
+                        "Check database connectivity",
+                        "Contact administrator"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "List tasks",
+        "description": "Retrieve a list of tasks with optional filtering",
+        "operationId": "tasks_list",
+        "parameters": [
+          {
+            "name": "connection_trn",
+            "in": "query",
+            "description": "Filter by connection TRN",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of tasks to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Number of tasks to skip for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskConfig"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Create task",
+        "description": "Create a new task configuration",
+        "operationId": "tasks_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Task created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConfig"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid task data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{trn}": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Get task by TRN",
+        "description": "Retrieve a specific task configuration by its TRN",
+        "operationId": "tasks_get",
+        "parameters": [
+          {
+            "name": "trn",
+            "in": "path",
+            "description": "Task TRN identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConfig"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid TRN format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Update task",
+        "description": "Update an existing task configuration",
+        "operationId": "tasks_update",
+        "parameters": [
+          {
+            "name": "trn",
+            "in": "path",
+            "description": "Task TRN identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Task updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskConfig"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid TRN format or data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Delete task",
+        "description": "Delete a task configuration",
+        "operationId": "tasks_delete",
+        "parameters": [
+          {
+            "name": "trn",
+            "in": "path",
+            "description": "Task TRN identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Task deleted successfully"
+          },
+          "400": {
+            "description": "Invalid TRN format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{trn}/execute": {
+      "post": {
+        "tags": [
+          "execution"
+        ],
+        "summary": "Execute task",
+        "description": "Execute a task configuration with optional overrides",
+        "operationId": "tasks_execute",
+        "parameters": [
+          {
+            "name": "trn",
+            "in": "path",
+            "description": "Task TRN identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "trn:openact:my-tenant:task/api-ping@v1"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteRequestDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Task executed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecuteResponseDto"
+                },
+                "example": {
+                  "status": 200,
+                  "headers": {
+                    "content-type": "application/json"
+                  },
+                  "body": {
+                    "result": "success",
+                    "data": {
+                      "id": 123
+                    }
+                  },
+                  "execution_time_ms": 250
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid TRN format or execution parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "invalid_overrides": {
+                    "summary": "Invalid parameter overrides",
+                    "value": {
+                      "error_code": "validation.invalid_input",
+                      "message": "Invalid override parameters",
+                      "hints": [
+                        "Check parameter format",
+                        "Ensure required fields are present"
+                      ]
+                    }
+                  },
+                  "invalid_trn": {
+                    "summary": "Invalid TRN format",
+                    "value": {
+                      "error_code": "validation.invalid_trn",
+                      "message": "Invalid TRN format: missing required components",
+                      "hints": [
+                        "Use format: trn:openact:tenant:task/id@version"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error_code": "not_found.task",
+                  "message": "not found",
+                  "hints": [
+                    "Verify task TRN",
+                    "Check task exists in tenant"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error or execution failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "execution_failed": {
+                    "summary": "Task execution failed",
+                    "value": {
+                      "error_code": "internal.execution_failed",
+                      "message": "HTTP request timeout",
+                      "hints": [
+                        "Retry request",
+                        "Check target service availability"
+                      ]
+                    }
+                  },
+                  "storage_error": {
+                    "summary": "Database error",
+                    "value": {
+                      "error_code": "internal.storage_error",
+                      "message": "Failed to load task configuration",
+                      "hints": [
+                        "Contact administrator",
+                        "Check system health"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/callback": {
+      "get": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Handle OAuth2 authorization callback",
+        "description": "Processes OAuth2 authorization callbacks from external providers and resumes the corresponding AuthFlow execution with the received authorization code.",
+        "operationId": "authflow_oauth_callback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "description": "Authorization code from OAuth2 provider",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "State parameter for CSRF protection",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "query",
+            "description": "Optional execution ID to target specific execution",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Callback processed successfully",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "No matching execution found or invalid parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ws": {
+      "get": {
+        "tags": [
+          "authflow"
+        ],
+        "summary": "Connect to AuthFlow WebSocket for real-time events",
+        "description": "Establishes a WebSocket connection to receive real-time notifications about AuthFlow execution events, state changes, and system events.",
+        "operationId": "authflow_websocket_connect",
+        "responses": {
+          "101": {
+            "description": "WebSocket connection established successfully"
+          },
+          "400": {
+            "description": "Invalid WebSocket upgrade request"
+          },
+          "500": {
+            "description": "Server error during WebSocket setup"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AcStatusQuery": {
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AdhocExecuteRequestDto": {
+        "type": "object",
+        "description": "Ad-hoc execution request - execute action without persistent task",
+        "required": [
+          "connection_trn",
+          "method",
+          "endpoint"
+        ],
+        "properties": {
+          "body": {
+            "description": "Optional request body"
+          },
+          "connection_trn": {
+            "type": "string",
+            "description": "Connection TRN to use for authentication"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "API endpoint URL"
+          },
+          "headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Optional headers (replaces MultiValue with Vec<String> for simplicity)",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "http_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HttpPolicy",
+                "description": "Optional HTTP policy"
+              }
+            ]
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method (GET, POST, PUT, DELETE, etc.)"
+          },
+          "network_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NetworkConfig",
+                "description": "Optional network configuration"
+              }
+            ]
+          },
+          "query": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Optional query parameters",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "response_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResponsePolicy",
+                "description": "Optional response policy"
+              }
+            ]
+          },
+          "retry_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetryPolicy",
+                "description": "Optional retry policy"
+              }
+            ]
+          },
+          "timeout_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TimeoutConfig",
+                "description": "Optional timeout configuration"
+              }
+            ]
+          }
+        },
+        "example": {
+          "connection_trn": "trn:openact:default:connection/github-api@v1",
+          "method": "GET",
+          "endpoint": "/user/repos",
+          "query_params": {
+            "type": [
+              "owner"
+            ],
+            "sort": [
+              "updated"
+            ],
+            "per_page": [
+              "10"
+            ]
+          },
+          "headers": {
+            "Accept": [
+              "application/vnd.github+json"
+            ]
+          },
+          "timeout_ms": 10000
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "required": [
+          "error_code",
+          "message"
+        ],
+        "properties": {
+          "details": {},
+          "error_code": {
+            "type": "string"
+          },
+          "hints": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiKeyAuthParameters": {
+        "type": "object",
+        "description": "API Key authentication parameters",
+        "required": [
+          "api_key_name",
+          "api_key_value"
+        ],
+        "properties": {
+          "api_key_name": {
+            "type": "string"
+          },
+          "api_key_value": {
+            "type": "string",
+            "example": "***redacted***"
+          }
+        }
+      },
+      "AuthConnection": {
+        "type": "object",
+        "description": "Authentication connection state, including tokens and metadata",
+        "required": [
+          "trn",
+          "accessToken"
+        ],
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "description": "Access token",
+            "example": "***redacted***"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Token expiration time (ISO8601 format)"
+          },
+          "extra": {
+            "description": "Additional metadata"
+          },
+          "refreshToken": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Refresh token (optional)",
+            "example": "***redacted***"
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Authorization scope"
+          },
+          "tokenType": {
+            "type": "string",
+            "description": "Token type (usually \"Bearer\")"
+          },
+          "trn": {
+            "$ref": "#/components/schemas/AuthConnectionTrn",
+            "description": "TRN identifier"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last update time"
+          }
+        }
+      },
+      "AuthConnectionTrn": {
+        "type": "object",
+        "description": "openact Connection TRN\nFormat: trn:openact:tenant:connection/provider-user_id",
+        "required": [
+          "tenant",
+          "provider",
+          "user_id",
+          "metadata"
+        ],
+        "properties": {
+          "metadata": {
+            "type": "object",
+            "description": "Metadata (version, environment, region, etc.)",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "provider": {
+            "type": "string",
+            "description": "Provider name (github, slack, google, etc.)"
+          },
+          "tenant": {
+            "type": "string",
+            "description": "Tenant identifier"
+          },
+          "user_id": {
+            "type": "string",
+            "description": "User identifier (may contain special characters, needs encoding)"
+          }
+        }
+      },
+      "AuthParameters": {
+        "type": "object",
+        "description": "Authentication parameters container",
+        "properties": {
+          "api_key_auth_parameters": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApiKeyAuthParameters"
+              }
+            ]
+          },
+          "basic_auth_parameters": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BasicAuthParameters"
+              }
+            ]
+          },
+          "oauth_parameters": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OAuth2Parameters"
+              }
+            ]
+          }
+        }
+      },
+      "AuthorizationType": {
+        "type": "string",
+        "description": "Authorization type for connections",
+        "enum": [
+          "api_key",
+          "basic",
+          "oauth2_client_credentials",
+          "oauth2_authorization_code"
+        ]
+      },
+      "BasicAuthParameters": {
+        "type": "object",
+        "description": "Basic authentication parameters",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "example": "***redacted***"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "CallbackParams": {
+        "type": "object",
+        "description": "OAuth2 callback parameters received from authorization server\n\nThis structure represents the standard OAuth2 authorization code callback parameters\nthat are received when the user completes the authorization flow and is redirected\nback to the application.",
+        "properties": {
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Authorization code received from the OAuth2 provider",
+            "example": "auth_code_12345"
+          },
+          "execution_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional execution ID to directly target a specific AuthFlow execution",
+            "example": "exec_abc123def456"
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "State parameter to prevent CSRF attacks (should match the one sent in the authorization request)",
+            "example": "random_state_67890"
+          }
+        },
+        "example": {
+          "code": "auth_code_12345",
+          "state": "random_state_67890",
+          "execution_id": "exec_abc123def456"
+        }
+      },
+      "CleanupResponse": {
+        "type": "object",
+        "description": "Cleanup operation response",
+        "required": [
+          "message",
+          "cleaned_count",
+          "timestamp"
+        ],
+        "properties": {
+          "cleaned_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of cleaned items",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string",
+            "description": "Success message"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Cleanup operation timestamp"
+          }
+        },
+        "example": {
+          "message": "System cleanup completed successfully",
+          "cleaned_count": 15,
+          "timestamp": "2023-12-01T15:30:45Z"
+        }
+      },
+      "ClientPoolStats": {
+        "type": "object",
+        "description": "Client pool statistics",
+        "required": [
+          "hits",
+          "builds",
+          "evictions",
+          "size",
+          "capacity",
+          "hit_rate"
+        ],
+        "properties": {
+          "builds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of new client builds",
+            "minimum": 0
+          },
+          "capacity": {
+            "type": "integer",
+            "description": "Maximum pool capacity",
+            "minimum": 0
+          },
+          "evictions": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of evictions",
+            "minimum": 0
+          },
+          "hit_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "Hit rate (0.0 to 1.0)"
+          },
+          "hits": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of cache hits",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "description": "Current pool size",
+            "minimum": 0
+          }
+        }
+      },
+      "ComponentHealth": {
+        "type": "object",
+        "description": "Individual component health status",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional error message"
+          },
+          "status": {
+            "type": "string",
+            "description": "Component status (healthy, degraded, unhealthy)"
+          }
+        }
+      },
+      "ConnectAcResumeRequest": {
+        "type": "object",
+        "required": [
+          "connection_trn",
+          "run_id",
+          "code",
+          "state"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "connection_trn": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "ConnectAcStartResponse": {
+        "type": "object",
+        "required": [
+          "connection_trn",
+          "run_id",
+          "authorize_url",
+          "state"
+        ],
+        "properties": {
+          "authorize_url": {
+            "type": "string"
+          },
+          "connection_trn": {
+            "type": "string"
+          },
+          "next_hints": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "ConnectMode": {
+        "type": "string",
+        "enum": [
+          "cc",
+          "ac",
+          "device_code"
+        ]
+      },
+      "ConnectRequest": {
+        "type": "object",
+        "required": [
+          "provider",
+          "template",
+          "tenant",
+          "name",
+          "mode"
+        ],
+        "properties": {
+          "dsl_yaml": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional OAuth flow DSL (YAML). Required for AC mode."
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inputs": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "mode": {
+            "$ref": "#/components/schemas/ConnectMode"
+          },
+          "name": {
+            "type": "string"
+          },
+          "overrides": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "provider": {
+            "type": "string"
+          },
+          "secrets": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "template": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          }
+        }
+      },
+      "ConnectResult": {
+        "type": "object",
+        "required": [
+          "connection"
+        ],
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/ConnectionConfig"
+          },
+          "next_hints": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConnectionStatusDto"
+              }
+            ]
+          },
+          "test": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ExecuteResponseDto"
+              }
+            ]
+          }
+        }
+      },
+      "ConnectionConfig": {
+        "type": "object",
+        "description": "Connection configuration",
+        "required": [
+          "trn",
+          "name",
+          "authorization_type",
+          "auth_parameters",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "auth_parameters": {
+            "$ref": "#/components/schemas/AuthParameters"
+          },
+          "auth_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authorization_type": {
+            "$ref": "#/components/schemas/AuthorizationType"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "http_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HttpPolicy"
+              }
+            ]
+          },
+          "invocation_http_parameters": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InvocationHttpParameters"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "network_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NetworkConfig"
+              }
+            ]
+          },
+          "retry_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetryPolicy"
+              }
+            ]
+          },
+          "timeout_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TimeoutConfig"
+              }
+            ]
+          },
+          "trn": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ConnectionStatusDto": {
+        "type": "object",
+        "required": [
+          "trn",
+          "authorization_type",
+          "status"
+        ],
+        "properties": {
+          "authorization_type": {
+            "$ref": "#/components/schemas/AuthorizationType"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "has_auth_ref": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seconds_to_expiry": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "description": "one of: ready | expiring_soon | expired | unbound | not_issued | not_authorized | misconfigured"
+          },
+          "trn": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "trn": "trn:openact:default:connection/github-api@v1",
+          "authorization_type": "oauth2",
+          "has_auth_ref": true,
+          "status": "ready",
+          "expires_at": "2023-12-31T23:59:59Z",
+          "seconds_to_expiry": 2592000,
+          "message": null
+        }
+      },
+      "ConnectionTestRequest": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string"
+          }
+        }
+      },
+      "ConnectionUpsertRequest": {
+        "type": "object",
+        "description": "Connection upsert request DTO (without metadata fields)",
+        "required": [
+          "trn",
+          "name",
+          "authorization_type",
+          "auth_parameters"
+        ],
+        "properties": {
+          "auth_parameters": {
+            "$ref": "#/components/schemas/AuthParameters"
+          },
+          "auth_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authorization_type": {
+            "$ref": "#/components/schemas/AuthorizationType"
+          },
+          "http_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HttpPolicy"
+              }
+            ]
+          },
+          "invocation_http_parameters": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InvocationHttpParameters"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "network_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NetworkConfig"
+              }
+            ]
+          },
+          "retry_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetryPolicy"
+              }
+            ]
+          },
+          "timeout_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TimeoutConfig"
+              }
+            ]
+          },
+          "trn": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "trn": "trn:openact:default:connection/github-api@v1",
+          "name": "GitHub API Connection",
+          "authorization_type": "oauth2",
+          "auth_parameters": {
+            "oauth_parameters": {
+              "authorization_url": "https://github.com/login/oauth/authorize",
+              "token_url": "https://github.com/login/oauth/access_token",
+              "client_id": "github_client_123",
+              "client_secret": "***redacted***",
+              "scope": "user:email repo"
+            }
+          },
+          "invocation_http_parameters": {
+            "base_url": "https://api.github.com",
+            "default_headers": {
+              "Accept": "application/vnd.github+json",
+              "User-Agent": "OpenAct/1.0"
+            }
+          },
+          "timeout_config": {
+            "connect_timeout_ms": 5000,
+            "request_timeout_ms": 30000
+          }
+        }
+      },
+      "CreateWorkflowRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "dsl"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "Complete GitHub OAuth2 authentication workflow"
+          },
+          "dsl": {},
+          "name": {
+            "type": "string",
+            "example": "GitHub OAuth Flow"
+          }
+        },
+        "example": {
+          "name": "GitHub OAuth Flow",
+          "description": "Complete GitHub OAuth2 authentication workflow",
+          "dsl": {
+            "startAt": "Config",
+            "states": {
+              "Config": {
+                "type": "pass",
+                "assign": {
+                  "config": {
+                    "authorizeUrl": "https://github.com/login/oauth/authorize",
+                    "tokenUrl": "https://github.com/login/oauth/access_token",
+                    "redirectUri": "http://localhost:8080/oauth/callback",
+                    "defaultScope": "user:email"
+                  }
+                },
+                "next": "StartAuth"
+              },
+              "StartAuth": {
+                "type": "task",
+                "resource": "oauth2.authorize_redirect",
+                "parameters": {
+                  "authorizeUrl": "{% $config.authorizeUrl %}",
+                  "clientId": "{% $creds.client_id %}",
+                  "redirectUri": "{% $config.redirectUri %}",
+                  "scope": "{% $config.defaultScope %}"
+                },
+                "end": true
+              }
+            }
+          }
+        }
+      },
+      "DeviceCodeRequest": {
+        "type": "object",
+        "required": [
+          "token_url",
+          "device_code_url",
+          "client_id",
+          "tenant",
+          "provider",
+          "user_id"
+        ],
+        "properties": {
+          "bind_connection": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "device_code_url": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "test_endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "token_url": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "DeviceCodeResponse": {
+        "type": "object",
+        "required": [
+          "auth_trn"
+        ],
+        "properties": {
+          "auth_trn": {
+            "type": "string"
+          },
+          "next_hints": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConnectionStatusDto"
+              }
+            ]
+          },
+          "test": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ExecuteResponseDto"
+              }
+            ]
+          }
+        }
+      },
+      "ExecuteOverridesDto": {
+        "type": "object",
+        "properties": {
+          "body": {},
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "method": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "query": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "retry_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetryPolicy"
+              }
+            ]
+          }
+        }
+      },
+      "ExecuteRequestDto": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overrides": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ExecuteOverridesDto"
+              }
+            ]
+          }
+        }
+      },
+      "ExecuteResponseDto": {
+        "type": "object",
+        "required": [
+          "status",
+          "headers",
+          "body"
+        ],
+        "properties": {
+          "body": {},
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "example": {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json; charset=utf-8",
+            "x-ratelimit-remaining": "4999"
+          },
+          "body": {
+            "id": 123456789,
+            "login": "octocat",
+            "name": "The Octocat",
+            "public_repos": 8,
+            "followers": 4000
+          }
+        }
+      },
+      "ExecutionActionResponse": {
+        "type": "object",
+        "required": [
+          "execution_id",
+          "status",
+          "message"
+        ],
+        "properties": {
+          "execution_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExecutionStatus"
+          }
+        }
+      },
+      "ExecutionCreatedResponse": {
+        "type": "object",
+        "required": [
+          "execution_id",
+          "workflow_id",
+          "status",
+          "message"
+        ],
+        "properties": {
+          "execution_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExecutionStatus"
+          },
+          "workflow_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ExecutionDetail": {
+        "type": "object",
+        "required": [
+          "execution_id",
+          "workflow_id",
+          "flow",
+          "status",
+          "started_at",
+          "updated_at",
+          "input"
+        ],
+        "properties": {
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "context": {},
+          "current_state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "execution_id": {
+            "type": "string"
+          },
+          "flow": {
+            "type": "string"
+          },
+          "input": {},
+          "pending_info": {},
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExecutionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workflow_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ExecutionListResponse": {
+        "type": "object",
+        "required": [
+          "executions"
+        ],
+        "properties": {
+          "executions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionSummary"
+            }
+          }
+        }
+      },
+      "ExecutionStatus": {
+        "type": "string",
+        "enum": [
+          "Running",
+          "Paused",
+          "Completed",
+          "Failed",
+          "Cancelled"
+        ]
+      },
+      "ExecutionSummary": {
+        "type": "object",
+        "required": [
+          "execution_id",
+          "workflow_id",
+          "flow",
+          "status",
+          "started_at",
+          "updated_at"
+        ],
+        "properties": {
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "current_state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "execution_id": {
+            "type": "string"
+          },
+          "flow": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExecutionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workflow_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ExecutionTraceResponse": {
+        "type": "object",
+        "required": [
+          "execution_id",
+          "workflow_id",
+          "state_history",
+          "status"
+        ],
+        "properties": {
+          "current_state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "execution_id": {
+            "type": "string"
+          },
+          "state_history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StateHistoryEntry"
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExecutionStatus"
+          },
+          "workflow_id": {
+            "type": "string"
+          }
+        }
+      },
+      "HealthComponents": {
+        "type": "object",
+        "description": "Health status of system components",
+        "required": [
+          "database",
+          "storage"
+        ],
+        "properties": {
+          "database": {
+            "$ref": "#/components/schemas/ComponentHealth",
+            "description": "Database connectivity status"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/ComponentHealth",
+            "description": "Storage service status"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "description": "Health check response",
+        "required": [
+          "status",
+          "timestamp",
+          "components"
+        ],
+        "properties": {
+          "components": {
+            "$ref": "#/components/schemas/HealthComponents",
+            "description": "Detailed component status"
+          },
+          "status": {
+            "type": "string",
+            "description": "Overall health status"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Health check timestamp"
+          }
+        },
+        "example": {
+          "status": "healthy",
+          "timestamp": "2023-12-01T15:30:45Z",
+          "components": {
+            "database": {
+              "status": "healthy",
+              "message": null
+            },
+            "storage": {
+              "status": "healthy",
+              "message": null
+            }
+          }
+        }
+      },
+      "HttpParameter": {
+        "type": "object",
+        "description": "HTTP parameter key-value pair",
+        "required": [
+          "key",
+          "value"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "HttpPolicy": {
+        "type": "object",
+        "description": "HTTP policy configuration",
+        "required": [
+          "denied_headers",
+          "reserved_headers",
+          "multi_value_append_headers",
+          "drop_forbidden_headers",
+          "normalize_header_names",
+          "max_header_value_length",
+          "max_total_headers",
+          "allowed_content_types"
+        ],
+        "properties": {
+          "allowed_content_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "denied_headers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "drop_forbidden_headers": {
+            "type": "boolean"
+          },
+          "max_header_value_length": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_total_headers": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "multi_value_append_headers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "normalize_header_names": {
+            "type": "boolean"
+          },
+          "reserved_headers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "InvocationHttpParameters": {
+        "type": "object",
+        "description": "Invocation HTTP parameters (connection-level defaults)",
+        "properties": {
+          "body_parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HttpParameter"
+            }
+          },
+          "header_parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HttpParameter"
+            }
+          },
+          "query_string_parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HttpParameter"
+            }
+          }
+        }
+      },
+      "ListQuery": {
+        "type": "object",
+        "properties": {
+          "connection_trn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ListQueryDto": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "pattern": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MemoryStats": {
+        "type": "object",
+        "description": "Memory usage statistics",
+        "required": [
+          "note"
+        ],
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "Note about memory stats implementation"
+          }
+        }
+      },
+      "NetworkConfig": {
+        "type": "object",
+        "description": "Network configuration",
+        "properties": {
+          "proxy_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tls": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TlsConfig"
+              }
+            ]
+          }
+        }
+      },
+      "OAuth2Parameters": {
+        "type": "object",
+        "description": "OAuth2 parameters",
+        "required": [
+          "client_id",
+          "client_secret",
+          "token_url"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": "string",
+            "example": "***redacted***"
+          },
+          "redirect_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "token_url": {
+            "type": "string"
+          },
+          "use_pkce": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      },
+      "ResponsePolicy": {
+        "type": "object",
+        "description": "Response policy configuration",
+        "required": [
+          "allow_binary",
+          "max_body_bytes"
+        ],
+        "properties": {
+          "allow_binary": {
+            "type": "boolean"
+          },
+          "max_body_bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ResumeExecutionRequest": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {}
+        }
+      },
+      "RetryPolicy": {
+        "type": "object",
+        "description": "Retry policy configuration for HTTP requests",
+        "required": [
+          "max_retries",
+          "base_delay_ms",
+          "max_delay_ms",
+          "backoff_multiplier",
+          "retry_status_codes",
+          "respect_retry_after"
+        ],
+        "properties": {
+          "backoff_multiplier": {
+            "type": "number",
+            "format": "double",
+            "description": "Backoff multiplier for exponential backoff"
+          },
+          "base_delay_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Base delay duration in milliseconds",
+            "minimum": 0
+          },
+          "max_delay_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Maximum delay duration in milliseconds",
+            "minimum": 0
+          },
+          "max_retries": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum number of retries (excluding initial attempt)",
+            "minimum": 0
+          },
+          "respect_retry_after": {
+            "type": "boolean",
+            "description": "Whether to respect Retry-After headers"
+          },
+          "retry_status_codes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "HTTP status codes that should trigger a retry"
+          }
+        }
+      },
+      "StartExecutionRequest": {
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "flow"
+        ],
+        "properties": {
+          "context": {},
+          "flow": {
+            "type": "string"
+          },
+          "input": {},
+          "workflow_id": {
+            "type": "string"
+          }
+        }
+      },
+      "StateHistoryEntry": {
+        "type": "object",
+        "required": [
+          "state",
+          "status",
+          "entered_at"
+        ],
+        "properties": {
+          "entered_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "exited_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "SystemInfo": {
+        "type": "object",
+        "description": "System statistics",
+        "required": [
+          "uptime_seconds",
+          "memory_usage",
+          "version"
+        ],
+        "properties": {
+          "memory_usage": {
+            "$ref": "#/components/schemas/MemoryStats",
+            "description": "Memory usage statistics"
+          },
+          "uptime_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "System uptime in seconds",
+            "minimum": 0
+          },
+          "version": {
+            "$ref": "#/components/schemas/VersionInfo",
+            "description": "Version and build information"
+          }
+        }
+      },
+      "SystemStatsResponse": {
+        "type": "object",
+        "description": "Complete system statistics response",
+        "required": [
+          "storage",
+          "caches",
+          "client_pool",
+          "system",
+          "timestamp"
+        ],
+        "properties": {
+          "caches": {
+            "description": "Cache statistics"
+          },
+          "client_pool": {
+            "$ref": "#/components/schemas/ClientPoolStats",
+            "description": "Client pool statistics"
+          },
+          "storage": {
+            "description": "Storage statistics"
+          },
+          "system": {
+            "$ref": "#/components/schemas/SystemInfo",
+            "description": "System information"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Response timestamp"
+          }
+        },
+        "example": {
+          "storage": {
+            "connections_count": 15,
+            "tasks_count": 42,
+            "auth_connections_count": 8,
+            "total_executions": 156
+          },
+          "caches": {
+            "exec_lookups": 1250,
+            "exec_hits": 1100,
+            "exec_hit_rate": 0.88,
+            "conn_lookups": 890,
+            "conn_hits": 850,
+            "conn_hit_rate": 0.955
+          },
+          "client_pool": {
+            "hits": 2340,
+            "builds": 156,
+            "evictions": 12,
+            "size": 45,
+            "capacity": 100,
+            "hit_rate": 0.937
+          },
+          "system": {
+            "uptime_seconds": 86400,
+            "memory_usage": {
+              "note": "Memory stats require platform-specific implementation"
+            },
+            "version": {
+              "version": "0.1.0",
+              "git_hash": "abc123def456",
+              "build_time": "2023-12-01T10:00:00Z",
+              "rust_version": "1.75.0"
+            }
+          },
+          "timestamp": "2023-12-01T15:30:45Z"
+        }
+      },
+      "TaskConfig": {
+        "type": "object",
+        "description": "HTTP Task configuration",
+        "required": [
+          "trn",
+          "name",
+          "connection_trn",
+          "api_endpoint",
+          "method",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "api_endpoint": {
+            "type": "string"
+          },
+          "connection_trn": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Vec"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "http_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HttpPolicy"
+              }
+            ]
+          },
+          "method": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NetworkConfig"
+              }
+            ]
+          },
+          "query_params": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Vec"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "request_body": {},
+          "response_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResponsePolicy"
+              }
+            ]
+          },
+          "retry_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetryPolicy"
+              }
+            ]
+          },
+          "timeout_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TimeoutConfig"
+              }
+            ]
+          },
+          "trn": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "TaskUpsertRequest": {
+        "type": "object",
+        "description": "Task upsert request DTO (without metadata fields)",
+        "required": [
+          "trn",
+          "name",
+          "connection_trn",
+          "api_endpoint",
+          "method"
+        ],
+        "properties": {
+          "api_endpoint": {
+            "type": "string"
+          },
+          "connection_trn": {
+            "type": "string"
+          },
+          "headers": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Vec"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "http_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HttpPolicy"
+              }
+            ]
+          },
+          "method": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NetworkConfig"
+              }
+            ]
+          },
+          "query_params": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Vec"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "request_body": {},
+          "response_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResponsePolicy"
+              }
+            ]
+          },
+          "retry_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetryPolicy"
+              }
+            ]
+          },
+          "timeout_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TimeoutConfig"
+              }
+            ]
+          },
+          "trn": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "trn": "trn:openact:default:task/get-user-repos@v1",
+          "name": "Get User Repositories",
+          "connection_trn": "trn:openact:default:connection/github-api@v1",
+          "api_endpoint": "/user/repos",
+          "method": "GET",
+          "query_params": {
+            "type": {
+              "value": "owner"
+            },
+            "sort": {
+              "value": "updated"
+            },
+            "per_page": {
+              "value": "50"
+            }
+          },
+          "timeout_config": {
+            "request_timeout_ms": 10000
+          },
+          "retry_policy": {
+            "max_attempts": 3,
+            "initial_delay_ms": 1000,
+            "max_delay_ms": 5000,
+            "backoff_multiplier": 2.0
+          }
+        }
+      },
+      "TimeoutConfig": {
+        "type": "object",
+        "description": "Timeout configuration",
+        "required": [
+          "connect_ms",
+          "read_ms",
+          "total_ms"
+        ],
+        "properties": {
+          "connect_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "read_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "TlsConfig": {
+        "type": "object",
+        "description": "TLS configuration",
+        "required": [
+          "verify_peer"
+        ],
+        "properties": {
+          "ca_pem": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          "client_cert_pem": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          "client_key_pem": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          "server_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verify_peer": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ValidationResult": {
+        "type": "object",
+        "required": [
+          "valid",
+          "errors",
+          "warnings"
+        ],
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "valid": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Vec": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "VersionInfo": {
+        "type": "object",
+        "description": "Version and build information",
+        "required": [
+          "version",
+          "rust_version"
+        ],
+        "properties": {
+          "build_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Build timestamp (if available)"
+          },
+          "git_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Git commit hash (if available)"
+          },
+          "rust_version": {
+            "type": "string",
+            "description": "Rust version used for build"
+          },
+          "version": {
+            "type": "string",
+            "description": "Application version"
+          }
+        }
+      },
+      "WorkflowDetail": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "dsl",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dsl": {},
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkflowStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WorkflowGraphResponse": {
+        "type": "object",
+        "required": [
+          "workflowId",
+          "graphs"
+        ],
+        "properties": {
+          "graphs": {
+            "type": "object",
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "workflowId": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkflowListResponse": {
+        "type": "object",
+        "required": [
+          "workflows"
+        ],
+        "properties": {
+          "workflows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowSummary"
+            }
+          }
+        }
+      },
+      "WorkflowStatus": {
+        "type": "string",
+        "enum": [
+          "Active",
+          "Inactive"
+        ]
+      },
+      "WorkflowSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkflowStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "api_key": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      },
+      "bearer_auth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearer_auth": []
+    },
+    {
+      "api_key": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "connections",
+      "description": "Connection management operations"
+    },
+    {
+      "name": "tasks",
+      "description": "Task configuration and management"
+    },
+    {
+      "name": "execution",
+      "description": "Task execution and ad-hoc operations"
+    },
+    {
+      "name": "oauth",
+      "description": "OAuth 2.0 authentication flows"
+    },
+    {
+      "name": "connect",
+      "description": "One-click connection wizard"
+    },
+    {
+      "name": "system",
+      "description": "System information and health checks"
+    },
+    {
+      "name": "templates",
+      "description": "Provider templates and instantiation"
+    },
+    {
+      "name": "authflow",
+      "description": "AuthFlow workflow and execution management"
+    }
+  ]
+}
