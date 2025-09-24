@@ -33,5 +33,3 @@ pub async fn health_check() -> impl IntoResponse {
             .as_secs()
     }))
 }
-
-
