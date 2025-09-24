@@ -2,7 +2,7 @@
 
 use crate::app::service::OpenActService;
 use crate::interface::error::helpers;
-use axum::{Json, response::IntoResponse};
+use axum::{Json, extract::State, response::IntoResponse};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -192,8 +192,7 @@ pub struct CleanupResponse {
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn stats() -> impl IntoResponse {
-    let svc = OpenActService::from_env().await.unwrap();
+pub async fn stats(State(svc): State<OpenActService>) -> impl IntoResponse {
     let storage = svc.stats().await;
     let caches = svc.cache_stats().await;
     let cp = crate::executor::client_pool::get_stats();
@@ -269,8 +268,7 @@ fn get_version_info() -> VersionInfo {
     )
 ))]
 /// Add health check endpoint
-pub async fn health() -> impl IntoResponse {
-    let svc = OpenActService::from_env().await.unwrap();
+pub async fn health(State(svc): State<OpenActService>) -> impl IntoResponse {
 
     // Quick health checks
     let storage_ok = svc.stats().await.is_ok();
@@ -324,8 +322,7 @@ pub async fn health() -> impl IntoResponse {
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn cleanup() -> impl IntoResponse {
-    let svc = OpenActService::from_env().await.unwrap();
+pub async fn cleanup(State(svc): State<OpenActService>) -> impl IntoResponse {
     match svc.cleanup().await {
         Ok(result) => {
             let response = CleanupResponse {

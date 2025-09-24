@@ -1,6 +1,10 @@
 #![cfg(feature = "server")]
 
-use axum::{Json, extract::Query, response::IntoResponse};
+use axum::{
+    Json,
+    extract::{Query, State},
+    response::IntoResponse,
+};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "openapi")]
@@ -77,8 +81,10 @@ pub struct ConnectResult {
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn connect(Json(req): Json<ConnectRequest>) -> impl IntoResponse {
-    let svc = OpenActService::from_env().await.unwrap();
+pub async fn connect(
+    State(svc): State<OpenActService>,
+    Json(req): Json<ConnectRequest>,
+) -> impl IntoResponse {
     // Build template inputs
     let mut ti = TemplateInputs::default();
     if let Some(s) = req.secrets {
@@ -143,9 +149,14 @@ pub async fn connect(Json(req): Json<ConnectRequest>) -> impl IntoResponse {
                 match s.status.as_str() {
                     "ready" => {
                         if let Some(ref t) = test {
-                            if t.status < 400 { hints.push("Connection ready: run tasks".to_string()); }
-                            else { hints.push("Check connection status or fix auth".to_string()); }
-                        } else { hints.push("Run a test call".to_string()); }
+                            if t.status < 400 {
+                                hints.push("Connection ready: run tasks".to_string());
+                            } else {
+                                hints.push("Check connection status or fix auth".to_string());
+                            }
+                        } else {
+                            hints.push("Run a test call".to_string());
+                        }
                     }
                     "misconfigured" => hints.push("Fix auth parameters and retry".to_string()),
                     "not_issued" => hints.push("Execute once to obtain token".to_string()),
@@ -170,27 +181,42 @@ pub async fn connect(Json(req): Json<ConnectRequest>) -> impl IntoResponse {
                     "dsl_required",
                     "AC mode requires dsl_yaml in request body",
                 )
-                .with_hints(["Provide dsl_yaml with provider OAuth settings", "See templates for examples"])
+                .with_hints([
+                    "Provide dsl_yaml with provider OAuth settings",
+                    "See templates for examples",
+                ])
                 .into_response();
             };
             let dsl: stepflow_dsl::WorkflowDSL = match serde_yaml::from_str(dsl_yaml) {
                 Ok(d) => d,
                 Err(e) => {
                     return helpers::validation_error("dsl_error", e.to_string())
-                        .with_hints(["Ensure YAML is valid", "Check required fields: authorizeUrl/clientId/redirectUri/scope"])
+                        .with_hints([
+                            "Ensure YAML is valid",
+                            "Check required fields: authorizeUrl/clientId/redirectUri/scope",
+                        ])
                         .into_response();
                 }
             };
             let router = crate::authflow::actions::DefaultRouter; // not Default
             let run_store = connect_run_store();
             // Execute with empty context; DSL should embed provider params explicitly
-            let start =
-                match crate::authflow::workflow::start_obtain(&dsl, &router, run_store, serde_json::json!({})) {
-                    Ok(s) => s,
-                    Err(e) => return helpers::execution_error(e.to_string())
-                        .with_hints(["Verify client credentials and redirect URI", "Check DSL mapping for inputs"]) 
-                        .into_response(),
-                };
+            let start = match crate::authflow::workflow::start_obtain(
+                &dsl,
+                &router,
+                run_store,
+                serde_json::json!({}),
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    return helpers::execution_error(e.to_string())
+                        .with_hints([
+                            "Verify client credentials and redirect URI",
+                            "Check DSL mapping for inputs",
+                        ])
+                        .into_response();
+                }
+            };
             let hints = vec![
                 "Open authorize_url in browser".to_string(),
                 format!("Poll /api/v1/connect/ac/status?run_id={}", start.run_id),
@@ -236,8 +262,10 @@ pub struct ConnectAcResumeRequest {
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn connect_ac_resume(Json(req): Json<ConnectAcResumeRequest>) -> impl IntoResponse {
-    let svc = OpenActService::from_env().await.unwrap();
+pub async fn connect_ac_resume(
+    State(svc): State<OpenActService>,
+    Json(req): Json<ConnectAcResumeRequest>,
+) -> impl IntoResponse {
     let run_store = connect_run_store();
     // If the run_id no longer exists (e.g., timeout cleanup), return not_found
     if run_store.get(&req.run_id).is_none() {
@@ -441,7 +469,9 @@ pub(crate) fn get_ac_result(run_id: &str) -> Option<AcResultRecord> {
 // Background cleaner for pending AC runs and stale results
 pub(crate) fn spawn_ac_ttl_cleaner() {
     static START: OnceLock<()> = OnceLock::new();
-    if START.set(()).is_err() { return; }
+    if START.set(()).is_err() {
+        return;
+    }
 
     // TTLs (can be tuned or moved to config): pending 10 minutes, results 30 minutes
     const RESULT_TTL_SECS: u64 = 30 * 60;
@@ -509,9 +539,10 @@ pub struct DeviceCodeResponse {
     )
 ))]
 /// Complete Device Code flow synchronously (issue code, poll token, persist, optional bind)
-pub async fn connect_device_code(Json(req): Json<DeviceCodeRequest>) -> impl IntoResponse {
-    let svc = OpenActService::from_env().await.unwrap();
-
+pub async fn connect_device_code(
+    State(svc): State<OpenActService>,
+    Json(req): Json<DeviceCodeRequest>,
+) -> impl IntoResponse {
     // Step 1: device authorization request
     let mut form = vec![("client_id", req.client_id.as_str())];
     if let Some(ref s) = req.scope {
@@ -525,19 +556,23 @@ pub async fn connect_device_code(Json(req): Json<DeviceCodeRequest>) -> impl Int
     {
         Ok(x) => x,
         Err(e) => {
-        return helpers::execution_error(format!("device_code request failed: {}", e))
-            .with_hints(["Check device_code_url and client_id/scope", "Retry later"]) 
+            return helpers::execution_error(format!("device_code request failed: {}", e))
+                .with_hints(["Check device_code_url and client_id/scope", "Retry later"])
                 .into_response();
         }
     };
     if !r.status().is_success() {
         return helpers::execution_error(format!("device_code request failed: {}", r.status()))
-            .with_hints(["Check endpoint and credentials"]) 
+            .with_hints(["Check endpoint and credentials"])
             .into_response();
     }
     let payload: serde_json::Value = match r.json().await {
         Ok(v) => v,
-        Err(e) => return helpers::execution_error(e.to_string()).with_hints(["Endpoint returned non-JSON", "Check network connectivity"]).into_response(),
+        Err(e) => {
+            return helpers::execution_error(e.to_string())
+                .with_hints(["Endpoint returned non-JSON", "Check network connectivity"])
+                .into_response();
+        }
     };
     let device_code = match payload.get("device_code").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
@@ -568,7 +603,11 @@ pub async fn connect_device_code(Json(req): Json<DeviceCodeRequest>) -> impl Int
             .await
         {
             Ok(x) => x,
-            Err(e) => return helpers::execution_error(e.to_string()).with_hints(["Check token endpoint URL", "Verify client_id/device_code"]).into_response(),
+            Err(e) => {
+                return helpers::execution_error(e.to_string())
+                    .with_hints(["Check token endpoint URL", "Verify client_id/device_code"])
+                    .into_response();
+            }
         };
         if res.status().is_success() {
             break res;
@@ -580,16 +619,24 @@ pub async fn connect_device_code(Json(req): Json<DeviceCodeRequest>) -> impl Int
             continue;
         }
         return helpers::execution_error(format!("token polling failed: {} - {}", status, body))
-            .with_hints(["Complete authorization in browser", "Retry if slowed down"]) 
+            .with_hints(["Complete authorization in browser", "Retry if slowed down"])
             .into_response();
     };
     let token_json: serde_json::Value = match token_resp.json().await {
         Ok(v) => v,
-        Err(e) => return helpers::execution_error(e.to_string()).with_hints(["Malformed token response"]).into_response(),
+        Err(e) => {
+            return helpers::execution_error(e.to_string())
+                .with_hints(["Malformed token response"])
+                .into_response();
+        }
     };
     let access_token = match token_json.get("access_token").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
-        None => return helpers::execution_error("missing access_token").with_hints(["Ensure authorization was completed"]).into_response(),
+        None => {
+            return helpers::execution_error("missing access_token")
+                .with_hints(["Ensure authorization was completed"])
+                .into_response();
+        }
     };
     let refresh_token = token_json
         .get("refresh_token")
@@ -661,7 +708,11 @@ pub async fn connect_device_code(Json(req): Json<DeviceCodeRequest>) -> impl Int
     }
 
     let mut hints = vec!["Use auth_trn to bind a connection or proceed to requests".to_string()];
-    if let Some(ref s) = status { if s.status != "ready" { hints.push("Check connection status".to_string()); } }
+    if let Some(ref s) = status {
+        if s.status != "ready" {
+            hints.push("Check connection status".to_string());
+        }
+    }
 
     Json(serde_json::json!(DeviceCodeResponse {
         auth_trn: trn_str,

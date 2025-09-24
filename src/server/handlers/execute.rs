@@ -4,7 +4,7 @@ use crate::app::service::OpenActService;
 use crate::interface::dto::{ExecuteRequestDto, ExecuteResponseDto, AdhocExecuteRequestDto};
 use crate::interface::error::helpers;
 use crate::utils::trn;
-use axum::{Json, extract::Path, response::IntoResponse};
+use axum::{Json, extract::{Path, State}, response::IntoResponse};
 
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -25,13 +25,13 @@ use axum::{Json, extract::Path, response::IntoResponse};
     )
 ))]
 pub async fn execute(
+    State(svc): State<OpenActService>,
     Path(trn): Path<String>,
     Json(req): Json<ExecuteRequestDto>,
 ) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }
-    let svc = OpenActService::from_env().await.unwrap();
     match svc.execute_task(&trn, req.overrides).await {
         Ok(res) => {
             let dto = ExecuteResponseDto {
@@ -62,6 +62,7 @@ pub async fn execute(
 ))]
 /// Execute ad-hoc action using existing connection
 pub async fn execute_adhoc(
+    State(svc): State<OpenActService>,
     Json(req): Json<AdhocExecuteRequestDto>,
 ) -> impl IntoResponse {
     // Validate connection TRN
@@ -76,8 +77,6 @@ pub async fn execute_adhoc(
     if req.endpoint.is_empty() {
         return helpers::validation_error("missing_endpoint", "API endpoint is required").into_response();
     }
-    
-    let svc = OpenActService::from_env().await.unwrap();
     match svc.execute_adhoc(req).await {
         Ok(res) => {
             let dto = ExecuteResponseDto {
