@@ -235,6 +235,28 @@ pub fn get_metrics_snapshot() -> serde_json::Value {
     })
 }
 
+/// Export metrics in Prometheus format
+#[cfg(feature = "metrics")]
+pub fn export_prometheus() -> Result<String> {
+    use metrics_exporter_prometheus::PrometheusHandle;
+    use std::sync::OnceLock;
+    
+    static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
+    
+    let handle = PROMETHEUS_HANDLE.get_or_init(|| {
+        // Create a Prometheus recorder and get a handle to it
+        let builder = metrics_exporter_prometheus::PrometheusBuilder::new();
+        builder.install_recorder().expect("Failed to install Prometheus recorder")
+    });
+    
+    Ok(handle.render())
+}
+
+#[cfg(not(feature = "metrics"))]
+pub fn export_prometheus() -> Result<String> {
+    Ok("# Metrics not enabled\n".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

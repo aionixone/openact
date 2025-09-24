@@ -332,6 +332,144 @@ RUST_LOG=debug cargo run --features server --bin openact
 - **执行层**: 处理HTTP请求、认证注入、重试等
 - **存储层**: SQLite 数据库存储配置和状态
 
+## 运维指南
+
+### 系统监控
+
+#### 健康检查端点
+
+```bash
+# 基础健康检查（无需认证）
+curl http://localhost:8080/api/v1/system/health
+
+# 详细健康信息  
+curl http://localhost:8080/health
+```
+
+#### 系统统计
+
+```bash
+# 获取详细系统统计
+curl -H "X-API-Key: your-api-key" \
+     http://localhost:8080/api/v1/system/stats
+```
+
+返回信息包括：
+- 数据库连接数、任务数、认证连接数
+- 缓存命中率统计
+- HTTP 客户端池状态
+- 内存使用情况
+
+#### Prometheus 指标（需要 metrics feature）
+
+```bash
+# 启动带指标的服务器
+cargo run --features server,openapi,metrics --bin openact
+
+# 获取 Prometheus 格式指标
+curl -H "X-API-Key: your-api-key" \
+     http://localhost:8080/api/v1/system/metrics
+```
+
+### 故障排除
+
+#### 常见问题诊断
+
+**1. 数据库连接问题**
+```bash
+# 检查数据库文件权限
+ls -la data/openact.db
+
+# 检查数据库完整性
+sqlite3 data/openact.db "PRAGMA integrity_check;"
+```
+
+**2. 认证问题**
+```bash
+# 验证连接状态
+curl -H "X-API-Key: your-api-key" \
+     "http://localhost:8080/api/v1/connections/{trn}/status"
+
+# 测试连接
+curl -X POST -H "X-API-Key: your-api-key" \
+     "http://localhost:8080/api/v1/connections/{trn}/test"
+```
+
+**3. 性能问题**
+```bash
+# 查看客户端池状态
+curl -H "X-API-Key: your-api-key" \
+     http://localhost:8080/api/v1/system/stats | jq '.client_pool'
+
+# 系统清理（清理过期认证）
+curl -X POST -H "X-API-Key: your-api-key" \
+     http://localhost:8080/api/v1/system/cleanup
+```
+
+#### 日志配置
+
+```bash
+# 调试级别日志
+RUST_LOG=debug cargo run --features server --bin openact
+
+# JSON 格式日志（生产环境推荐）
+OPENACT_LOG_JSON=true RUST_LOG=info cargo run --features server --bin openact
+
+# 特定模块日志
+RUST_LOG=openact::executor=debug,openact::auth=trace cargo run --features server --bin openact
+```
+
+#### 环境变量参考
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `OPENACT_DB_URL` | `sqlite:./data/openact.db?mode=rwc` | 数据库连接URL |
+| `OPENACT_MASTER_KEY` | 必需 | 64位十六进制主密钥 |
+| `OPENACT_LOG_JSON` | `false` | 启用JSON格式日志 |
+| `OPENACT_METRICS_ENABLED` | `false` | 启用Prometheus指标 |
+| `OPENACT_METRICS_ADDR` | `127.0.0.1:9090` | 指标服务监听地址 |
+| `RUST_LOG` | `info` | 日志级别 |
+
+### OpenAPI 文档使用
+
+启用 OpenAPI 功能后，可访问：
+
+- **Swagger UI**: http://localhost:8080/docs
+- **OpenAPI JSON**: http://localhost:8080/api-docs/openapi.json
+
+文档包含：
+- 27个API端点的完整文档
+- 详细的请求/响应示例
+- 错误处理指南和解决提示
+- 认证配置说明
+
+### Docker 部署（推荐）
+
+```dockerfile
+FROM rust:1.75 as builder
+WORKDIR /app
+COPY . .
+RUN cargo build --release --features server,openapi,metrics
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/openact /usr/local/bin/
+EXPOSE 8080
+CMD ["openact"]
+```
+
+```bash
+# 构建镜像
+docker build -t openact .
+
+# 运行容器
+docker run -p 8080:8080 \
+  -e OPENACT_MASTER_KEY=your-64-char-key \
+  -e OPENACT_LOG_JSON=true \
+  -v ./data:/app/data \
+  openact
+```
+
 ## 许可证
 
-[添加许可证信息]
+MIT License

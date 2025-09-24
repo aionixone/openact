@@ -81,7 +81,16 @@ pub fn core_api_router_with_state(service: OpenActService) -> Router {
         .route(
             "/api/v1/system/cleanup",
             post(crate::server::handlers::system::cleanup),
-        )
+        );
+    
+    // Add metrics endpoint only if metrics feature is enabled
+    #[cfg(feature = "metrics")]
+    let router = router.route(
+        "/api/v1/system/metrics",
+        get(crate::server::handlers::system::metrics),
+    );
+    
+    let mut router = router
         // Observability endpoints
         .route(
             "/health",

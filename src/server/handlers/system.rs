@@ -444,3 +444,42 @@ pub async fn cleanup(State(svc): State<OpenActService>) -> impl IntoResponse {
         Err(e) => helpers::storage_error(e.to_string()).into_response(),
     }
 }
+
+#[cfg(feature = "metrics")]
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    path = "/api/v1/system/metrics",
+    tag = "system",
+    operation_id = "system_get_metrics",
+    summary = "Prometheus metrics",
+    description = "Get system metrics in Prometheus format for monitoring and alerting",
+    responses(
+        (status = 200, description = "Metrics in Prometheus format", content_type = "text/plain"),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    ),
+    security(
+        // Metrics endpoint may need authentication for security
+        ("bearer_auth" = []),
+        ("api_key" = [])
+    )
+))]
+/// Prometheus metrics endpoint
+pub async fn metrics() -> impl IntoResponse {
+    use axum::response::Response;
+    use axum::body::Body;
+    use axum::http::{StatusCode, header};
+    
+    match crate::observability::metrics::export_prometheus() {
+        Ok(metrics_text) => {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                .body(Body::from(metrics_text))
+                .unwrap()
+        }
+        Err(e) => {
+            let error = helpers::storage_error(format!("Failed to export metrics: {}", e));
+            error.into_response()
+        }
+    }
+}

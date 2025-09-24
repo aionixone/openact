@@ -1,0 +1,98 @@
+name: Performance Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run performance tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+    
+    - name: Run benchmarks
+      run: cargo bench --features server,openapi
+      env:
+        OPENACT_MASTER_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    
+    - name: Store benchmark result
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'cargo'
+        output-file-path: target/criterion/*/benchmark.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+
+  load-test:
+    name: Load Testing
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Build and start server
+      run: |
+        cargo build --release --features server,openapi
+        ./target/release/openact &
+        sleep 10
+      env:
+        OPENACT_MASTER_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    
+    - name: Install wrk
+      run: |
+        sudo apt-get update
+        sudo apt-get install wrk
+    
+    - name: Health check load test
+      run: |
+        wrk -t8 -c100 -d30s --latency http://localhost:8080/api/v1/system/health
+    
+    - name: API stats load test
+      run: |
+        wrk -t4 -c50 -d15s --latency http://localhost:8080/api/v1/system/stats
+    
+    - name: Stop server
+      run: pkill -f openact || true
+
+  memory-profiling:
+    name: Memory Profiling
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Install Valgrind
+      run: sudo apt-get update && sudo apt-get install valgrind
+    
+    - name: Run memory profiling
+      run: |
+        cargo build --features server,openapi
+        timeout 60s valgrind --tool=massif --massif-out-file=massif.out target/debug/openact || true
+      env:
+        OPENACT_MASTER_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    
+    - name: Upload memory profile
+      uses: actions/upload-artifact@v4
+      with:
+        name: memory-profile
+        path: massif.out
