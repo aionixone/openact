@@ -1,10 +1,14 @@
 #![cfg(feature = "server")]
 
 use crate::app::service::OpenActService;
-use crate::interface::dto::{ExecuteRequestDto, ExecuteResponseDto, AdhocExecuteRequestDto};
+use crate::interface::dto::{AdhocExecuteRequestDto, ExecuteRequestDto, ExecuteResponseDto};
 use crate::interface::error::helpers;
 use crate::utils::trn;
-use axum::{Json, extract::{Path, State}, response::IntoResponse};
+use axum::{
+    Json,
+    extract::{Path, State},
+    response::IntoResponse,
+};
 
 #[cfg(feature = "openapi")]
 #[allow(unused_imports)] // Used in utoipa path examples
@@ -163,13 +167,15 @@ pub async fn execute_adhoc(
     if let Err(e) = trn::validate_trn(&req.connection_trn) {
         return helpers::validation_error("invalid_connection_trn", e.to_string()).into_response();
     }
-    
+
     // Basic validation
     if req.method.is_empty() {
-        return helpers::validation_error("missing_method", "HTTP method is required").into_response();
+        return helpers::validation_error("missing_method", "HTTP method is required")
+            .into_response();
     }
     if req.endpoint.is_empty() {
-        return helpers::validation_error("missing_endpoint", "API endpoint is required").into_response();
+        return helpers::validation_error("missing_endpoint", "API endpoint is required")
+            .into_response();
     }
     match svc.execute_adhoc(req).await {
         Ok(res) => {

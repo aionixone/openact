@@ -46,7 +46,7 @@ pub struct ListQuery {
 ))]
 pub async fn list(
     State(svc): State<OpenActService>,
-    Query(q): Query<ListQuery>
+    Query(q): Query<ListQuery>,
 ) -> impl IntoResponse {
     match svc
         .list_connections(q.auth_type.as_deref(), q.limit, q.offset)
@@ -73,20 +73,24 @@ pub async fn list(
 ))]
 pub async fn create(
     axum::extract::State(svc): axum::extract::State<OpenActService>,
-    Json(req): Json<ConnectionUpsertRequest>
+    Json(req): Json<ConnectionUpsertRequest>,
 ) -> impl IntoResponse {
-    
     // Validate TRN format
     use crate::utils::trn::parse_connection_trn;
     if let Err(e) = parse_connection_trn(&req.trn) {
-        return helpers::validation_error("invalid_input", format!("Invalid TRN format: {}", e)).into_response();
+        return helpers::validation_error("invalid_input", format!("Invalid TRN format: {}", e))
+            .into_response();
     }
-    
+
     // Convert DTO to config with metadata (new creation)
     let config = req.to_config(None, None);
-    
+
     match svc.upsert_connection(&config).await {
-        Ok(_) => (axum::http::StatusCode::CREATED, Json(serde_json::json!(config))).into_response(),
+        Ok(_) => (
+            axum::http::StatusCode::CREATED,
+            Json(serde_json::json!(config)),
+        )
+            .into_response(),
         Err(e) => helpers::validation_error("invalid_input", e.to_string()).into_response(),
     }
 }
@@ -108,10 +112,7 @@ pub async fn create(
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn get(
-    State(svc): State<OpenActService>,
-    Path(trn): Path<String>
-) -> impl IntoResponse {
+pub async fn get(State(svc): State<OpenActService>, Path(trn): Path<String>) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }
@@ -151,17 +152,17 @@ pub async fn update(
     if req.trn != trn {
         return helpers::validation_error("trn_mismatch", "trn mismatch").into_response();
     }
-    
+
     // Get existing version and created_at for proper versioning
     let (existing_version, existing_created_at) = match svc.get_connection(&trn).await {
         Ok(Some(existing)) => (Some(existing.version), Some(existing.created_at)),
         Ok(None) => (None, None), // Treat as creation if doesn't exist
         Err(e) => return helpers::storage_error(e.to_string()).into_response(),
     };
-    
+
     // Convert DTO to config with proper versioning
     let config = req.to_config(existing_version, existing_created_at);
-    
+
     match svc.upsert_connection(&config).await {
         Ok(_) => Json(serde_json::json!(config)).into_response(),
         Err(e) => helpers::validation_error("invalid_input", e.to_string()).into_response(),
@@ -185,10 +186,7 @@ pub async fn update(
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn del(
-    State(svc): State<OpenActService>,
-    Path(trn): Path<String>
-) -> impl IntoResponse {
+pub async fn del(State(svc): State<OpenActService>, Path(trn): Path<String>) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }
@@ -219,7 +217,7 @@ pub async fn del(
 /// Get connection auth status (no network)
 pub async fn status(
     State(svc): State<OpenActService>,
-    Path(trn): Path<String>
+    Path(trn): Path<String>,
 ) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
@@ -238,7 +236,9 @@ pub struct ConnectionTestRequest {
     pub endpoint: String,
 }
 
-fn default_test_endpoint() -> String { "https://httpbin.org/get".to_string() }
+fn default_test_endpoint() -> String {
+    "https://httpbin.org/get".to_string()
+}
 
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -293,7 +293,8 @@ pub async fn test(
             "status": res.status,
             "headers": res.headers,
             "body": res.body,
-        })).into_response(),
+        }))
+        .into_response(),
         Err(e) => helpers::execution_error(e.to_string()).into_response(),
     }
 }

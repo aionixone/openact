@@ -1,14 +1,14 @@
 //! Distributed tracing configuration and utilities
-//! 
+//!
 //! Provides tracing spans for tracking requests across service boundaries
 
-use tracing::{Span, Level};
+use tracing::{Level, Span};
 use uuid::Uuid;
 
 /// Create a new root span for HTTP requests
 pub fn create_request_span(method: &str, path: &str, request_id: Option<String>) -> Span {
     let request_id = request_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    
+
     tracing::span!(
         Level::INFO,
         "http_request",
@@ -20,11 +20,7 @@ pub fn create_request_span(method: &str, path: &str, request_id: Option<String>)
 }
 
 /// Create a span for task execution
-pub fn create_task_execution_span(
-    task_trn: &str,
-    connection_trn: &str,
-    request_id: &str,
-) -> Span {
+pub fn create_task_execution_span(task_trn: &str, connection_trn: &str, request_id: &str) -> Span {
     tracing::span!(
         Level::INFO,
         "task_execution",
@@ -36,12 +32,7 @@ pub fn create_task_execution_span(
 }
 
 /// Create a span for HTTP client requests
-pub fn create_http_client_span(
-    method: &str,
-    url: &str,
-    request_id: &str,
-    task_trn: &str,
-) -> Span {
+pub fn create_http_client_span(method: &str, url: &str, request_id: &str, task_trn: &str) -> Span {
     tracing::span!(
         Level::INFO,
         "http_client_request",
@@ -54,11 +45,7 @@ pub fn create_http_client_span(
 }
 
 /// Create a span for database operations
-pub fn create_database_span(
-    operation: &str,
-    table: &str,
-    request_id: &str,
-) -> Span {
+pub fn create_database_span(operation: &str, table: &str, request_id: &str) -> Span {
     tracing::span!(
         Level::DEBUG,
         "database_operation",
@@ -70,11 +57,7 @@ pub fn create_database_span(
 }
 
 /// Create a span for cache operations
-pub fn create_cache_span(
-    operation: &str,
-    key: &str,
-    request_id: &str,
-) -> Span {
+pub fn create_cache_span(operation: &str, key: &str, request_id: &str) -> Span {
     tracing::span!(
         Level::DEBUG,
         "cache_operation",
@@ -86,12 +69,7 @@ pub fn create_cache_span(
 }
 
 /// Create a span for retry attempts
-pub fn create_retry_span(
-    attempt: u32,
-    max_retries: u32,
-    request_id: &str,
-    task_trn: &str,
-) -> Span {
+pub fn create_retry_span(attempt: u32, max_retries: u32, request_id: &str, task_trn: &str) -> Span {
     tracing::span!(
         Level::WARN,
         "retry_attempt",
@@ -108,7 +86,7 @@ pub fn enrich_span_with_response(status: u16, duration_ms: u64) {
     let span = Span::current();
     span.record("http.status_code", status);
     span.record("duration_ms", duration_ms);
-    
+
     if status >= 400 {
         span.record("error", true);
     }
@@ -123,9 +101,12 @@ pub fn enrich_span_with_error(error: &anyhow::Error) {
 }
 
 /// Extract trace context from headers (for distributed tracing)
-pub fn extract_trace_context(headers: &std::collections::HashMap<String, String>) -> Option<String> {
+pub fn extract_trace_context(
+    headers: &std::collections::HashMap<String, String>,
+) -> Option<String> {
     // Look for common tracing headers
-    headers.get("x-trace-id")
+    headers
+        .get("x-trace-id")
         .or_else(|| headers.get("traceparent"))
         .or_else(|| headers.get("x-request-id"))
         .cloned()

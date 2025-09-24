@@ -1,8 +1,8 @@
-//! 统一执行器模块
+//! Unified Executor Module
 //!
-//! 提供统一的API调用执行器，支持所有认证类型：
-//! - API Key、Basic Auth、OAuth2 Client Credentials、OAuth2 Authorization Code
-//! - 自动处理token刷新、参数合并、认证注入
+//! Provides a unified API call executor supporting all authentication types:
+//! - API Key, Basic Auth, OAuth2 Client Credentials, OAuth2 Authorization Code
+//! - Automatically handles token refresh, parameter merging, and authentication injection
 
 pub mod auth_injector;
 pub mod http_executor;
@@ -21,7 +21,7 @@ use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::Value;
 
-/// 执行结果
+/// Execution Result
 #[derive(Debug)]
 pub struct ExecutionResult {
     pub status: u16,
@@ -29,20 +29,20 @@ pub struct ExecutionResult {
     pub body: Value,
 }
 
-/// 主执行器：统一处理所有认证类型的API调用
+/// Main Executor: Handles API calls for all authentication types
 pub struct Executor {
     http_executor: HttpExecutor,
 }
 
 impl Executor {
-    /// 创建新的执行器实例
+    /// Create a new Executor instance
     pub fn new() -> Self {
         Self {
             http_executor: HttpExecutor::new(),
         }
     }
 
-    /// 执行API调用（支持所有认证类型，包括自动token刷新）
+    /// Execute an API call (supports all authentication types, including automatic token refresh)
     pub async fn execute(
         &self,
         connection: &ConnectionConfig,
@@ -50,7 +50,7 @@ impl Executor {
     ) -> Result<ExecutionResult> {
         let response = self.http_executor.execute(connection, task).await?;
 
-        // 提取响应信息
+        // Extract response information
         let status = response.status().as_u16();
         let headers = response
             .headers()
@@ -58,10 +58,10 @@ impl Executor {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        // 读取并应用 ResponsePolicy
+        // Read and apply ResponsePolicy
         let effective = task.response_policy.clone().unwrap_or_default();
 
-        // 获取 content-type
+        // Get content-type
         let content_type = response
             .headers()
             .get("content-type")

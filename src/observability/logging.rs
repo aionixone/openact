@@ -1,14 +1,14 @@
 //! Logging configuration and initialization
-//! 
+//!
 //! Provides structured logging with tracing-subscriber and optional JSON output
 
 use anyhow::Result;
 use std::str::FromStr;
 use tracing_subscriber::{
+    EnvFilter,
     fmt::{self, format::FmtSpan},
     layer::SubscriberExt,
     util::SubscriberInitExt,
-    EnvFilter,
 };
 
 /// Initialize logging with default configuration
@@ -17,14 +17,13 @@ pub fn init() -> Result<()> {
     let json_logs = std::env::var("OPENACT_JSON_LOGS")
         .map(|v| v.to_lowercase() == "true")
         .unwrap_or(false);
-    
+
     init_with_config(&log_level, json_logs)
 }
 
 /// Initialize logging with custom configuration
 pub fn init_with_config(log_level: &str, json_logs: bool) -> Result<()> {
-    let env_filter = EnvFilter::from_str(log_level)
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::from_str(log_level).unwrap_or_else(|_| EnvFilter::new("info"));
 
     let registry = tracing_subscriber::registry().with(env_filter);
 
@@ -42,7 +41,7 @@ pub fn init_with_config(log_level: &str, json_logs: bool) -> Result<()> {
                     .with_thread_names(true)
                     .with_file(true)
                     .with_line_number(true)
-                    .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT)
+                    .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT),
             )
             .init();
     } else {
@@ -57,7 +56,7 @@ pub fn init_with_config(log_level: &str, json_logs: bool) -> Result<()> {
                     .with_thread_names(false)
                     .with_file(false)
                     .with_line_number(false)
-                    .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT)
+                    .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT),
             )
             .init();
     }
@@ -114,7 +113,11 @@ pub fn log_request_end(
 }
 
 /// Log task execution start
-pub fn log_task_start(request_id: &str, task_trn: &str, connection_trn: &str) -> std::time::Instant {
+pub fn log_task_start(
+    request_id: &str,
+    task_trn: &str,
+    connection_trn: &str,
+) -> std::time::Instant {
     let start = std::time::Instant::now();
     tracing::info!(
         request_id = %request_id,
@@ -167,9 +170,9 @@ pub fn log_retry_attempt(
 /// Log error with context (with sanitization)
 pub fn log_error(request_id: &str, error: &anyhow::Error, context: Option<&str>) {
     use crate::observability::sanitization::sanitize_error_message;
-    
+
     let sanitized_error = sanitize_error_message(&error.to_string());
-    
+
     match context {
         Some(ctx) => tracing::error!(
             request_id = %request_id,

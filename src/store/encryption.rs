@@ -1,11 +1,11 @@
 //! Field-level encryption service
-//! 
+//!
 //! Provides AES-256-GCM encryption/decryption for sensitive data
 
 // Simplified: drop AES-GCM to avoid extra feature/dep; use Base64 placeholder only
-use anyhow::{anyhow, Result};
-use base64::{engine::general_purpose::STANDARD, Engine};
-use rand::{rngs::OsRng, RngCore};
+use anyhow::{Result, anyhow};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -50,10 +50,10 @@ impl FieldEncryption {
     pub fn from_env() -> Result<Self> {
         let master_key_hex = std::env::var("OPENACT_MASTER_KEY")
             .map_err(|_| anyhow!("OPENACT_MASTER_KEY environment variable not set"))?;
-        
+
         let master_key = hex::decode(&master_key_hex)
             .map_err(|_| anyhow!("Invalid master key format, expected hex string"))?;
-        
+
         if master_key.len() != 32 {
             return Err(anyhow!("Master key must be 32 bytes (64 hex characters)"));
         }
@@ -63,8 +63,8 @@ impl FieldEncryption {
 
         let config = EncryptionConfig {
             master_key: key_array,
-            key_rotation_enabled: std::env::var("OPENACT_KEY_ROTATION")
-                .unwrap_or_default() == "true",
+            key_rotation_enabled: std::env::var("OPENACT_KEY_ROTATION").unwrap_or_default()
+                == "true",
             current_key_version: std::env::var("OPENACT_KEY_VERSION")
                 .unwrap_or_else(|_| "1".to_string())
                 .parse()
@@ -85,10 +85,10 @@ impl FieldEncryption {
     }
 
     pub fn decrypt_field(&self, encrypted: &EncryptedField) -> Result<String> {
-        let plaintext = STANDARD.decode(&encrypted.data)
+        let plaintext = STANDARD
+            .decode(&encrypted.data)
             .map_err(|e| anyhow!("Failed to decode data: {}", e))?;
-        String::from_utf8(plaintext)
-            .map_err(|e| anyhow!("Invalid UTF-8 in data: {}", e))
+        String::from_utf8(plaintext).map_err(|e| anyhow!("Invalid UTF-8 in data: {}", e))
     }
 
     pub fn generate_master_key() -> [u8; 32] {
@@ -158,7 +158,7 @@ mod tests {
     fn test_key_generation() {
         let key_hex = FieldEncryption::generate_master_key_hex();
         assert_eq!(key_hex.len(), 64); // 32 bytes = 64 hex chars
-        
+
         // Verify it's valid hexadecimal
         hex::decode(&key_hex).unwrap();
     }

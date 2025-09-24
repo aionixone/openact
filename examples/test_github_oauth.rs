@@ -5,21 +5,21 @@ use std::fs;
 use stepflow_dsl::dsl::WorkflowDSL;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 读取 GitHub OAuth2 模板
+    // Read GitHub OAuth2 template
     let template_content = fs::read_to_string("templates/providers/github/oauth2.json")?;
     let template: serde_json::Value = serde_json::from_str(&template_content)?;
     
-    // 提取 OAuth 流程
+    // Extract OAuth flow
     let oauth_flow = &template["provider"]["flows"]["OAuth"];
     let dsl: WorkflowDSL = serde_json::from_value(oauth_flow.clone())?;
     
     println!("🚀 Starting GitHub OAuth2 flow test...");
     println!("📋 DSL validation: {:?}", dsl.validate());
     
-    // 创建路由器
+    // Create router
     let router = DefaultRouter;
     
-    // 准备输入上下文（secrets + input 覆盖）
+    // Prepare input context (secrets + input overrides)
     let cid = std::env::var("GITHUB_CLIENT_ID").unwrap_or_default();
     let csec = std::env::var("GITHUB_CLIENT_SECRET").unwrap_or_default();
     if cid.is_empty() || csec.is_empty() {
@@ -41,20 +41,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Input context prepared:");
     println!("{}", serde_json::to_string_pretty(&input_context)?);
     
-    // 先只运行 Config 状态，看看 vars 是否正确设置
+    // Run Config state only to check if vars are set correctly
     println!("🔧 Running Config state only...");
     let ctx_after_config = run_flow(&dsl, &dsl.start_at, input_context.clone(), &router, 1)?;
     println!("🔍 Context after Config:");
     println!("{}", serde_json::to_string_pretty(&ctx_after_config)?);
     
-    // 运行直到暂停或结束
+    // Run until pause or end
     println!("🔧 Running flow until pause or end...");
     let result = run_until_pause_or_end(&dsl, &dsl.start_at, input_context, &router, 100)?;
     
     match result {
         RunOutcome::Pending(pending_info) => {
             println!("✅ Flow paused for callback");
-            // 从 context 中提取授权 URL
+            // Extract authorization URL from context
             if let Some(url) = pending_info.context
                 .pointer("/states/StartAuth/result/authorize_url")
                 .and_then(|v| v.as_str()) {

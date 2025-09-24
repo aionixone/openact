@@ -1,42 +1,42 @@
-//! 数据库管理器
-//! 
-//! 提供统一的数据库连接池管理和初始化逻辑
+//! Database Manager
+//!
+//! Provides unified database connection pool management and initialization logic
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 use std::env;
 use std::path::Path;
 use tokio::fs;
-use tokio::sync::{OnceCell as TokioOnceCell, Mutex as TokioMutex};
+use tokio::sync::{Mutex as TokioMutex, OnceCell as TokioOnceCell};
 
-use crate::store::encryption::FieldEncryption;
 use super::connection_repository::ConnectionRepository;
+use crate::store::encryption::FieldEncryption;
 
-/// 数据库管理器
+/// Database Manager
 pub struct DatabaseManager {
     pool: SqlitePool,
     encryption: Option<FieldEncryption>,
 }
 
 impl DatabaseManager {
-    /// 从环境变量创建数据库管理器
+    /// Create a database manager from environment variables
     pub async fn from_env() -> Result<Self> {
-        let database_url = env::var("OPENACT_DB_URL")
-            .unwrap_or_else(|_| "./data/openact.db".to_string());
-        
+        let database_url =
+            env::var("OPENACT_DB_URL").unwrap_or_else(|_| "./data/openact.db".to_string());
+
         Self::new(&database_url).await
     }
 
-    /// 创建新的数据库管理器
+    /// Create a new database manager
     pub async fn new(database_url: &str) -> Result<Self> {
-        // 确保数据库目录存在
+        // Ensure the database directory exists
         if database_url.starts_with("sqlite:") || !database_url.contains("://") {
             let db_path = if database_url.starts_with("sqlite:") {
                 database_url.strip_prefix("sqlite:").unwrap_or(database_url)
             } else {
                 database_url
             };
-            
+
             let path = Path::new(db_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -45,14 +45,14 @@ impl DatabaseManager {
             }
         }
 
-        // 规范化数据库URL，确保具有写权限
+        // Normalize the database URL to ensure write permissions
         let mut url_owned = database_url.to_string();
         // Ensure absolute paths use sqlite:// prefix (three slashes after scheme)
         if url_owned.starts_with("sqlite:/") && !url_owned.starts_with("sqlite://") {
             url_owned = url_owned.replacen("sqlite:/", "sqlite://", 1);
         }
         let normalized_url = if url_owned.starts_with("sqlite:") {
-            // 如果已经有sqlite前缀，检查是否有mode参数
+            // If it already has the sqlite prefix, check for mode parameter
             if url_owned.contains("mode=") {
                 url_owned
             } else {
@@ -60,48 +60,50 @@ impl DatabaseManager {
                 format!("{}{}mode=rwc", url_owned, separator)
             }
         } else {
-            // 使用 URL 形式，确保为 sqlite:// 路径，避免某些平台的权限问题
+            // Use URL form, ensure it is a sqlite:// path to avoid permission issues on some platforms
             format!("sqlite://{}?mode=rwc", url_owned)
         };
 
-        // 创建连接池
+        // Create connection pool
         let pool = SqlitePool::connect(&normalized_url)
             .await
             .context("Failed to connect to database")?;
 
-        // 初始化加密服务
+        // Initialize encryption service
         let encryption = match env::var("OPENACT_MASTER_KEY") {
             Ok(_) => Some(FieldEncryption::from_env()?),
             Err(_) => {
-                tracing::warn!("OPENACT_MASTER_KEY not set, sensitive fields will not be encrypted");
+                tracing::warn!(
+                    "OPENACT_MASTER_KEY not set, sensitive fields will not be encrypted"
+                );
                 None
             }
         };
 
         let manager = Self { pool, encryption };
-        
-        // 初始化数据库schema
+
+        // Initialize database schema
         manager.initialize_schema().await?;
-        
+
         Ok(manager)
     }
 
-    /// 获取连接池
+    /// Get the connection pool
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
-    /// 获取加密服务
+    /// Get the encryption service
     pub fn encryption(&self) -> &Option<FieldEncryption> {
         &self.encryption
     }
 
-    /// 创建 ConnectionRepository
+    /// Create a ConnectionRepository
     pub fn connection_repository(&self) -> ConnectionRepository {
         ConnectionRepository::new(self.pool.clone(), self.encryption.clone())
     }
 
-    /// 初始化数据库schema - 使用迁移系统
+    /// Initialize the database schema - using the migration system
     async fn initialize_schema(&self) -> Result<()> {
         // Global migration lock to avoid concurrent UNIQUE(_sqlx_migrations.version) errors in tests
         static MIGRATION_LOCK: TokioOnceCell<TokioMutex<()>> = TokioOnceCell::const_new();
@@ -111,12 +113,10 @@ impl DatabaseManager {
             .lock()
             .await;
         tracing::info!("Running database migrations...");
-        
-        // 运行所有待执行的迁移
-        let migration_result = sqlx::migrate!("./migrations")
-            .run(&self.pool)
-            .await;
-            
+
+        // Run all pending migrations
+        let migration_result = sqlx::migrate!("./migrations").run(&self.pool).await;
+
         match migration_result {
             Ok(_) => {
                 tracing::info!("Database migrations completed successfully");
@@ -161,8 +161,7 @@ impl DatabaseManager {
         }
     }
 
-
-    /// 健康检查
+    /// Health check
     pub async fn health_check(&self) -> Result<()> {
         sqlx::query("SELECT 1")
             .fetch_one(&self.pool)
@@ -171,11 +170,12 @@ impl DatabaseManager {
         Ok(())
     }
 
-    /// 获取数据库统计信息
+    /// Get database statistics
     pub async fn get_stats(&self) -> Result<DatabaseStats> {
-        let auth_connections_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM auth_connections")
-            .fetch_one(&self.pool)
-            .await?;
+        let auth_connections_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM auth_connections")
+                .fetch_one(&self.pool)
+                .await?;
 
         let connections_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM connections")
             .fetch_one(&self.pool)
@@ -192,7 +192,7 @@ impl DatabaseManager {
         })
     }
 
-    /// 清理过期的认证连接
+    /// Cleanup expired authentication connections
     pub async fn cleanup_expired_auth_connections(&self) -> Result<u64> {
         let result = sqlx::query("DELETE FROM auth_connections WHERE expires_at < datetime('now')")
             .execute(&self.pool)
@@ -203,7 +203,7 @@ impl DatabaseManager {
     }
 }
 
-/// 数据库统计信息
+/// Database statistics
 #[derive(Debug, Clone)]
 pub struct DatabaseStats {
     pub auth_connections_count: i64,
@@ -223,11 +223,11 @@ mod tests {
         let database_url = db_path.to_string_lossy().to_string();
 
         let manager = DatabaseManager::new(&database_url).await.unwrap();
-        
-        // 健康检查
+
+        // Health check
         manager.health_check().await.unwrap();
-        
-        // 获取统计信息
+
+        // Get statistics
         let stats = manager.get_stats().await.unwrap();
         assert_eq!(stats.auth_connections_count, 0);
         assert_eq!(stats.connections_count, 0);
@@ -240,7 +240,7 @@ mod tests {
         let manager = DatabaseManager::new(database_url).await.unwrap();
         let _repo = manager.connection_repository();
 
-        // 测试repository创建成功（通过健康检查验证）
+        // Test repository creation success (verified by health check)
         manager.health_check().await.unwrap();
     }
 }

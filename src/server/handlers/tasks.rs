@@ -42,7 +42,7 @@ pub struct ListQuery {
 ))]
 pub async fn list(
     State(svc): State<OpenActService>,
-    Query(q): Query<ListQuery>
+    Query(q): Query<ListQuery>,
 ) -> impl IntoResponse {
     match svc
         .list_tasks(q.connection_trn.as_deref(), q.limit, q.offset)
@@ -69,19 +69,23 @@ pub async fn list(
 ))]
 pub async fn create(
     State(svc): State<OpenActService>,
-    Json(req): Json<TaskUpsertRequest>
+    Json(req): Json<TaskUpsertRequest>,
 ) -> impl IntoResponse {
-
     // Validate TRN format
     use crate::utils::trn::parse_task_trn;
     if let Err(e) = parse_task_trn(&req.trn) {
-        return helpers::validation_error("invalid_input", format!("Invalid TRN format: {}", e)).into_response();
+        return helpers::validation_error("invalid_input", format!("Invalid TRN format: {}", e))
+            .into_response();
     }
-    
+
     // Validate connection TRN format
     use crate::utils::trn::parse_connection_trn;
     if let Err(e) = parse_connection_trn(&req.connection_trn) {
-        return helpers::validation_error("invalid_input", format!("Invalid connection TRN format: {}", e)).into_response();
+        return helpers::validation_error(
+            "invalid_input",
+            format!("Invalid connection TRN format: {}", e),
+        )
+        .into_response();
     }
 
     // Convert DTO to config with metadata (new creation)
@@ -114,10 +118,7 @@ pub async fn create(
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn get(
-    State(svc): State<OpenActService>,
-    Path(trn): Path<String>
-) -> impl IntoResponse {
+pub async fn get(State(svc): State<OpenActService>, Path(trn): Path<String>) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }
@@ -191,10 +192,7 @@ pub async fn update(
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn del(
-    State(svc): State<OpenActService>,
-    Path(trn): Path<String>
-) -> impl IntoResponse {
+pub async fn del(State(svc): State<OpenActService>, Path(trn): Path<String>) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }

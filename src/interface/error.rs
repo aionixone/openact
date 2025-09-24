@@ -17,7 +17,12 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { code: code.into(), message: message.into(), details: None, hints: None }
+        Self {
+            code: code.into(),
+            message: message.into(),
+            details: None,
+            hints: None,
+        }
     }
     pub fn with_details(mut self, details: serde_json::Value) -> Self {
         self.details = Some(details);
@@ -46,42 +51,36 @@ impl axum::response::IntoResponse for ApiError {
 /// Error helper functions for consistent error responses
 pub mod helpers {
     use super::ApiError;
-    
+
     pub fn validation_error(subtype: &str, message: impl Into<String>) -> ApiError {
-        ApiError::new(format!("validation.{}", subtype), message)
-            .with_hints([
-                "Check required fields",
-                "Verify parameter formats",
-                "See API docs for this endpoint",
-            ])
+        ApiError::new(format!("validation.{}", subtype), message).with_hints([
+            "Check required fields",
+            "Verify parameter formats",
+            "See API docs for this endpoint",
+        ])
     }
-    
+
     pub fn not_found_error(resource: &str) -> ApiError {
-        ApiError::new(format!("not_found.{}", resource), "not found")
-            .with_hints([
-                "Verify the identifier (TRN) is correct",
-                "List resources to confirm existence",
-                "Check tenant/context",
-            ])
+        ApiError::new(format!("not_found.{}", resource), "not found").with_hints([
+            "Verify the identifier (TRN) is correct",
+            "List resources to confirm existence",
+            "Check tenant/context",
+        ])
     }
-    
+
     pub fn storage_error(message: impl Into<String>) -> ApiError {
-        ApiError::new("internal.storage_error", message)
-            .with_hints([
-                "Retry later",
-                "Check database connectivity",
-                "Inspect server logs for details",
-            ])
+        ApiError::new("internal.storage_error", message).with_hints([
+            "Retry later",
+            "Check database connectivity",
+            "Inspect server logs for details",
+        ])
     }
-    
+
     pub fn execution_error(message: impl Into<String>) -> ApiError {
-        ApiError::new("internal.execution_failed", message)
-            .with_hints([
-                "Retry the request",
-                "Check network/endpoint availability",
-                "Validate authentication/authorization",
-            ])
+        ApiError::new("internal.execution_failed", message).with_hints([
+            "Retry the request",
+            "Check network/endpoint availability",
+            "Validate authentication/authorization",
+        ])
     }
 }
-
-

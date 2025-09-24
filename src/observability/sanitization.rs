@@ -3,33 +3,34 @@
 //! Provides functions to sanitize sensitive data from logs, error messages,
 //! and debug output to prevent credential leakage.
 
-use serde_json::{Value, Map};
+use serde_json::{Map, Value};
 use std::collections::HashSet;
 
 /// List of sensitive field names that should be redacted in logs
 static SENSITIVE_FIELDS: &[&str] = &[
     "client_secret",
-    "refresh_token", 
+    "refresh_token",
     "access_token",
     "api_key_value",
     "password",
     "authorization", // for HTTP Authorization headers
-    "token", // generic token fields
-    "secret", // generic secret fields
-    "key", // generic key fields that might contain secrets
+    "token",         // generic token fields
+    "secret",        // generic secret fields
+    "key",           // generic key fields that might contain secrets
 ];
 
 /// Create a sanitized string representation for logging
-/// 
+///
 /// This function takes any serializable value and returns a sanitized JSON string
 /// where sensitive fields are replaced with "[REDACTED]"
 pub fn sanitize_for_logging<T: serde::Serialize>(data: &T) -> String {
     match serde_json::to_value(data) {
         Ok(value) => {
             let sanitized = sanitize_json_value(value);
-            serde_json::to_string(&sanitized).unwrap_or_else(|_| "[SERIALIZATION_ERROR]".to_string())
+            serde_json::to_string(&sanitized)
+                .unwrap_or_else(|_| "[SERIALIZATION_ERROR]".to_string())
         }
-        Err(_) => "[SERIALIZATION_ERROR]".to_string()
+        Err(_) => "[SERIALIZATION_ERROR]".to_string(),
     }
 }
 
@@ -41,10 +42,8 @@ pub fn sanitize_json_value(mut value: Value) -> Value {
             Value::Object(map.clone())
         }
         Value::Array(arr) => {
-            let sanitized: Vec<Value> = arr
-                .iter()
-                .map(|v| sanitize_json_value(v.clone()))
-                .collect();
+            let sanitized: Vec<Value> =
+                arr.iter().map(|v| sanitize_json_value(v.clone())).collect();
             Value::Array(sanitized)
         }
         _ => value,
@@ -54,13 +53,14 @@ pub fn sanitize_json_value(mut value: Value) -> Value {
 /// Sanitize a JSON object by redacting sensitive fields
 fn sanitize_json_object(map: &mut Map<String, Value>) {
     let sensitive_set: HashSet<&str> = SENSITIVE_FIELDS.iter().cloned().collect();
-    
+
     for (key, value) in map.iter_mut() {
         let key_lower = key.to_lowercase();
-        
+
         // Check if this field should be redacted
-        if sensitive_set.contains(key_lower.as_str()) || 
-           sensitive_set.iter().any(|&field| key_lower.contains(field)) {
+        if sensitive_set.contains(key_lower.as_str())
+            || sensitive_set.iter().any(|&field| key_lower.contains(field))
+        {
             *value = Value::String("[REDACTED]".to_string());
         } else {
             // Recursively sanitize nested objects and arrays
@@ -86,7 +86,7 @@ pub fn sanitize_url(url: &str) -> String {
     // Simple URL sanitization without external dependencies
     // Look for common sensitive query parameters and redact them
     let mut sanitized = url.to_string();
-    
+
     for &field in SENSITIVE_FIELDS {
         let patterns = [
             format!("{}=", field),
@@ -94,7 +94,7 @@ pub fn sanitize_url(url: &str) -> String {
             format!("{}:", field),
             format!("{} :", field),
         ];
-        
+
         for pattern in &patterns {
             if let Some(start) = sanitized.find(pattern) {
                 let after_pattern = start + pattern.len();
@@ -108,14 +108,14 @@ pub fn sanitize_url(url: &str) -> String {
             }
         }
     }
-    
+
     sanitized
 }
 
 /// Sanitize an error message by removing sensitive information
 pub fn sanitize_error_message(error_msg: &str) -> String {
     let mut sanitized = error_msg.to_string();
-    
+
     // Simple pattern-based sanitization without regex
     for &field in SENSITIVE_FIELDS {
         // Look for patterns like "field":"value" or field=value
@@ -127,7 +127,7 @@ pub fn sanitize_error_message(error_msg: &str) -> String {
             format!("{}=\"", field),
             format!("{} =\"", field),
         ];
-        
+
         for pattern in &patterns {
             if let Some(start) = sanitized.find(pattern) {
                 let after_pattern = start + pattern.len();
@@ -138,7 +138,7 @@ pub fn sanitize_error_message(error_msg: &str) -> String {
             }
         }
     }
-    
+
     // Handle Bearer and Basic auth patterns
     if let Some(start) = sanitized.find("Bearer ") {
         let after_bearer = start + 7; // length of "Bearer "
@@ -150,7 +150,7 @@ pub fn sanitize_error_message(error_msg: &str) -> String {
             sanitized.replace_range(after_bearer.., "[REDACTED]");
         }
     }
-    
+
     if let Some(start) = sanitized.find("Basic ") {
         let after_basic = start + 6; // length of "Basic "
         if let Some(end) = sanitized[after_basic..].find(' ') {
@@ -161,7 +161,7 @@ pub fn sanitize_error_message(error_msg: &str) -> String {
             sanitized.replace_range(after_basic.., "[REDACTED]");
         }
     }
-    
+
     sanitized
 }
 
@@ -194,7 +194,7 @@ mod tests {
         let input = json!({
             "user_id": "123",
             "client_secret": "secret123",
-            "access_token": "token456", 
+            "access_token": "token456",
             "api_key_value": "key789",
             "password": "pass123",
             "normal_field": "normal_value",
@@ -205,7 +205,7 @@ mod tests {
         });
 
         let sanitized = sanitize_json_value(input);
-        
+
         assert_eq!(sanitized["user_id"], "123");
         assert_eq!(sanitized["client_secret"], "[REDACTED]");
         assert_eq!(sanitized["access_token"], "[REDACTED]");
@@ -220,7 +220,7 @@ mod tests {
     fn test_sanitize_url() {
         let url = "https://oauth.example.com/token?client_id=123&client_secret=secret&scope=read";
         let sanitized = sanitize_url(url);
-        
+
         assert!(sanitized.contains("client_id=123"));
         assert!(sanitized.contains("client_secret=[REDACTED]"));
         assert!(sanitized.contains("scope=read"));
@@ -230,7 +230,7 @@ mod tests {
     fn test_sanitize_error_message() {
         let error_msg = r#"OAuth error: {"client_secret":"secret123","access_token":"token456"}"#;
         let sanitized = sanitize_error_message(error_msg);
-        
+
         assert!(sanitized.contains("[REDACTED]"));
         assert!(!sanitized.contains("secret123"));
         assert!(!sanitized.contains("token456"));
@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn test_sanitize_for_logging() {
         use crate::models::connection::OAuth2Parameters;
-        
+
         let oauth = OAuth2Parameters {
             client_id: "test_client".to_string(),
             client_secret: "secret123".to_string(),
@@ -248,9 +248,9 @@ mod tests {
             redirect_uri: None,
             use_pkce: Some(false),
         };
-        
+
         let sanitized = sanitize_for_logging(&oauth);
-        
+
         assert!(sanitized.contains("test_client"));
         assert!(sanitized.contains("[REDACTED]"));
         assert!(!sanitized.contains("secret123"));

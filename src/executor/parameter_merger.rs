@@ -1,6 +1,6 @@
-//! 参数合并器
+//! Parameter Merger
 //!
-//! 实现"ConnectionWins"合并策略：Connection参数覆盖Task相同参数
+//! Implements the "ConnectionWins" merge strategy: Connection parameters override Task parameters with the same key
 
 use crate::models::{ConnectionConfig, TaskConfig};
 use anyhow::{Result, anyhow};
@@ -8,7 +8,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// 合并后的参数
+/// Merged parameters
 #[derive(Debug, Clone)]
 pub struct MergedParameters {
     pub headers: HeaderMap,
@@ -18,11 +18,11 @@ pub struct MergedParameters {
     pub method: String,
 }
 
-/// 参数合并器
+/// Parameter Merger
 pub struct ParameterMerger;
 
 impl ParameterMerger {
-    /// 合并Connection和Task参数，Connection参数优先
+    /// Merges Connection and Task parameters, with Connection parameters taking precedence
     pub fn merge(connection: &ConnectionConfig, task: &TaskConfig) -> Result<MergedParameters> {
         let mut merged = MergedParameters {
             headers: HeaderMap::new(),
@@ -32,30 +32,30 @@ impl ParameterMerger {
             method: task.method.clone(),
         };
 
-        // 1. 先添加Task的参数作为基础
+        // 1. Add Task parameters as the base
         Self::merge_task_headers(&mut merged.headers, task)?;
         Self::merge_task_query_params(&mut merged.query_params, task)?;
         merged.body = task.request_body.clone();
 
-        // 2. 再添加Connection的默认参数（覆盖相同key）
+        // 2. Add Connection default parameters (override same keys)
         Self::merge_connection_headers(&mut merged.headers, connection)?;
         Self::merge_connection_query_params(&mut merged.query_params, connection)?;
         Self::merge_connection_body(&mut merged.body, connection)?;
 
-        // 3. 应用 HttpPolicy（禁止头/保留头/追加多值）
+        // 3. Apply HttpPolicy (deny headers/reserve headers/append multi-values)
         Self::apply_http_policy(&mut merged.headers, connection, task)?;
 
         Ok(merged)
     }
 
-    /// 合并Task的headers
+    /// Merge Task headers
     fn merge_task_headers(headers: &mut HeaderMap, task: &TaskConfig) -> Result<()> {
         if let Some(task_headers) = &task.headers {
             for (key, multi_value) in task_headers {
                 let header_name = HeaderName::from_bytes(key.as_bytes())
                     .map_err(|e| anyhow!("Invalid header name '{}': {}", key, e))?;
 
-                // 对于MultiValue (Vec<String>)，我们合并所有值
+                // For MultiValue (Vec<String>), merge all values
                 let header_value = if multi_value.len() == 1 {
                     HeaderValue::from_str(&multi_value[0])
                         .map_err(|e| anyhow!("Invalid header value '{}': {}", multi_value[0], e))?
@@ -71,7 +71,7 @@ impl ParameterMerger {
         Ok(())
     }
 
-    /// 合并Task的query参数
+    /// Merge Task query parameters
     fn merge_task_query_params(
         query_params: &mut HashMap<String, String>,
         task: &TaskConfig,
@@ -81,7 +81,7 @@ impl ParameterMerger {
                 let value = if multi_value.len() == 1 {
                     multi_value[0].clone()
                 } else {
-                    multi_value.join(",") // 用逗号分隔多值
+                    multi_value.join(",") // Join multi-values with a comma
                 };
                 query_params.insert(key.clone(), value);
             }
@@ -89,7 +89,7 @@ impl ParameterMerger {
         Ok(())
     }
 
-    /// 合并Connection的headers（来自invocation_http_parameters）
+    /// Merge Connection headers (from invocation_http_parameters)
     fn merge_connection_headers(
         headers: &mut HeaderMap,
         connection: &ConnectionConfig,
@@ -101,35 +101,35 @@ impl ParameterMerger {
                 let header_value = HeaderValue::from_str(&header_param.value)
                     .map_err(|e| anyhow!("Invalid header value '{}': {}", header_param.value, e))?;
 
-                // ConnectionWins: 覆盖已存在的header
+                // ConnectionWins: Override existing header
                 headers.insert(header_name, header_value);
             }
         }
         Ok(())
     }
 
-    /// 合并Connection的query参数
+    /// Merge Connection query parameters
     fn merge_connection_query_params(
         query_params: &mut HashMap<String, String>,
         connection: &ConnectionConfig,
     ) -> Result<()> {
         if let Some(invocation_params) = &connection.invocation_http_parameters {
             for query_param in &invocation_params.query_string_parameters {
-                // ConnectionWins: 覆盖已存在的query参数
+                // ConnectionWins: Override existing query parameters
                 query_params.insert(query_param.key.clone(), query_param.value.clone());
             }
         }
         Ok(())
     }
 
-    /// 合并Connection的body参数
+    /// Merge Connection body parameters
     fn merge_connection_body(
         body: &mut Option<Value>,
         connection: &ConnectionConfig,
     ) -> Result<()> {
         if let Some(invocation_params) = &connection.invocation_http_parameters {
             if !invocation_params.body_parameters.is_empty() {
-                // 将body_parameters转换为JSON对象
+                // Convert body_parameters to a JSON object
                 let mut body_obj = serde_json::Map::new();
                 for body_param in &invocation_params.body_parameters {
                     body_obj.insert(
@@ -140,18 +140,18 @@ impl ParameterMerger {
 
                 match body {
                     Some(existing_body) => {
-                        // 如果Task已有body，合并（ConnectionWins）
+                        // If Task already has a body, merge (ConnectionWins)
                         if let Some(existing_obj) = existing_body.as_object_mut() {
                             for (key, value) in body_obj {
-                                existing_obj.insert(key, value); // 覆盖已存在的key
+                                existing_obj.insert(key, value); // Override existing key
                             }
                         } else {
-                            // Task的body不是对象，直接替换
+                            // Task's body is not an object, directly replace
                             *body = Some(Value::Object(body_obj));
                         }
                     }
                     None => {
-                        // Task没有body，直接使用Connection的body
+                        // Task has no body, directly use Connection's body
                         *body = Some(Value::Object(body_obj));
                     }
                 }
@@ -165,7 +165,7 @@ impl ParameterMerger {
         connection: &ConnectionConfig,
         task: &TaskConfig,
     ) -> Result<()> {
-        // 选择策略：task优先于connection；若都无则默认
+        // Select policy: task takes precedence over connection; default if neither
         let policy = task
             .http_policy
             .as_ref()
@@ -173,7 +173,7 @@ impl ParameterMerger {
             .cloned()
             .unwrap_or_default();
 
-        // 0) 验证头部总数限制
+        // 0) Validate total header count limit
         if headers.len() > policy.max_total_headers {
             return Err(anyhow!(
                 "Too many headers: {} exceeds limit of {}",
@@ -182,7 +182,7 @@ impl ParameterMerger {
             ));
         }
 
-        // 1) 删除禁止头
+        // 1) Remove denied headers
         let denied_headers_lower: Vec<String> = policy
             .denied_headers
             .iter()
@@ -199,12 +199,12 @@ impl ParameterMerger {
             headers.remove(name);
         }
 
-        // 2) 验证头部值长度和内容
+        // 2) Validate header value length and content
         let mut invalid_headers = Vec::new();
         for (name, value) in headers.iter() {
             let value_str = value.to_str().unwrap_or("");
 
-            // 检查头部值长度
+            // Check header value length
             if value_str.len() > policy.max_header_value_length {
                 if policy.drop_forbidden_headers {
                     invalid_headers.push(name.clone());
@@ -219,7 +219,7 @@ impl ParameterMerger {
                 }
             }
 
-            // 检查Content-Type是否允许
+            // Check if Content-Type is allowed
             if name.as_str().to_lowercase() == "content-type"
                 && !policy.allowed_content_types.is_empty()
             {
@@ -243,7 +243,7 @@ impl ParameterMerger {
                 }
             }
 
-            // 检查恶意头部值
+            // Check for malicious header values
             if Self::is_malicious_header_value(value_str) {
                 if policy.drop_forbidden_headers {
                     invalid_headers.push(name.clone());
@@ -257,17 +257,17 @@ impl ParameterMerger {
             }
         }
 
-        // 移除违规头部
+        // Remove invalid headers
         for name in invalid_headers {
             headers.remove(name);
         }
 
-        // 3) 头部名称标准化
+        // 3) Normalize header names
         if policy.normalize_header_names {
             Self::normalize_header_names(headers)?;
         }
 
-        // 4) 保留头名单：若 task 显式提供了保留头，则以 task 的值为准，覆盖 ConnectionWins 结果
+        // 4) Reserved headers: if task explicitly provides reserved headers, use task's value, overriding ConnectionWins result
         if let Some(task_headers) = &task.headers {
             for rkey in policy.reserved_headers.iter() {
                 let rkey_lc = rkey.to_lowercase();
@@ -289,12 +289,12 @@ impl ParameterMerger {
             }
         }
 
-        // 5) 多值追加头：如果头存在多个值，合并为逗号分隔
+        // 5) Multi-value append headers: if a header has multiple values, merge them into a comma-separated list
         for key in policy.multi_value_append_headers.iter() {
             if let Ok(name) = HeaderName::from_bytes(key.as_bytes()) {
                 if let Some(val) = headers.get(&name) {
                     let s = val.to_str().unwrap_or("");
-                    // 标准化：用逗号分隔，去重并排序
+                    // Normalize: comma-separated, deduplicate, and sort
                     let mut values: Vec<&str> = s
                         .split(',')
                         .map(|v| v.trim())
@@ -313,19 +313,19 @@ impl ParameterMerger {
         Ok(())
     }
 
-    /// 检查头部值是否包含恶意内容
+    /// Check if a header value contains malicious content
     fn is_malicious_header_value(value: &str) -> bool {
-        // 检查CRLF注入
+        // Check for CRLF injection
         if value.contains('\r') || value.contains('\n') {
             return true;
         }
 
-        // 检查控制字符
+        // Check for control characters
         if value.chars().any(|c| c.is_control() && c != '\t') {
             return true;
         }
 
-        // 检查可疑脚本标签
+        // Check for suspicious script tags
         let value_lower = value.to_lowercase();
         if value_lower.contains("<script")
             || value_lower.contains("javascript:")
@@ -337,11 +337,11 @@ impl ParameterMerger {
         false
     }
 
-    /// 标准化头部名称（转换为小写）
+    /// Normalize header names (convert to lowercase)
     fn normalize_header_names(headers: &mut HeaderMap) -> Result<()> {
         let mut headers_to_update = Vec::new();
 
-        // 收集需要标准化的头部
+        // Collect headers that need normalization
         for (name, value) in headers.iter() {
             let name_str = name.as_str();
             let normalized = name_str.to_lowercase();
@@ -350,7 +350,7 @@ impl ParameterMerger {
             }
         }
 
-        // 更新头部名称
+        // Update header names
         for (old_name, value, normalized) in headers_to_update {
             headers.remove(&old_name);
             if let Ok(new_name) = HeaderName::from_bytes(normalized.as_bytes()) {
@@ -381,14 +381,14 @@ mod tests {
                     value: "v2".to_string(),
                 },
                 HttpParameter {
-                    key: "Content-Type".to_string(), // 这个会覆盖Task的
+                    key: "Content-Type".to_string(), // This will override Task's
                     value: "application/json; charset=utf-8".to_string(),
                 },
             ],
             query_string_parameters: vec![
                 HttpParameter {
                     key: "limit".to_string(),
-                    value: "100".to_string(), // 这个会覆盖Task的
+                    value: "100".to_string(), // This will override Task's
                 },
                 HttpParameter {
                     key: "format".to_string(),
@@ -557,7 +557,7 @@ mod tests {
 
         let merged = ParameterMerger::merge(&connection, &task).unwrap();
 
-        // 验证headers：Connection覆盖Task
+        // Verify headers: Connection overrides Task
         assert_eq!(
             merged
                 .headers
@@ -565,7 +565,7 @@ mod tests {
                 .unwrap()
                 .to_str()
                 .unwrap(),
-            "application/json; charset=utf-8" // Connection的值
+            "application/json; charset=utf-8" // Connection's value
         );
         // Multi-value append normalization: task provided two values → comma joined
         let accept = merged.headers.get("Accept").unwrap().to_str().unwrap();
@@ -578,19 +578,19 @@ mod tests {
                 .unwrap()
                 .to_str()
                 .unwrap(),
-            "v2" // Connection的值
+            "v2" // Connection's value
         );
         // Denied headers removed
         assert!(merged.headers.get("host").is_none());
 
-        // 验证query参数：Connection覆盖Task
-        assert_eq!(merged.query_params.get("limit").unwrap(), "100"); // Connection的值
-        assert_eq!(merged.query_params.get("offset").unwrap(), "0"); // Task的值（没有冲突）
-        assert_eq!(merged.query_params.get("format").unwrap(), "json"); // Connection的值
+        // Verify query parameters: Connection overrides Task
+        assert_eq!(merged.query_params.get("limit").unwrap(), "100"); // Connection's value
+        assert_eq!(merged.query_params.get("offset").unwrap(), "0"); // Task's value (no conflict)
+        assert_eq!(merged.query_params.get("format").unwrap(), "json"); // Connection's value
 
-        // 验证body：Connection参数合并到Task的body中
+        // Verify body: Connection parameters merged into Task's body
         let body = merged.body.unwrap();
-        assert_eq!(body["existing"], "value"); // Task的值
-        assert_eq!(body["source"], "connection"); // Connection的值
+        assert_eq!(body["existing"], "value"); // Task's value
+        assert_eq!(body["source"], "connection"); // Connection's value
     }
 }

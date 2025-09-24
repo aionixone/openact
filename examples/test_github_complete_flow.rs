@@ -4,10 +4,10 @@ use serde_json::json;
 use stepflow_dsl::WorkflowDSL;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🚀 GitHub OAuth2 完整流程测试");
+    println!("🚀 GitHub OAuth2 Complete Flow Test");
     println!("================================");
 
-    // 设置环境变量
+    // Set environment variables
     unsafe {
         std::env::set_var("GITHUB_CLIENT_ID", "Ov23lihVkExosE0hR0Bh");
         std::env::set_var("GITHUB_CLIENT_SECRET", "1766570dda50d46701559cc7b86e9d315cb2f23a");
@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let router = DefaultRouter;
     
-    // 创建 GitHub OAuth2 工作流 DSL
+    // Create GitHub OAuth2 Workflow DSL
     let dsl = serde_json::from_value::<WorkflowDSL>(json!({
         "version": "1.0",
         "startAt": "Config",
@@ -127,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }))?;
 
-    // 创建初始上下文
+    // Create initial context
     let context = json!({
         "input": {
             "tenant": "test-tenant",
@@ -139,78 +139,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    println!("📋 步骤 1: 执行到 AwaitCallback 状态...");
+    println!("📋 Step 1: Execute until AwaitCallback state...");
     
-    // 执行到 AwaitCallback 状态
+    // Execute until AwaitCallback state
     match run_until_pause_or_end(&dsl, "Config", context.clone(), &router, 100) {
         Ok(RunOutcome::Pending(pending_info)) => {
-            println!("✅ 流程暂停在 AwaitCallback 状态");
-            println!("📋 执行 ID: {}", pending_info.run_id);
-            println!("📋 下一个状态: {}", pending_info.next_state);
+            println!("✅ Flow paused at AwaitCallback state");
+            println!("📋 Execution ID: {}", pending_info.run_id);
+            println!("📋 Next state: {}", pending_info.next_state);
             
-            // 获取授权 URL
+            // Retrieve authorization URL
             if let Some(authorize_url) = pending_info.context.pointer("/states/StartAuth/result/authorize_url") {
-                println!("🔗 授权 URL: {}", authorize_url);
+                println!("🔗 Authorization URL: {}", authorize_url);
             }
             
-            // 模拟用户授权，注入授权码
-            println!("🔄 步骤 2: 模拟用户授权...");
+            // Simulate user authorization, inject authorization code
+            println!("🔄 Step 2: Simulate user authorization...");
             let mut continue_context = pending_info.context;
             continue_context["code"] = json!("mock_auth_code_12345");
             continue_context["state"] = continue_context.pointer("/vars/auth_state").cloned().unwrap_or(json!(""));
             
-            println!("📋 注入授权码: mock_auth_code_12345");
+            println!("📋 Inject authorization code: mock_auth_code_12345");
             
-            // 从 AwaitCallback 状态继续执行
-            println!("🚀 步骤 3: 从 AwaitCallback 状态继续执行...");
+            // Continue execution from AwaitCallback state
+            println!("🚀 Step 3: Continue execution from AwaitCallback state...");
             match run_until_pause_or_end(&dsl, "AwaitCallback", continue_context, &router, 100) {
                 Ok(RunOutcome::Finished(final_context)) => {
-                    println!("🎉 流程执行完成！");
-                    println!("📋 最终状态:");
+                    println!("🎉 Flow execution completed!");
+                    println!("📋 Final state:");
                     println!("{}", serde_json::to_string_pretty(&final_context)?);
                     
-                    // 检查各个状态的结果
+                    // Check results of each state
                     if let Some(config_result) = final_context.pointer("/states/Config/result") {
-                        println!("✅ Config 状态结果: {}", config_result);
+                        println!("✅ Config state result: {}", config_result);
                     }
                     
                     if let Some(start_auth_result) = final_context.pointer("/states/StartAuth/result") {
-                        println!("✅ StartAuth 状态结果: {}", start_auth_result);
+                        println!("✅ StartAuth state result: {}", start_auth_result);
                     }
                     
                     if let Some(await_callback_result) = final_context.pointer("/states/AwaitCallback/result") {
-                        println!("✅ AwaitCallback 状态结果: {}", await_callback_result);
+                        println!("✅ AwaitCallback state result: {}", await_callback_result);
                     }
                     
                     if let Some(exchange_token_result) = final_context.pointer("/states/ExchangeToken/result") {
-                        println!("✅ ExchangeToken 状态结果: {}", exchange_token_result);
+                        println!("✅ ExchangeToken state result: {}", exchange_token_result);
                     }
                     
                     if let Some(get_user_result) = final_context.pointer("/states/GetUser/result") {
-                        println!("✅ GetUser 状态结果: {}", get_user_result);
+                        println!("✅ GetUser state result: {}", get_user_result);
                     }
                     
                     if let Some(persist_connection_result) = final_context.pointer("/states/PersistConnection/result") {
-                        println!("✅ PersistConnection 状态结果: {}", persist_connection_result);
+                        println!("✅ PersistConnection state result: {}", persist_connection_result);
                     }
                     
-                    println!("🎯 GitHub OAuth2 完整流程测试成功完成！");
+                    println!("🎯 GitHub OAuth2 Complete Flow Test successfully completed!");
                     
                 }
                 Ok(RunOutcome::Pending(pending_info)) => {
-                    println!("⚠️  流程再次暂停: {}", pending_info.next_state);
+                    println!("⚠️  Flow paused again: {}", pending_info.next_state);
                 }
                 Err(e) => {
-                    println!("❌ 继续执行失败: {}", e);
+                    println!("❌ Continue execution failed: {}", e);
                 }
             }
         }
         Ok(RunOutcome::Finished(context)) => {
-            println!("✅ 流程直接完成（未暂停）");
-            println!("📋 结果: {}", serde_json::to_string_pretty(&context)?);
+            println!("✅ Flow completed directly (no pause)");
+            println!("📋 Result: {}", serde_json::to_string_pretty(&context)?);
         }
         Err(e) => {
-            println!("❌ 执行失败: {}", e);
+            println!("❌ Execution failed: {}", e);
         }
     }
 

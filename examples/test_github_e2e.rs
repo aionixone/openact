@@ -5,29 +5,29 @@ use std::fs;
 use stepflow_dsl::dsl::WorkflowDSL;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🚀 GitHub OAuth2 端到端测试");
+    println!("🚀 GitHub OAuth2 End-to-End Test");
     println!("============================");
 
-    // 检查环境变量
+    // Check environment variables
     let client_id = std::env::var("GITHUB_CLIENT_ID")
-        .map_err(|_| "请设置 GITHUB_CLIENT_ID 环境变量")?;
+        .map_err(|_| "Please set the GITHUB_CLIENT_ID environment variable")?;
     let client_secret = std::env::var("GITHUB_CLIENT_SECRET")
-        .map_err(|_| "请设置 GITHUB_CLIENT_SECRET 环境变量")?;
+        .map_err(|_| "Please set the GITHUB_CLIENT_SECRET environment variable")?;
 
-    println!("✅ 环境变量检查通过");
+    println!("✅ Environment variables check passed");
     println!("   Client ID: {}...", &client_id[..8.min(client_id.len())]);
 
-    // 加载 GitHub OAuth2 模板
+    // Load GitHub OAuth2 template
     let template_content = fs::read_to_string("templates/providers/github/oauth2.json")?;
     let template: serde_json::Value = serde_json::from_str(&template_content)?;
     
-    // 提取 OAuth 流程
+    // Extract OAuth flow
     let oauth_flow = template["provider"]["flows"]["OAuth"].clone();
     let dsl: WorkflowDSL = serde_json::from_value(oauth_flow)?;
     
-    println!("📋 DSL 验证: {:?}", dsl.validate());
+    println!("📋 DSL Validation: {:?}", dsl.validate());
 
-    // 准备输入上下文
+    // Prepare input context
     let input_context = json!({
         "input": {
             "tenant": "test-tenant",
@@ -40,111 +40,111 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    println!("🔧 输入上下文准备完成");
+    println!("🔧 Input context prepared");
 
-    // 创建路由器
+    // Create router
     let router = DefaultRouter;
 
-    // 运行流程直到暂停或完成
-    println!("🔧 运行完整 OAuth2 流程...");
+    // Run the flow until pause or completion
+    println!("🔧 Running full OAuth2 flow...");
     let result = run_until_pause_or_end(&dsl, &dsl.start_at, input_context, &router, 100)?;
 
     match result {
         RunOutcome::Pending(pending_info) => {
-            println!("✅ 流程暂停，等待用户授权");
+            println!("✅ Flow paused, waiting for user authorization");
             
-            // 提取授权 URL
+            // Extract authorization URL
             if let Some(url) = pending_info.context
                 .pointer("/states/StartAuth/result/authorize_url")
                 .and_then(|v| v.as_str()) {
-                println!("🔗 授权 URL:");
+                println!("🔗 Authorization URL:");
                 println!("{}", url);
                 println!();
-                println!("📝 下一步操作:");
-                println!("   1. 在浏览器中访问上面的授权 URL");
-                println!("   2. 登录 GitHub 并授权应用");
-                println!("   3. 从回调 URL 中获取授权码");
-                println!("   4. 使用授权码继续流程");
+                println!("📝 Next steps:");
+                println!("   1. Visit the authorization URL above in your browser");
+                println!("   2. Log in to GitHub and authorize the application");
+                println!("   3. Retrieve the authorization code from the callback URL");
+                println!("   4. Use the authorization code to continue the flow");
                 println!();
                 
-                // 模拟获取授权码（在实际场景中，这来自用户授权后的回调）
-                println!("🔄 模拟用户授权完成...");
+                // Simulate obtaining the authorization code (in a real scenario, this comes from the user's authorization callback)
+                println!("🔄 Simulating user authorization completion...");
                 let mock_code = "mock_auth_code_12345";
-                println!("🔑 模拟授权码: {}", mock_code);
+                println!("🔑 Simulated authorization code: {}", mock_code);
                 
-                // 继续执行流程
-                println!("🚀 继续执行流程...");
+                // Continue the flow
+                println!("🚀 Continuing the flow...");
                 
-                // 更新上下文，添加授权码到顶层
+                // Update context, adding the authorization code to the top level
                 let mut continue_context = pending_info.context.clone();
                 if let Some(obj) = continue_context.as_object_mut() {
                     obj.insert("code".to_string(), json!(mock_code));
                 }
                 
-                // 从 AwaitCallback 状态继续执行
+                // Continue execution from AwaitCallback state
                 let final_result = run_until_pause_or_end(&dsl, "AwaitCallback", continue_context, &router, 50)?;
                 
                 match final_result {
                     RunOutcome::Finished(context) => {
-                        println!("🎉 流程执行完成！");
+                        println!("🎉 Flow execution completed!");
                         println!();
-                        println!("📋 最终结果:");
+                        println!("📋 Final result:");
                         
-                        // 显示令牌交换结果
+                        // Display token exchange result
                         if let Some(exchange_result) = context
                             .pointer("/states/ExchangeToken/result") {
-                            println!("🔑 令牌交换结果:");
+                            println!("🔑 Token exchange result:");
                             println!("{}", serde_json::to_string_pretty(exchange_result)?);
                         }
                         
-                        // 显示访问令牌信息
+                        // Display access token information
                         if let Some(access_token) = context
                             .pointer("/states/ExchangeToken/result/access_token")
                             .and_then(|v| v.as_str()) {
-                            println!("🔑 访问令牌: {}...", &access_token[..10.min(access_token.len())]);
+                            println!("🔑 Access token: {}...", &access_token[..10.min(access_token.len())]);
                         } else {
-                            println!("❌ 未找到访问令牌");
+                            println!("❌ Access token not found");
                         }
                         
-                        // 显示用户信息
+                        // Display user information
                         if let Some(user_login) = context
                             .pointer("/states/GetUser/result/user_login")
                             .and_then(|v| v.as_str()) {
-                            println!("👤 用户登录名: {}", user_login);
+                            println!("👤 User login: {}", user_login);
                         } else {
-                            println!("❌ 未找到用户信息");
+                            println!("❌ User information not found");
                         }
                         
-                        // 显示连接持久化结果
+                        // Display connection persistence result
                         if let Some(connection_result) = context
                             .pointer("/states/PersistConnection/result") {
-                            println!("💾 连接持久化结果:");
+                            println!("💾 Connection persistence result:");
                             println!("{}", serde_json::to_string_pretty(connection_result)?);
                         } else {
-                            println!("❌ 未找到连接持久化结果");
+                            println!("❌ Connection persistence result not found");
                         }
                         
                         println!();
-                        println!("🎯 GitHub OAuth2 端到端测试完成！");
-                        println!("📊 执行状态:");
-                        println!("   ✓ 配置初始化");
-                        println!("   ✓ 授权 URL 生成");
-                        println!("   ✓ 授权码交换 (模拟)");
-                        println!("   ⚠️  用户信息获取 (需要真实授权码)");
-                        println!("   ⚠️  连接持久化 (需要真实授权码)");
+                        println!("🎯 GitHub OAuth2 End-to-End Test Completed!");
+                        println!("📊 Execution status:");
+                        println!("   ✓ Configuration initialized");
+                        println!("   ✓ Authorization URL generated");
+                        println!("   ✓ Authorization code exchange (simulated)");
+                        println!("   ⚠️  User information retrieval (requires real authorization code)");
+                        println!("   ⚠️  Connection persistence (requires real authorization code)");
                         
                     }
                     RunOutcome::Pending(_) => {
-                        println!("⚠️  流程仍在等待中");
+                        println!("⚠️  Flow is still pending");
                     }
                 }
             } else {
-                println!("⚠️  未找到授权 URL");
+                println!("⚠️  Authorization URL not found");
             }
         }
         RunOutcome::Finished(context) => {
-            println!("✅ 流程意外完成");
-            println!("📋 最终上下文:");
+            println!("✅ Flow unexpectedly completed");
+            println!("📋 Final context:");
             println!("{}", serde_json::to_string_pretty(&context)?);
         }
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-简单的回调服务器，用于捕获 GitHub OAuth2 授权码
+A simple callback server to capture GitHub OAuth2 authorization codes
 """
 
 import http.server
@@ -14,29 +14,29 @@ import os
 class CallbackHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith('/oauth/callback'):
-            # 解析查询参数
+            # Parse query parameters
             parsed_url = urlparse(self.path)
             query_params = parse_qs(parsed_url.query)
             
-            # 提取授权码
+            # Extract authorization code
             code = query_params.get('code', [None])[0]
             state = query_params.get('state', [None])[0]
             error = query_params.get('error', [None])[0]
             
             if error:
-                print(f"❌ OAuth 错误: {error}")
+                print(f"❌ OAuth error: {error}")
                 self.send_response(400)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
                 self.end_headers()
-                html = f"<h1>OAuth 错误: {error}</h1>"
+                html = f"<h1>OAuth error: {error}</h1>"
                 self.wfile.write(html.encode('utf-8'))
                 return
             
             if code:
-                print(f"✅ 获取到授权码: {code}")
-                print(f"📋 状态: {state}")
+                print(f"✅ Authorization code received: {code}")
+                print(f"📋 State: {state}")
                 
-                # 保存授权码到文件
+                # Save authorization code to file
                 with open('/tmp/github_auth_code.txt', 'w') as f:
                     f.write(code)
                 
@@ -45,43 +45,43 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
                 html = (
                     "<html>"
-                    "<head><title>授权成功</title></head>"
+                    "<head><title>Authorization Successful</title></head>"
                     "<body>"
-                    "<h1>✅ GitHub 授权成功！</h1>"
-                    "<p>授权码已保存，可以继续 OAuth2 流程。</p>"
-                    "<p>请返回终端查看结果。</p>"
+                    "<h1>✅ GitHub Authorization Successful!</h1>"
+                    "<p>The authorization code has been saved. You can continue the OAuth2 process.</p>"
+                    "<p>Please return to the terminal to see the results.</p>"
                     "</body>"
                     "</html>"
                 )
                 self.wfile.write(html.encode('utf-8'))
             else:
-                print("❌ 未找到授权码")
+                print("❌ Authorization code not found")
                 self.send_response(400)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
                 self.end_headers()
-                self.wfile.write("<h1>未找到授权码</h1>".encode('utf-8'))
+                self.wfile.write("<h1>Authorization code not found</h1>".encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()
     
     def log_message(self, format, *args):
-        # 禁用默认日志
+        # Disable default logging
         pass
 
 def main():
     PORT = int(os.environ.get("OPENACT_CALLBACK_PORT", "8080"))
     
-    # 检查端口是否被占用
+    # Check if the port is already in use
     try:
         with socketserver.TCPServer(("", PORT), CallbackHandler) as httpd:
-            print(f"🔄 回调服务器启动在端口 {PORT}")
-            print(f"📋 等待 GitHub 回调...")
-            print(f"💡 请在浏览器中访问授权 URL")
+            print(f"🔄 Callback server started on port {PORT}")
+            print(f"📋 Waiting for GitHub callback...")
+            print(f"💡 Please visit the authorization URL in your browser")
             httpd.serve_forever()
     except OSError as e:
         if e.errno == 48:  # Address already in use
-            print(f"❌ 端口 {PORT} 已被占用")
-            print("💡 请确保 openact 服务器没有运行，或者使用不同的端口")
+            print(f"❌ Port {PORT} is already in use")
+            print("💡 Please ensure the openact server is not running, or use a different port")
             sys.exit(1)
         else:
             raise

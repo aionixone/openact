@@ -1,6 +1,6 @@
-//! 认证注入器
+//! Authentication Injector
 //!
-//! 根据不同的认证类型注入相应的认证头和参数
+//! Injects appropriate authentication headers and parameters based on the type of authentication.
 
 use crate::models::{AuthorizationType, ConnectionConfig};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -8,7 +8,7 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use std::collections::HashMap;
 use thiserror::Error;
 
-/// 认证注入错误
+/// Authentication Injection Error
 #[derive(Error, Debug)]
 pub enum AuthInjectionError {
     #[error("Missing authentication parameters for {auth_type:?}")]
@@ -24,9 +24,9 @@ pub enum AuthInjectionError {
     OAuth2TokenNotAvailable { connection_trn: String },
 }
 
-/// 认证注入器接口
+/// Authentication Injector Interface
 pub trait AuthInjector {
-    /// 注入认证信息到headers和query参数中
+    /// Inject authentication information into headers and query parameters
     fn inject_auth(
         &self,
         headers: &mut HeaderMap,
@@ -35,7 +35,7 @@ pub trait AuthInjector {
     ) -> Result<(), AuthInjectionError>;
 }
 
-/// API Key 认证注入器
+/// API Key Authentication Injector
 pub struct ApiKeyInjector;
 
 impl AuthInjector for ApiKeyInjector {
@@ -53,9 +53,9 @@ impl AuthInjector for ApiKeyInjector {
                 auth_type: connection.authorization_type.clone(),
             })?;
 
-        // 根据API Key名称决定注入位置
-        // 常见模式：
-        // - "Authorization" -> Header: "Bearer {api_key}" 或 "ApiKey {api_key}"
+        // Determine injection location based on API Key name
+        // Common patterns:
+        // - "Authorization" -> Header: "Bearer {api_key}" or "ApiKey {api_key}"
         // - "X-API-Key" -> Header: "{api_key}"
         // - "api_key" -> Query: "{api_key}"
 
@@ -90,7 +90,7 @@ impl AuthInjector for ApiKeyInjector {
     }
 }
 
-/// Basic Auth 认证注入器
+/// Basic Auth Authentication Injector
 pub struct BasicAuthInjector;
 
 impl AuthInjector for BasicAuthInjector {
@@ -108,7 +108,7 @@ impl AuthInjector for BasicAuthInjector {
                 auth_type: connection.authorization_type.clone(),
             })?;
 
-        // 创建 Basic Auth header: "Basic base64(username:password)"
+        // Create Basic Auth header: "Basic base64(username:password)"
         let credentials = format!("{}:{}", basic_params.username, basic_params.password);
         let encoded = STANDARD.encode(credentials.as_bytes());
         let auth_value = format!("Basic {}", encoded);
@@ -121,7 +121,7 @@ impl AuthInjector for BasicAuthInjector {
     }
 }
 
-/// OAuth2 认证注入器
+/// OAuth2 Authentication Injector
 pub struct OAuth2Injector;
 
 impl AuthInjector for OAuth2Injector {
@@ -137,7 +137,7 @@ impl AuthInjector for OAuth2Injector {
     }
 }
 
-/// 创建对应的认证注入器
+/// Create the corresponding authentication injector
 pub fn create_auth_injector(auth_type: &AuthorizationType) -> Box<dyn AuthInjector> {
     match auth_type {
         AuthorizationType::ApiKey => Box::new(ApiKeyInjector),

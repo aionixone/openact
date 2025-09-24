@@ -11,17 +11,17 @@ pub mod connection_store;
 pub use connection_store::*;
 
 // Database and repositories
-pub mod database;
-pub mod sqlite_connection_store;
 pub mod connection_repository;
-pub mod task_repository;
+pub mod database;
 pub mod service;
+pub mod sqlite_connection_store;
+pub mod task_repository;
 
-pub use database::*;
-pub use sqlite_connection_store::*;
 pub use connection_repository::*;
-pub use task_repository::*;
+pub use database::*;
 pub use service::*;
+pub use sqlite_connection_store::*;
+pub use task_repository::*;
 
 // Run store module
 pub mod run_store;
@@ -34,7 +34,7 @@ use anyhow::Result;
 #[derive(Debug, Clone)]
 pub enum StoreBackend {
     Memory,
-    
+
     Sqlite,
 }
 
@@ -42,7 +42,7 @@ pub enum StoreBackend {
 #[derive(Debug, Clone)]
 pub struct StoreConfig {
     pub backend: StoreBackend,
-    
+
     pub sqlite: Option<sqlite_connection_store::SqliteConfig>,
 }
 
@@ -50,7 +50,7 @@ impl Default for StoreConfig {
     fn default() -> Self {
         Self {
             backend: StoreBackend::Memory,
-            
+
             sqlite: None,
         }
     }
@@ -64,12 +64,16 @@ pub async fn create_connection_store(config: StoreConfig) -> Result<Arc<dyn Conn
         StoreBackend::Memory => {
             Ok(Arc::new(MemoryConnectionStore::new()) as Arc<dyn ConnectionStore>)
         }
-        
+
         StoreBackend::Sqlite => {
             let mut sqlite_cfg = config.sqlite.unwrap_or_default();
             // Align with OPENACT_DB_URL if provided
             if let Ok(url) = std::env::var("OPENACT_DB_URL") {
-                sqlite_cfg.database_url = if url.starts_with("sqlite:") { url } else { format!("sqlite:{}", url) };
+                sqlite_cfg.database_url = if url.starts_with("sqlite:") {
+                    url
+                } else {
+                    format!("sqlite:{}", url)
+                };
             }
             // Disable encryption if no master key provided (tests/dev)
             if std::env::var("OPENACT_MASTER_KEY").is_err() {

@@ -1,10 +1,10 @@
 #![cfg(feature = "server")]
 
+use crate::app::service::OpenActService;
 use axum::{
     Router,
     routing::{get, post},
 };
-use crate::app::service::OpenActService;
 
 #[cfg(feature = "openapi")]
 use utoipa_swagger_ui::SwaggerUi;
@@ -82,14 +82,14 @@ pub fn core_api_router_with_state(service: OpenActService) -> Router {
             "/api/v1/system/cleanup",
             post(crate::server::handlers::system::cleanup),
         );
-    
+
     // Add metrics endpoint only if metrics feature is enabled
     #[cfg(feature = "metrics")]
     let router = router.route(
         "/api/v1/system/metrics",
         get(crate::server::handlers::system::metrics),
     );
-    
+
     let mut router = router
         // Observability endpoints
         .route(
@@ -116,6 +116,8 @@ pub fn core_api_router_with_state(service: OpenActService) -> Router {
 
 /// Create router with service from environment (backward compatibility)
 pub async fn core_api_router() -> Router {
-    let service = OpenActService::from_env().await.expect("Failed to create OpenActService");
+    let service = OpenActService::from_env()
+        .await
+        .expect("Failed to create OpenActService");
     core_api_router_with_state(service)
 }

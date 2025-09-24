@@ -23,9 +23,13 @@ pub struct MemoryRunStore {
 }
 
 impl RunStore for MemoryRunStore {
-    fn put(&self, c: Checkpoint) { self.inner.write().unwrap().insert(c.run_id.clone(), c); }
-    fn get(&self, run_id: &str) -> Option<Checkpoint> { self.inner.read().unwrap().get(run_id).cloned() }
-    fn del(&self, run_id: &str) { self.inner.write().unwrap().remove(run_id); }
+    fn put(&self, c: Checkpoint) {
+        self.inner.write().unwrap().insert(c.run_id.clone(), c);
+    }
+    fn get(&self, run_id: &str) -> Option<Checkpoint> {
+        self.inner.read().unwrap().get(run_id).cloned()
+    }
+    fn del(&self, run_id: &str) {
+        self.inner.write().unwrap().remove(run_id);
+    }
 }
-
-

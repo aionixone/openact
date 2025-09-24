@@ -1,24 +1,24 @@
 #!/bin/bash
 
-# openact API 测试脚本
+# openact API test script
 
 BASE_URL="http://localhost:8080/api/v1"
 
-echo "🧪 openact API 测试"
+echo "🧪 openact API Test"
 echo "==================="
 
-# 健康检查
-echo "1. 健康检查..."
+# Health check
+echo "1. Health check..."
 curl -s "$BASE_URL/health" | jq '.'
 echo ""
 
-# 创建工作流
-echo "2. 创建 GitHub OAuth2 工作流..."
+# Create workflow
+echo "2. Create GitHub OAuth2 workflow..."
 WORKFLOW_RESPONSE=$(curl -s -X POST "$BASE_URL/workflows" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "GitHub OAuth2 Test",
-    "description": "测试 GitHub OAuth2 认证流程",
+    "description": "Test GitHub OAuth2 authentication flow",
     "dsl": {
       "version": "1.0",
       "provider": {
@@ -53,26 +53,26 @@ WORKFLOW_RESPONSE=$(curl -s -X POST "$BASE_URL/workflows" \
 
 echo "$WORKFLOW_RESPONSE" | jq '.'
 WORKFLOW_ID=$(echo "$WORKFLOW_RESPONSE" | jq -r '.id')
-echo "工作流 ID: $WORKFLOW_ID"
+echo "Workflow ID: $WORKFLOW_ID"
 echo ""
 
-# 获取工作流列表
-echo "3. 获取工作流列表..."
+# Get workflow list
+echo "3. Get workflow list..."
 curl -s "$BASE_URL/workflows" | jq '.'
 echo ""
 
-# 获取工作流图结构
-echo "4. 获取工作流图结构..."
+# Get workflow graph
+echo "4. Get workflow graph..."
 curl -s "$BASE_URL/workflows/$WORKFLOW_ID/graph" | jq '.'
 echo ""
 
-# 验证工作流
-echo "5. 验证工作流..."
+# Validate workflow
+echo "5. Validate workflow..."
 curl -s -X POST "$BASE_URL/workflows/$WORKFLOW_ID/validate" | jq '.'
 echo ""
 
-# 启动执行
-echo "6. 启动工作流执行..."
+# Start execution
+echo "6. Start workflow execution..."
 EXECUTION_RESPONSE=$(curl -s -X POST "$BASE_URL/executions" \
   -H "Content-Type: application/json" \
   -d "{
@@ -86,29 +86,29 @@ EXECUTION_RESPONSE=$(curl -s -X POST "$BASE_URL/executions" \
 
 echo "$EXECUTION_RESPONSE" | jq '.'
 EXECUTION_ID=$(echo "$EXECUTION_RESPONSE" | jq -r '.executionId')
-echo "执行 ID: $EXECUTION_ID"
+echo "Execution ID: $EXECUTION_ID"
 echo ""
 
-# 等待一下让执行完成
+# Wait for execution to complete
 sleep 2
 
-# 获取执行状态
-echo "7. 获取执行状态..."
+# Get execution status
+echo "7. Get execution status..."
 curl -s "$BASE_URL/executions/$EXECUTION_ID" | jq '.'
 echo ""
 
-# 获取执行轨迹
-echo "8. 获取执行轨迹..."
+# Get execution trace
+echo "8. Get execution trace..."
 curl -s "$BASE_URL/executions/$EXECUTION_ID/trace" | jq '.'
 echo ""
 
-# 获取执行列表
-echo "9. 获取执行列表..."
+# Get execution list
+echo "9. Get execution list..."
 curl -s "$BASE_URL/executions" | jq '.'
 echo ""
 
-echo "✅ API 测试完成！"
+echo "✅ API test completed!"
 echo ""
-echo "💡 提示:"
-echo "  - 使用 'cargo run --example workflow_server_demo --features server' 启动服务器"
-echo "  - 使用 WebSocket 客户端连接 ws://localhost:8080/api/v1/ws/executions 获取实时更新"
+echo "💡 Tips:"
+echo "  - Use 'cargo run --example workflow_server_demo --features server' to start the server"
+echo "  - Use a WebSocket client to connect to ws://localhost:8080/api/v1/ws/executions for real-time updates"

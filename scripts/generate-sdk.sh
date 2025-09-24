@@ -1,38 +1,38 @@
 #!/bin/bash
-# OpenAct SDK 生成脚本
+# OpenAct SDK Generation Script
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-echo "📦 OpenAct SDK 生成工具"
-echo "========================"
+echo "📦 OpenAct SDK Generation Tool"
+echo "=============================="
 
-# 检查依赖
+# Check dependencies
 if ! command -v openapi-generator-cli &> /dev/null; then
-    echo "❌ openapi-generator-cli 未安装"
-    echo "请使用以下命令安装:"
+    echo "❌ openapi-generator-cli is not installed"
+    echo "Please install it using the following command:"
     echo "  npm install -g @openapitools/openapi-generator-cli"
     exit 1
 fi
 
-# 确保服务器正在运行 (或生成静态文件)
-echo "🔧 生成 OpenAPI 规范..."
+# Ensure the server is running (or generate static files)
+echo "🔧 Generating OpenAPI specification..."
 cd "$PROJECT_ROOT"
 
-# 使用测试生成 OpenAPI JSON
+# Generate OpenAPI JSON using tests
 OPENAPI_JSON=$(mktemp)
 cargo test openapi_json_generation --features openapi,server -- --nocapture --exact 2>/dev/null | \
     grep -A 1000 "Generated OpenAPI spec" | tail -n +2 > "$OPENAPI_JSON" || {
-    echo "❌ 无法生成 OpenAPI 规范"
+    echo "❌ Failed to generate OpenAPI specification"
     exit 1
 }
 
-echo "✅ OpenAPI 规范已生成"
+echo "✅ OpenAPI specification generated"
 
-# 生成 TypeScript SDK
-echo "🚀 生成 TypeScript SDK..."
+# Generate TypeScript SDK
+echo "🚀 Generating TypeScript SDK..."
 SDK_DIR="$PROJECT_ROOT/sdk/typescript"
 mkdir -p "$SDK_DIR"
 
@@ -42,31 +42,31 @@ openapi-generator-cli generate \
     -o "$SDK_DIR" \
     --additional-properties=npmName=openact-client,withSeparateModelsAndApi=true,modelPackage=models,apiPackage=api
 
-echo "✅ TypeScript SDK 已生成到: $SDK_DIR"
+echo "✅ TypeScript SDK generated at: $SDK_DIR"
 
-# 清理临时文件
+# Clean up temporary files
 rm "$OPENAPI_JSON"
 
-# 验证生成的 SDK
-echo "🧪 验证 SDK 结构..."
+# Validate the generated SDK
+echo "🧪 Validating SDK structure..."
 if [ -f "$SDK_DIR/package.json" ] && [ -d "$SDK_DIR/api" ] && [ -d "$SDK_DIR/models" ]; then
-    echo "✅ SDK 结构验证通过"
+    echo "✅ SDK structure validation passed"
     
-    # 显示生成的 API 数量
+    # Display the number of generated API files
     API_COUNT=$(find "$SDK_DIR/api" -name "*.ts" | wc -l)
     MODEL_COUNT=$(find "$SDK_DIR/models" -name "*.ts" | wc -l)
     
-    echo "📊 生成统计:"
-    echo "  - API 文件: $API_COUNT"
-    echo "  - Model 文件: $MODEL_COUNT"
+    echo "📊 Generation statistics:"
+    echo "  - API files: $API_COUNT"
+    echo "  - Model files: $MODEL_COUNT"
     
     echo ""
-    echo "🎉 SDK 生成完成！"
-    echo "使用方法:"
+    echo "🎉 SDK generation completed!"
+    echo "Usage:"
     echo "  cd $SDK_DIR"
     echo "  npm install"
     echo "  npm run build"
 else
-    echo "❌ SDK 结构验证失败"
+    echo "❌ SDK structure validation failed"
     exit 1
 fi

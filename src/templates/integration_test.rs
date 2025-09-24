@@ -1,5 +1,5 @@
 //! Integration tests for template loading and instantiation
-//! 
+//!
 //! These tests verify the complete flow from template files to DTO objects.
 
 #[cfg(test)]
@@ -10,16 +10,16 @@ mod tests {
     #[test]
     fn test_load_github_oauth2_connection_template() {
         let loader = TemplateLoader::new("templates");
-        
+
         // This test depends on the actual template file existing
         let result = loader.load_connection_template("github", "oauth2");
-        
+
         match result {
             Ok(template) => {
                 assert_eq!(template.provider, "github");
                 assert_eq!(template.template_type, "connection");
                 assert_eq!(template.metadata.name, "GitHub OAuth2 Connection");
-                
+
                 // Verify template has required structure
                 assert!(template.config.get("authorization_type").is_some());
                 assert!(template.config.get("auth_parameters").is_some());
@@ -34,15 +34,15 @@ mod tests {
     #[test]
     fn test_load_github_get_user_task_template() {
         let loader = TemplateLoader::new("templates");
-        
+
         let result = loader.load_task_template("github", "get_user");
-        
+
         match result {
             Ok(template) => {
                 assert_eq!(template.provider, "github");
                 assert_eq!(template.template_type, "task");
                 assert_eq!(template.action, "get_user");
-                
+
                 // Verify template has required structure
                 assert!(template.config.get("api_endpoint").is_some());
                 assert!(template.config.get("method").is_some());
@@ -65,7 +65,10 @@ mod tests {
                 description: "Test template".to_string(),
                 documentation: None,
                 api_reference: None,
-                required_secrets: Some(vec!["github_client_id".to_string(), "github_client_secret".to_string()]),
+                required_secrets: Some(vec![
+                    "github_client_id".to_string(),
+                    "github_client_secret".to_string(),
+                ]),
                 requires_connection: None,
             },
             config: json!({
@@ -82,41 +85,60 @@ mod tests {
         };
 
         let loader = TemplateLoader::new("templates");
-        
-        let mut inputs = TemplateInputs::default();
-        inputs.secrets.insert("github_client_id".to_string(), "test_client_id".to_string());
-        inputs.secrets.insert("github_client_secret".to_string(), "test_client_secret".to_string());
-        inputs.inputs.insert("auth_parameters".to_string(), json!({
-            "oauth_parameters": {
-                "scope": "user:email,repo:read"
-            }
-        }));
 
-        let result = loader.instantiate_connection(
-            &template,
-            "test_tenant",
-            "github_test",
-            &inputs,
+        let mut inputs = TemplateInputs::default();
+        inputs
+            .secrets
+            .insert("github_client_id".to_string(), "test_client_id".to_string());
+        inputs.secrets.insert(
+            "github_client_secret".to_string(),
+            "test_client_secret".to_string(),
         );
+        inputs.inputs.insert(
+            "auth_parameters".to_string(),
+            json!({
+                "oauth_parameters": {
+                    "scope": "user:email,repo:read"
+                }
+            }),
+        );
+
+        let result =
+            loader.instantiate_connection(&template, "test_tenant", "github_test", &inputs);
 
         assert!(result.is_ok());
         let connection_request = result.unwrap();
-        
+
         // Verify TRN generation
-        assert_eq!(connection_request.trn, "trn:openact:test_tenant:connection/github_test@v1");
-        
+        assert_eq!(
+            connection_request.trn,
+            "trn:openact:test_tenant:connection/github_test@v1"
+        );
+
         // Verify name from template
         assert_eq!(connection_request.name, "GitHub API Connection");
-        
+
         // Verify authorization type
-        assert_eq!(format!("{:?}", connection_request.authorization_type), "OAuth2AuthorizationCode");
-        
+        assert_eq!(
+            format!("{:?}", connection_request.authorization_type),
+            "OAuth2AuthorizationCode"
+        );
+
         // Verify secrets were injected (we can't see the actual values due to encryption)
-        assert!(connection_request.auth_parameters.oauth_parameters.is_some());
-        let oauth_params = connection_request.auth_parameters.oauth_parameters.as_ref().unwrap();
+        assert!(
+            connection_request
+                .auth_parameters
+                .oauth_parameters
+                .is_some()
+        );
+        let oauth_params = connection_request
+            .auth_parameters
+            .oauth_parameters
+            .as_ref()
+            .unwrap();
         assert_eq!(oauth_params.client_id, "test_client_id");
         assert_eq!(oauth_params.client_secret, "test_client_secret");
-        
+
         // Verify merged scope
         assert_eq!(oauth_params.scope, Some("user:email,repo:read".to_string()));
     }
@@ -148,7 +170,7 @@ mod tests {
         };
 
         let loader = TemplateLoader::new("templates");
-        
+
         let inputs = TemplateInputs::default();
         let connection_trn = "trn:openact:test_tenant:connection/github_test@v1";
 
@@ -162,18 +184,21 @@ mod tests {
 
         assert!(result.is_ok());
         let task_request = result.unwrap();
-        
+
         // Verify TRN generation
-        assert_eq!(task_request.trn, "trn:openact:test_tenant:task/get_user_test@v1");
-        
+        assert_eq!(
+            task_request.trn,
+            "trn:openact:test_tenant:task/get_user_test@v1"
+        );
+
         // Verify connection reference
         assert_eq!(task_request.connection_trn, connection_trn);
-        
+
         // Verify task configuration
         assert_eq!(task_request.name, "Get GitHub User Profile");
         assert_eq!(task_request.api_endpoint, "https://api.github.com/user");
         assert_eq!(task_request.method, "GET");
-        
+
         // Verify headers
         assert!(task_request.headers.is_some());
         let headers = task_request.headers.as_ref().unwrap();
@@ -207,30 +232,37 @@ mod tests {
         };
 
         let loader = TemplateLoader::new("templates");
-        
+
         let mut inputs = TemplateInputs::default();
         // Add required secrets
-        inputs.secrets.insert("github_client_id".to_string(), "test_client_id".to_string());
-        inputs.secrets.insert("github_client_secret".to_string(), "test_client_secret".to_string());
+        inputs
+            .secrets
+            .insert("github_client_id".to_string(), "test_client_id".to_string());
+        inputs.secrets.insert(
+            "github_client_secret".to_string(),
+            "test_client_secret".to_string(),
+        );
         // inputs should override template defaults
-        inputs.inputs.insert("auth_parameters".to_string(), json!({
-            "oauth_parameters": {
-                "scope": "input_scope"
-            }
-        }));
+        inputs.inputs.insert(
+            "auth_parameters".to_string(),
+            json!({
+                "oauth_parameters": {
+                    "scope": "input_scope"
+                }
+            }),
+        );
         // overrides should override everything
-        inputs.overrides.insert("name".to_string(), json!("Override Name"));
+        inputs
+            .overrides
+            .insert("name".to_string(), json!("Override Name"));
 
-        let result = loader.instantiate_connection(
-            &template,
-            "test",
-            "test",
-            &inputs,
-        ).unwrap();
+        let result = loader
+            .instantiate_connection(&template, "test", "test", &inputs)
+            .unwrap();
 
         // Override should win
         assert_eq!(result.name, "Override Name");
-        
+
         // Input should override template default
         let oauth_params = result.auth_parameters.oauth_parameters.unwrap();
         assert_eq!(oauth_params.scope, Some("input_scope".to_string()));
@@ -245,14 +277,13 @@ mod tests {
         let inputs = TemplateInputs::default();
         // Note: github oauth2 template requires github_client_id and github_client_secret
 
-        let result = loader.instantiate_connection(
-            &template,
-            "test_tenant",
-            "github_test",
-            &inputs,
+        let result =
+            loader.instantiate_connection(&template, "test_tenant", "github_test", &inputs);
+
+        assert!(
+            result.is_err(),
+            "Should fail when required secrets are missing"
         );
-        
-        assert!(result.is_err(), "Should fail when required secrets are missing");
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("Missing required secrets"));
         assert!(error_msg.contains("github_client_id"));
@@ -266,17 +297,18 @@ mod tests {
 
         // Provide only one of the two required secrets
         let mut inputs = TemplateInputs::default();
-        inputs.secrets.insert("github_client_id".to_string(), "test_id".to_string());
+        inputs
+            .secrets
+            .insert("github_client_id".to_string(), "test_id".to_string());
         // Missing github_client_secret
 
-        let result = loader.instantiate_connection(
-            &template,
-            "test_tenant",
-            "github_test",
-            &inputs,
+        let result =
+            loader.instantiate_connection(&template, "test_tenant", "github_test", &inputs);
+
+        assert!(
+            result.is_err(),
+            "Should fail when some required secrets are missing"
         );
-        
-        assert!(result.is_err(), "Should fail when some required secrets are missing");
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("Missing required secrets"));
         assert!(error_msg.contains("'github_client_secret'")); // Should mention missing secret

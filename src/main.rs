@@ -7,8 +7,8 @@ use std::net::SocketAddr;
 
 #[cfg(not(feature = "server"))]
 fn main() {
-    println!("❌ 服务器功能未启用。请使用 --features server 重新编译。");
-    println!("💡 使用方法: cargo run --features server");
+    println!("❌ Server feature not enabled. Please recompile with --features server.");
+    println!("💡 Usage: cargo run --features server");
 }
 
 #[cfg(feature = "server")]
@@ -17,15 +17,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize observability systems
     openact::observability::init()?;
     
-    tracing::info!("🚀 启动 openact 服务器...");
+    tracing::info!("🚀 Starting openact server...");
     
     let authflow_router = openact::server::authflow::router::create_router_async().await;
     let core_router = openact::server::router::core_api_router().await;
     let app: Router = authflow_router.merge(core_router);
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
     
-    println!("🌐 服务器运行在: http://{}", addr);
-    println!("📋 API 文档: http://{}/api/v1/authflow/health", addr);
+    println!("🌐 Server running at: http://{}", addr);
+    println!("📋 API documentation: http://{}/api/v1/authflow/health", addr);
     
     let listener = TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;

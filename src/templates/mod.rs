@@ -1,5 +1,5 @@
 //! Provider template system for managing Connection and Task configurations
-//! 
+//!
 //! This module provides a simple template system that allows loading predefined
 //! configurations for various providers (GitHub, Slack, etc.) and instantiating
 //! them with user-provided secrets and inputs.
@@ -83,28 +83,36 @@ impl TemplateLoader {
     }
 
     /// Load a connection template
-    pub fn load_connection_template(&self, provider: &str, template_name: &str) -> Result<ConnectionTemplate> {
-        let path = format!("{}/providers/{}/connections/{}.json", 
-                          self.template_root, provider, template_name);
+    pub fn load_connection_template(
+        &self,
+        provider: &str,
+        template_name: &str,
+    ) -> Result<ConnectionTemplate> {
+        let path = format!(
+            "{}/providers/{}/connections/{}.json",
+            self.template_root, provider, template_name
+        );
         let content = std::fs::read_to_string(&path)
             .map_err(|e| anyhow!("Failed to read connection template {}: {}", path, e))?;
-        
+
         let template: ConnectionTemplate = serde_json::from_str(&content)
             .map_err(|e| anyhow!("Failed to parse connection template {}: {}", path, e))?;
-        
+
         Ok(template)
     }
 
     /// Load a task template
     pub fn load_task_template(&self, provider: &str, action: &str) -> Result<TaskTemplate> {
-        let path = format!("{}/providers/{}/tasks/{}.json", 
-                          self.template_root, provider, action);
+        let path = format!(
+            "{}/providers/{}/tasks/{}.json",
+            self.template_root, provider, action
+        );
         let content = std::fs::read_to_string(&path)
             .map_err(|e| anyhow!("Failed to read task template {}: {}", path, e))?;
-        
+
         let template: TaskTemplate = serde_json::from_str(&content)
             .map_err(|e| anyhow!("Failed to parse task template {}: {}", path, e))?;
-        
+
         Ok(template)
     }
 
@@ -122,42 +130,51 @@ impl TemplateLoader {
                 .iter()
                 .filter(|key| !inputs.secrets.contains_key(*key))
                 .collect();
-            
+
             if !missing.is_empty() {
                 return Err(anyhow!(
                     "Missing required secrets for {}/{} template: {}. Required secrets: {}",
                     template.provider,
                     template.template_type,
-                    missing.iter().map(|s| format!("'{}'", s)).collect::<Vec<_>>().join(", "),
+                    missing
+                        .iter()
+                        .map(|s| format!("'{}'", s))
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     required.join(", ")
                 ));
             }
         }
-        
+
         // Start with template config
         let mut config = template.config.clone();
-        
+
         // Apply inputs (non-sensitive overrides)
         if !inputs.inputs.is_empty() {
             merge_json_objects(&mut config, &serde_json::to_value(&inputs.inputs)?)?;
         }
-        
+
         // Apply overrides (highest priority)
         if !inputs.overrides.is_empty() {
             merge_json_objects(&mut config, &serde_json::to_value(&inputs.overrides)?)?;
         }
-        
+
         // Inject secrets based on template provider
         self.inject_connection_secrets(&mut config, &template.provider, &inputs.secrets)?;
-        
+
         // Generate TRN
         let trn = format!("trn:openact:{}:connection/{}@v1", tenant, connection_name);
         config["trn"] = Value::String(trn);
-        
+
         // Convert to ConnectionUpsertRequest DTO
-        let connection_request: ConnectionUpsertRequest = serde_json::from_value(config)
-            .map_err(|e| anyhow!("Failed to convert template to ConnectionUpsertRequest: {}", e))?;
-        
+        let connection_request: ConnectionUpsertRequest =
+            serde_json::from_value(config).map_err(|e| {
+                anyhow!(
+                    "Failed to convert template to ConnectionUpsertRequest: {}",
+                    e
+                )
+            })?;
+
         Ok(connection_request)
     }
 
@@ -176,40 +193,44 @@ impl TemplateLoader {
                 .iter()
                 .filter(|key| !inputs.secrets.contains_key(*key))
                 .collect();
-            
+
             if !missing.is_empty() {
                 return Err(anyhow!(
                     "Missing required secrets for {}/{} template: {}. Required secrets: {}",
                     template.provider,
                     template.action,
-                    missing.iter().map(|s| format!("'{}'", s)).collect::<Vec<_>>().join(", "),
+                    missing
+                        .iter()
+                        .map(|s| format!("'{}'", s))
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     required.join(", ")
                 ));
             }
         }
-        
+
         // Start with template config
         let mut config = template.config.clone();
-        
+
         // Apply inputs (non-sensitive overrides)
         if !inputs.inputs.is_empty() {
             merge_json_objects(&mut config, &serde_json::to_value(&inputs.inputs)?)?;
         }
-        
+
         // Apply overrides (highest priority)
         if !inputs.overrides.is_empty() {
             merge_json_objects(&mut config, &serde_json::to_value(&inputs.overrides)?)?;
         }
-        
+
         // Generate TRN and set connection reference
         let trn = format!("trn:openact:{}:task/{}@v1", tenant, task_name);
         config["trn"] = Value::String(trn);
         config["connection_trn"] = Value::String(connection_trn.to_string());
-        
+
         // Convert to TaskUpsertRequest DTO
         let task_request: TaskUpsertRequest = serde_json::from_value(config)
             .map_err(|e| anyhow!("Failed to convert template to TaskUpsertRequest: {}", e))?;
-        
+
         Ok(task_request)
     }
 
@@ -231,7 +252,7 @@ impl TemplateLoader {
                 // Inject OAuth2 secrets
                 let client_id_key = format!("{}_client_id", provider);
                 let client_secret_key = format!("{}_client_secret", provider);
-                
+
                 if let Some(client_id) = secrets.get(&client_id_key) {
                     if let Some(oauth_params) = config
                         .get_mut("auth_parameters")
@@ -240,7 +261,7 @@ impl TemplateLoader {
                         oauth_params["client_id"] = Value::String(client_id.clone());
                     }
                 }
-                
+
                 if let Some(client_secret) = secrets.get(&client_secret_key) {
                     if let Some(oauth_params) = config
                         .get_mut("auth_parameters")
@@ -278,36 +299,40 @@ impl TemplateLoader {
                 return Err(anyhow!("Unsupported authorization type: {}", auth_type));
             }
         }
-        
+
         Ok(())
     }
 
     /// List all available templates
-    pub fn list_templates(&self, provider_filter: Option<&str>, type_filter: Option<&str>) -> Result<Vec<TemplateListItem>> {
+    pub fn list_templates(
+        &self,
+        provider_filter: Option<&str>,
+        type_filter: Option<&str>,
+    ) -> Result<Vec<TemplateListItem>> {
         let mut templates = Vec::new();
         let providers_dir = std::path::Path::new(&self.template_root).join("providers");
-        
+
         if !providers_dir.exists() {
             return Ok(templates);
         }
-        
+
         // Iterate through provider directories
         for provider_entry in std::fs::read_dir(&providers_dir)? {
             let provider_entry = provider_entry?;
             let provider_name = provider_entry.file_name().to_string_lossy().to_string();
-            
+
             // Apply provider filter
             if let Some(filter) = provider_filter {
                 if provider_name != filter {
                     continue;
                 }
             }
-            
+
             let provider_path = provider_entry.path();
             if !provider_path.is_dir() {
                 continue;
             }
-            
+
             // Check connections
             if type_filter.is_none() || type_filter == Some("connection") {
                 let connections_dir = provider_path.join("connections");
@@ -317,7 +342,9 @@ impl TemplateLoader {
                         let conn_name = conn_entry.file_name().to_string_lossy().to_string();
                         if conn_name.ends_with(".json") {
                             let name = conn_name.strip_suffix(".json").unwrap().to_string();
-                            if let Ok(template) = self.load_connection_template(&provider_name, &name) {
+                            if let Ok(template) =
+                                self.load_connection_template(&provider_name, &name)
+                            {
                                 templates.push(TemplateListItem {
                                     provider: template.provider,
                                     template_type: template.template_type,
@@ -331,7 +358,7 @@ impl TemplateLoader {
                     }
                 }
             }
-            
+
             // Check tasks
             if type_filter.is_none() || type_filter == Some("task") {
                 let tasks_dir = provider_path.join("tasks");
@@ -356,29 +383,38 @@ impl TemplateLoader {
                 }
             }
         }
-        
+
         // Sort by provider, then type, then name
         templates.sort_by(|a, b| {
-            a.provider.cmp(&b.provider)
+            a.provider
+                .cmp(&b.provider)
                 .then(a.template_type.cmp(&b.template_type))
                 .then(a.name.cmp(&b.name))
         });
-        
+
         Ok(templates)
     }
 
     /// Show detailed template information
-    pub fn show_template(&self, provider: &str, template_type: &str, name: &str) -> Result<serde_json::Value> {
+    pub fn show_template(
+        &self,
+        provider: &str,
+        template_type: &str,
+        name: &str,
+    ) -> Result<serde_json::Value> {
         match template_type {
             "connection" => {
                 let template = self.load_connection_template(provider, name)?;
                 Ok(serde_json::to_value(&template)?)
-            },
+            }
             "task" => {
                 let template = self.load_task_template(provider, name)?;
                 Ok(serde_json::to_value(&template)?)
-            },
-            _ => Err(anyhow!("Invalid template type '{}'. Must be 'connection' or 'task'", template_type))
+            }
+            _ => Err(anyhow!(
+                "Invalid template type '{}'. Must be 'connection' or 'task'",
+                template_type
+            )),
         }
     }
 }
@@ -417,7 +453,7 @@ mod tests {
                 "d": 3
             }
         });
-        
+
         let source = json!({
             "b": {
                 "d": 4,
@@ -425,30 +461,48 @@ mod tests {
             },
             "f": 6
         });
-        
+
         merge_json_objects(&mut target, &source).unwrap();
-        
-        assert_eq!(target, json!({
-            "a": 1,
-            "b": {
-                "c": 2,
-                "d": 4,
-                "e": 5
-            },
-            "f": 6
-        }));
+
+        assert_eq!(
+            target,
+            json!({
+                "a": 1,
+                "b": {
+                    "c": 2,
+                    "d": 4,
+                    "e": 5
+                },
+                "f": 6
+            })
+        );
     }
 
     #[test]
     fn test_template_inputs_creation() {
         let mut inputs = TemplateInputs::default();
-        inputs.secrets.insert("github_client_id".to_string(), "test_id".to_string());
-        inputs.inputs.insert("scope".to_string(), json!("user:email,repo:read"));
-        inputs.overrides.insert("name".to_string(), json!("Custom GitHub Connection"));
-        
-        assert_eq!(inputs.secrets.get("github_client_id"), Some(&"test_id".to_string()));
-        assert_eq!(inputs.inputs.get("scope"), Some(&json!("user:email,repo:read")));
-        assert_eq!(inputs.overrides.get("name"), Some(&json!("Custom GitHub Connection")));
+        inputs
+            .secrets
+            .insert("github_client_id".to_string(), "test_id".to_string());
+        inputs
+            .inputs
+            .insert("scope".to_string(), json!("user:email,repo:read"));
+        inputs
+            .overrides
+            .insert("name".to_string(), json!("Custom GitHub Connection"));
+
+        assert_eq!(
+            inputs.secrets.get("github_client_id"),
+            Some(&"test_id".to_string())
+        );
+        assert_eq!(
+            inputs.inputs.get("scope"),
+            Some(&json!("user:email,repo:read"))
+        );
+        assert_eq!(
+            inputs.overrides.get("name"),
+            Some(&json!("Custom GitHub Connection"))
+        );
     }
 }
 

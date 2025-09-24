@@ -1,5 +1,5 @@
 //! TRN helpers aligned with trn-rust: trn:{tool}:{tenant}:{resource_type}/{resource_id}
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 const TOOL: &str = "openact";
 
@@ -78,7 +78,9 @@ pub fn validate_trn(trn: &str) -> Result<()> {
     }
     let rt_and_id = parts[3];
     if !rt_and_id.contains('/') {
-        return Err(anyhow!("trn resource must contain '/' to separate type and id"));
+        return Err(anyhow!(
+            "trn resource must contain '/' to separate type and id"
+        ));
     }
     let mut it = rt_and_id.splitn(2, '/');
     let rt = it.next().unwrap_or("");
@@ -98,7 +100,7 @@ mod tests {
         // Valid TRNs
         assert!(validate_trn("trn:openact:test-tenant:connection/mock").is_ok());
         assert!(validate_trn("trn:openact:test-tenant:task/ping@v1").is_ok());
-        
+
         // Invalid TRNs
         assert!(validate_trn("invalid").is_err());
         assert!(validate_trn("trn:wrong:tenant:resource/id").is_err());
@@ -110,10 +112,11 @@ mod tests {
 
     #[test]
     fn test_parse_connection_trn() {
-        let (tenant, id) = parse_connection_trn("trn:openact:test-tenant:connection/mock@v1").unwrap();
+        let (tenant, id) =
+            parse_connection_trn("trn:openact:test-tenant:connection/mock@v1").unwrap();
         assert_eq!(tenant, "test-tenant");
         assert_eq!(id, "mock@v1");
-        
+
         assert!(parse_connection_trn("trn:openact:tenant:task/id").is_err());
     }
 
@@ -122,7 +125,7 @@ mod tests {
         let (tenant, id) = parse_task_trn("trn:openact:test-tenant:task/ping@v1").unwrap();
         assert_eq!(tenant, "test-tenant");
         assert_eq!(id, "ping@v1");
-        
+
         assert!(parse_task_trn("trn:openact:tenant:connection/id").is_err());
     }
 }

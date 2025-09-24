@@ -1,25 +1,25 @@
 #!/bin/bash
 
-# openact 快速入门脚本（已更新为使用 CLI 与本地 SQLite 存储）
+# openact quick start script (updated to use CLI and local SQLite storage)
 
 set -euo pipefail
 
-echo "🚀 openact 快速入门 (CLI 模式)"
+echo "🚀 openact Quick Start (CLI Mode)"
 echo "=============================="
 
 if [ ! -f "Cargo.toml" ]; then
-  echo "❌ 请在项目根目录运行"
+  echo "❌ Please run in the project root directory"
   exit 1
 fi
 
-# 1) 准备临时数据库与主密钥
+# 1) Prepare temporary database and master key
 TMPDIR=$(mktemp -d)
 export OPENACT_DB_URL="sqlite:$TMPDIR/quickstart.db?mode=rwc"
 export OPENACT_MASTER_KEY=00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
 echo "📦 DB: $OPENACT_DB_URL"
 
-# 2) 创建一个 API Key 连接与任务
-echo "🧩 创建连接与任务..."
+# 2) Create an API Key connection and task
+echo "🧩 Creating connection and task..."
 cat > "$TMPDIR/conn.json" <<'JSON'
 {
   "trn": "trn:openact:default:connection/qs",
@@ -50,13 +50,13 @@ JSON
 cargo run -q --features server --bin openact-cli -- connection upsert --file "$TMPDIR/conn.json"
 cargo run -q --features server --bin openact-cli -- task upsert --file "$TMPDIR/task.json"
 
-# 3) 执行并输出结果
-echo "🏃 执行任务..."
+# 3) Execute and output results
+echo "🏃 Executing task..."
 cargo run -q --features server --bin openact-cli -- execute trn:openact:default:task/qs --json | sed -n '1,60p'
 
-# 4) 查看统计
-echo "📊 系统统计:"
+# 4) View statistics
+echo "📊 System statistics:"
 cargo run -q --features server --bin openact-cli -- system stats --json | sed -n '1,80p'
 
 echo ""
-echo "🎉 快速入门完成！(临时目录: $TMPDIR)"
+echo "🎉 Quick start complete! (Temporary directory: $TMPDIR)"

@@ -1,52 +1,52 @@
 # OpenAct
 
-一个简单、强大、统一的 API 客户端解决方案，基于 AWS Step Functions HTTP Task 设计理念。
+A simple, powerful, and unified API client solution based on AWS Step Functions HTTP Task design principles.
 
-## 快速开始
+## Quick Start
 
-### 1. 环境准备
+### 1. Environment Setup
 
 ```bash
-# 克隆项目
+# Clone the repository
 git clone <repo-url>
 cd openact
 
-# 复制环境配置
+# Copy environment configuration
 cp .env.example .env
 
-# 创建数据目录
+# Create data directory
 mkdir -p data
 ```
 
-### 2. 启动服务器
+### 2. Start the Server
 
 ```bash
-# 启动 HTTP API 服务器
+# Start HTTP API server
 RUST_LOG=info OPENACT_DB_URL=sqlite:./data/openact.db?mode=rwc \
 cargo run --features server --bin openact
 
-# 启动带 OpenAPI 文档的服务器
+# Start server with OpenAPI documentation
 RUST_LOG=info OPENACT_DB_URL=sqlite:./data/openact.db?mode=rwc \
 cargo run --features server,openapi --bin openact
 ```
 
-服务器将在 `http://127.0.0.1:8080` 启动。
+The server will start at `http://127.0.0.1:8080`.
 
-### 📚 API 文档
+### 📚 API Documentation
 
-启用 `openapi` 特性后，可以访问交互式 API 文档：
+With the `openapi` feature enabled, you can access interactive API documentation:
 
 - **Swagger UI**: `http://127.0.0.1:8080/docs`
 - **OpenAPI JSON**: `http://127.0.0.1:8080/api-docs/openapi.json`
 
-API 文档包含完整的端点说明、请求/响应示例和认证信息。
+The API documentation includes complete endpoint descriptions, request/response examples, and authentication information.
 
-### 3. 基本使用
+### 3. Basic Usage
 
-#### 创建连接配置
+#### Create Connection Configuration
 
 ```bash
-# API Key 认证示例
+# API Key authentication example
 cat > github_connection.json << 'EOF'
 {
   "trn": "trn:openact:demo:connection/github@v1",
@@ -64,16 +64,16 @@ cat > github_connection.json << 'EOF'
 }
 EOF
 
-# 创建连接
+# Create connection
 curl -X POST http://127.0.0.1:8080/api/v1/connections \
   -H "Content-Type: application/json" \
   -d @github_connection.json
 ```
 
-#### 创建任务配置
+#### Create Task Configuration
 
 ```bash
-# 创建获取用户信息的任务
+# Create a task to fetch user information
 cat > github_user_task.json << 'EOF'
 {
   "trn": "trn:openact:demo:task/github-user@v1",
@@ -91,30 +91,30 @@ cat > github_user_task.json << 'EOF'
 }
 EOF
 
-# 创建任务
+# Create task
 curl -X POST http://127.0.0.1:8080/api/v1/tasks \
   -H "Content-Type: application/json" \
   -d @github_user_task.json
 ```
 
-#### 执行任务
+#### Execute Task
 
 ```bash
-# 使用 HTTP API 执行
+# Execute using HTTP API
 curl -X POST "http://127.0.0.1:8080/api/v1/tasks/trn%3Aopenact%3Ademo%3Atask%2Fgithub-user%40v1/execute" \
   -H "Content-Type: application/json" \
   -d '{}'
 
-# 或使用 CLI
+# Or use CLI
 cargo run --bin openact-cli -- execute "trn:openact:demo:task/github-user@v1"
 
-# 或使用 CLI 的 server 模式（代理到 HTTP API）
+# Or use CLI in server mode (proxy to HTTP API)
 cargo run --bin openact-cli -- --server http://127.0.0.1:8080 execute "trn:openact:demo:task/github-user@v1"
 ```
 
-## 认证类型支持
+## Authentication Types Support
 
-### 1. API Key 认证
+### 1. API Key Authentication
 
 ```json
 {
@@ -128,7 +128,7 @@ cargo run --bin openact-cli -- --server http://127.0.0.1:8080 execute "trn:opena
 }
 ```
 
-### 2. Basic 认证
+### 2. Basic Authentication
 
 ```json
 {
@@ -158,62 +158,62 @@ cargo run --bin openact-cli -- --server http://127.0.0.1:8080 execute "trn:opena
 }
 ```
 
-### 4. OAuth2 Authorization Code（复杂流程）
+### 4. OAuth2 Authorization Code (Complex Flow)
 
-用于需要用户授权的 OAuth2 流程，支持完整的授权码流程。
+For OAuth2 flows that require user authorization, supports complete authorization code flow.
 
-## CLI 使用
+## CLI Usage
 
-### 连接管理
+### Connection Management
 
 ```bash
-# 列出所有连接
+# List all connections
 openact-cli connection list
 
-# 创建连接
+# Create connection
 openact-cli connection upsert connection.json
 
-# 获取连接详情
+# Get connection details
 openact-cli connection get "trn:openact:demo:connection/github@v1"
 
-# 删除连接
+# Delete connection
 openact-cli connection delete "trn:openact:demo:connection/github@v1"
 ```
 
-### 任务管理
+### Task Management
 
 ```bash
-# 列出所有任务
+# List all tasks
 openact-cli task list
 
-# 创建任务
+# Create task
 openact-cli task upsert task.json
 
-# 获取任务详情
+# Get task details
 openact-cli task get "trn:openact:demo:task/github-user@v1"
 
-# 执行任务
+# Execute task
 openact-cli execute "trn:openact:demo:task/github-user@v1"
 ```
 
-### 系统管理
+### System Management
 
 ```bash
-# 查看系统状态
+# View system status
 openact-cli system stats
 
-# 清理过期数据
+# Clean up expired data
 openact-cli system cleanup
 ```
 
-## 高级功能
+## Advanced Features
 
-### 🔄 实时事件订阅 (WebSocket)
+### 🔄 Real-time Event Subscription (WebSocket)
 
-OpenAct 支持通过 WebSocket 实时订阅 AuthFlow 执行事件：
+OpenAct supports real-time subscription to AuthFlow execution events via WebSocket:
 
 ```javascript
-// 连接到 WebSocket
+// Connect to WebSocket
 const ws = new WebSocket('ws://127.0.0.1:8080/ws');
 
 ws.onopen = () => {
@@ -224,7 +224,7 @@ ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
     console.log('Event received:', data);
     
-    // 处理不同类型的事件
+    // Handle different event types
     switch (data.type) {
         case 'execution_state_change':
             console.log(`Execution ${data.execution_id} changed from ${data.from_state} to ${data.to_state}`);
@@ -240,14 +240,14 @@ ws.onerror = (error) => {
 };
 ```
 
-**事件类型示例**:
-- `execution_state_change`: 执行状态变更
-- `workflow_completed`: 工作流完成
-- `error_occurred`: 错误发生
+**Event Type Examples**:
+- `execution_state_change`: Execution state changes
+- `workflow_completed`: Workflow completion
+- `error_occurred`: Error occurrence
 
-### HTTP 策略配置
+### HTTP Policy Configuration
 
-可以在连接或任务级别配置 HTTP 策略：
+HTTP policies can be configured at connection or task level:
 
 ```json
 {
@@ -264,7 +264,7 @@ ws.onerror = (error) => {
 }
 ```
 
-### 网络配置
+### Network Configuration
 
 ```json
 {
@@ -281,7 +281,7 @@ ws.onerror = (error) => {
 }
 ```
 
-### 超时配置
+### Timeout Configuration
 
 ```json
 {
@@ -293,157 +293,157 @@ ws.onerror = (error) => {
 }
 ```
 
-## TRN (Tenant Resource Name) 格式
+## TRN (Tenant Resource Name) Format
 
-OpenAct 使用 TRN 来唯一标识资源：
+OpenAct uses TRN to uniquely identify resources:
 
 ```
 trn:openact:{tenant}:{resource_type}/{resource_id}
 ```
 
-示例：
+Examples:
 - `trn:openact:demo:connection/github@v1`
 - `trn:openact:demo:task/github-user@v1`
 - `trn:openact:prod:connection/slack-webhook@v2`
 
-## 开发和调试
+## Development and Debugging
 
-### 本地开发
+### Local Development
 
 ```bash
-# 运行测试
+# Run tests
 cargo test
 
-# 运行特定测试
+# Run specific test
 cargo test test_trn_validation
 
-# 运行服务器（开发模式）
+# Run server (development mode)
 RUST_LOG=debug cargo run --features server --bin openact
 ```
 
-### 环境变量
+### Environment Variables
 
-参考 `.env.example` 文件了解所有可配置的环境变量。
+Refer to the `.env.example` file for all configurable environment variables.
 
-## 架构设计
+## Architecture Design
 
-- **连接层**: 管理认证信息和网络配置
-- **任务层**: 定义具体的API调用逻辑  
-- **执行层**: 处理HTTP请求、认证注入、重试等
-- **存储层**: SQLite 数据库存储配置和状态
+- **Connection Layer**: Manages authentication information and network configuration
+- **Task Layer**: Defines specific API call logic  
+- **Execution Layer**: Handles HTTP requests, authentication injection, retries, etc.
+- **Storage Layer**: SQLite database stores configuration and state
 
-## 运维指南
+## Operations Guide
 
-### 系统监控
+### System Monitoring
 
-#### 健康检查端点
+#### Health Check Endpoints
 
 ```bash
-# 基础健康检查（无需认证）
+# Basic health check (no authentication required)
 curl http://localhost:8080/api/v1/system/health
 
-# 详细健康信息  
+# Detailed health information  
 curl http://localhost:8080/health
 ```
 
-#### 系统统计
+#### System Statistics
 
 ```bash
-# 获取详细系统统计
+# Get detailed system statistics
 curl -H "X-API-Key: your-api-key" \
      http://localhost:8080/api/v1/system/stats
 ```
 
-返回信息包括：
-- 数据库连接数、任务数、认证连接数
-- 缓存命中率统计
-- HTTP 客户端池状态
-- 内存使用情况
+Information returned includes:
+- Database connections, tasks, authentication connections count
+- Cache hit rate statistics
+- HTTP client pool status
+- Memory usage
 
-#### Prometheus 指标（需要 metrics feature）
+#### Prometheus Metrics (requires metrics feature)
 
 ```bash
-# 启动带指标的服务器
+# Start server with metrics
 cargo run --features server,openapi,metrics --bin openact
 
-# 获取 Prometheus 格式指标
+# Get Prometheus format metrics
 curl -H "X-API-Key: your-api-key" \
      http://localhost:8080/api/v1/system/metrics
 ```
 
-### 故障排除
+### Troubleshooting
 
-#### 常见问题诊断
+#### Common Issues Diagnosis
 
-**1. 数据库连接问题**
+**1. Database Connection Issues**
 ```bash
-# 检查数据库文件权限
+# Check database file permissions
 ls -la data/openact.db
 
-# 检查数据库完整性
+# Check database integrity
 sqlite3 data/openact.db "PRAGMA integrity_check;"
 ```
 
-**2. 认证问题**
+**2. Authentication Issues**
 ```bash
-# 验证连接状态
+# Verify connection status
 curl -H "X-API-Key: your-api-key" \
      "http://localhost:8080/api/v1/connections/{trn}/status"
 
-# 测试连接
+# Test connection
 curl -X POST -H "X-API-Key: your-api-key" \
      "http://localhost:8080/api/v1/connections/{trn}/test"
 ```
 
-**3. 性能问题**
+**3. Performance Issues**
 ```bash
-# 查看客户端池状态
+# View client pool status
 curl -H "X-API-Key: your-api-key" \
      http://localhost:8080/api/v1/system/stats | jq '.client_pool'
 
-# 系统清理（清理过期认证）
+# System cleanup (clear expired authentications)
 curl -X POST -H "X-API-Key: your-api-key" \
      http://localhost:8080/api/v1/system/cleanup
 ```
 
-#### 日志配置
+#### Logging Configuration
 
 ```bash
-# 调试级别日志
+# Debug level logging
 RUST_LOG=debug cargo run --features server --bin openact
 
-# JSON 格式日志（生产环境推荐）
+# JSON format logging (recommended for production)
 OPENACT_LOG_JSON=true RUST_LOG=info cargo run --features server --bin openact
 
-# 特定模块日志
+# Module-specific logging
 RUST_LOG=openact::executor=debug,openact::auth=trace cargo run --features server --bin openact
 ```
 
-#### 环境变量参考
+#### Environment Variables Reference
 
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `OPENACT_DB_URL` | `sqlite:./data/openact.db?mode=rwc` | 数据库连接URL |
-| `OPENACT_MASTER_KEY` | 必需 | 64位十六进制主密钥 |
-| `OPENACT_LOG_JSON` | `false` | 启用JSON格式日志 |
-| `OPENACT_METRICS_ENABLED` | `false` | 启用Prometheus指标 |
-| `OPENACT_METRICS_ADDR` | `127.0.0.1:9090` | 指标服务监听地址 |
-| `RUST_LOG` | `info` | 日志级别 |
+| Variable Name | Default Value | Description |
+|---------------|---------------|-------------|
+| `OPENACT_DB_URL` | `sqlite:./data/openact.db?mode=rwc` | Database connection URL |
+| `OPENACT_MASTER_KEY` | Required | 64-character hexadecimal master key |
+| `OPENACT_LOG_JSON` | `false` | Enable JSON format logging |
+| `OPENACT_METRICS_ENABLED` | `false` | Enable Prometheus metrics |
+| `OPENACT_METRICS_ADDR` | `127.0.0.1:9090` | Metrics service listen address |
+| `RUST_LOG` | `info` | Logging level |
 
-### OpenAPI 文档使用
+### OpenAPI Documentation Usage
 
-启用 OpenAPI 功能后，可访问：
+With OpenAPI feature enabled, you can access:
 
 - **Swagger UI**: http://localhost:8080/docs
 - **OpenAPI JSON**: http://localhost:8080/api-docs/openapi.json
 
-文档包含：
-- 27个API端点的完整文档
-- 详细的请求/响应示例
-- 错误处理指南和解决提示
-- 认证配置说明
+Documentation includes:
+- Complete documentation for 27 API endpoints
+- Detailed request/response examples
+- Error handling guidelines and resolution hints
+- Authentication configuration instructions
 
-### Docker 部署（推荐）
+### Docker Deployment (Recommended)
 
 ```dockerfile
 FROM rust:1.75 as builder
@@ -459,10 +459,10 @@ CMD ["openact"]
 ```
 
 ```bash
-# 构建镜像
+# Build image
 docker build -t openact .
 
-# 运行容器
+# Run container
 docker run -p 8080:8080 \
   -e OPENACT_MASTER_KEY=your-64-char-key \
   -e OPENACT_LOG_JSON=true \
@@ -470,6 +470,6 @@ docker run -p 8080:8080 \
   openact
 ```
 
-## 许可证
+## License
 
 MIT License

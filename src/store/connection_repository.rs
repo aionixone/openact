@@ -3,14 +3,14 @@
 //! This module provides CRUD operations for Connection configurations,
 //! with support for encryption of sensitive authentication parameters.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
-use sqlx::{SqlitePool, Row};
 use serde_json;
+use sqlx::{Row, SqlitePool};
 
 use crate::{
-    models::{ConnectionConfig, AuthParameters, InvocationHttpParameters},
-    store::encryption::{FieldEncryption, EncryptedField},
+    models::{AuthParameters, ConnectionConfig, InvocationHttpParameters},
+    store::encryption::{EncryptedField, FieldEncryption},
 };
 
 /// Repository for managing Connection configurations
@@ -29,47 +29,55 @@ impl ConnectionRepository {
     pub async fn upsert(&self, connection: &ConnectionConfig) -> Result<()> {
         // Encrypt sensitive auth_parameters
         let auth_params_json = serde_json::to_string(&connection.auth_parameters)?;
-        let (auth_params_encrypted, auth_params_nonce, key_version) = 
+        let (auth_params_encrypted, auth_params_nonce, key_version) =
             self.encrypt_field(&auth_params_json)?;
 
         // Serialize optional JSON fields
-        let default_headers_json = connection.invocation_http_parameters
+        let default_headers_json = connection
+            .invocation_http_parameters
             .as_ref()
             .map(|p| serde_json::to_string(&p.header_parameters))
             .transpose()?;
-        
-        let default_query_params_json = connection.invocation_http_parameters
+
+        let default_query_params_json = connection
+            .invocation_http_parameters
             .as_ref()
             .map(|p| serde_json::to_string(&p.query_string_parameters))
             .transpose()?;
-        
-        let default_body_json = connection.invocation_http_parameters
+
+        let default_body_json = connection
+            .invocation_http_parameters
             .as_ref()
             .map(|p| serde_json::to_string(&p.body_parameters))
             .transpose()?;
 
-        let network_config_json = connection.network_config
+        let network_config_json = connection
+            .network_config
             .as_ref()
             .map(|nc| serde_json::to_string(nc))
             .transpose()?;
 
-        let timeout_config_json = connection.timeout_config
+        let timeout_config_json = connection
+            .timeout_config
             .as_ref()
             .map(|tc| serde_json::to_string(tc))
             .transpose()?;
 
-        let http_policy_json = connection.http_policy
+        let http_policy_json = connection
+            .http_policy
             .as_ref()
             .map(|hp| serde_json::to_string(hp))
             .transpose()?;
 
-        let retry_policy_json = connection.retry_policy
+        let retry_policy_json = connection
+            .retry_policy
             .as_ref()
             .map(|rp| serde_json::to_string(rp))
             .transpose()?;
 
         let authorization_type_str = serde_json::to_string(&connection.authorization_type)?
-            .trim_matches('"').to_string(); // Remove quotes from enum
+            .trim_matches('"')
+            .to_string(); // Remove quotes from enum
 
         sqlx::query(
             r#"
@@ -139,7 +147,8 @@ impl ConnectionRepository {
 
                 // Parse authorization_type
                 let authorization_type_str: String = row.get("authorization_type");
-                let authorization_type = serde_json::from_str(&format!("\"{}\"", authorization_type_str))?;
+                let authorization_type =
+                    serde_json::from_str(&format!("\"{}\"", authorization_type_str))?;
 
                 // Parse optional JSON fields
                 let invocation_http_parameters = self.parse_invocation_http_parameters(&row)?;
@@ -169,7 +178,12 @@ impl ConnectionRepository {
     }
 
     /// List all connections with optional filtering and pagination
-    pub async fn list(&self, authorization_type_filter: Option<&str>, limit: Option<i64>, offset: Option<i64>) -> Result<Vec<ConnectionConfig>> {
+    pub async fn list(
+        &self,
+        authorization_type_filter: Option<&str>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<ConnectionConfig>> {
         let query = if let Some(auth_type) = authorization_type_filter {
             sqlx::query(
                 r#"
@@ -224,7 +238,8 @@ impl ConnectionRepository {
 
             // Parse authorization_type
             let authorization_type_str: String = row.get("authorization_type");
-            let authorization_type = serde_json::from_str(&format!("\"{}\"", authorization_type_str))?;
+            let authorization_type =
+                serde_json::from_str(&format!("\"{}\"", authorization_type_str))?;
 
             // Parse optional JSON fields
             let invocation_http_parameters = self.parse_invocation_http_parameters(&row)?;
@@ -284,10 +299,14 @@ impl ConnectionRepository {
     fn encrypt_field(&self, data: &str) -> Result<(String, String, i64)> {
         if let Some(ref encryption) = self.encryption {
             let encrypted = encryption.encrypt_field(data)?;
-            Ok((encrypted.data, encrypted.nonce, encrypted.key_version as i64))
+            Ok((
+                encrypted.data,
+                encrypted.nonce,
+                encrypted.key_version as i64,
+            ))
         } else {
             // Store directly without encryption (for development only)
-            use base64::{engine::general_purpose::STANDARD, Engine};
+            use base64::{Engine, engine::general_purpose::STANDARD};
             Ok((STANDARD.encode(data), "no-encryption".to_string(), 0))
         }
     }
@@ -302,17 +321,20 @@ impl ConnectionRepository {
             encryption.decrypt_field(&encrypted)
         } else {
             // Decode directly without encryption
-            use base64::{engine::general_purpose::STANDARD, Engine};
-            let decoded = STANDARD.decode(data)
+            use base64::{Engine, engine::general_purpose::STANDARD};
+            let decoded = STANDARD
+                .decode(data)
                 .map_err(|e| anyhow!("Failed to decode data: {}", e))?;
-            String::from_utf8(decoded)
-                .map_err(|e| anyhow!("Invalid UTF-8 in data: {}", e))
+            String::from_utf8(decoded).map_err(|e| anyhow!("Invalid UTF-8 in data: {}", e))
         }
     }
 
-    fn parse_invocation_http_parameters(&self, row: &sqlx::sqlite::SqliteRow) -> Result<Option<InvocationHttpParameters>> {
+    fn parse_invocation_http_parameters(
+        &self,
+        row: &sqlx::sqlite::SqliteRow,
+    ) -> Result<Option<InvocationHttpParameters>> {
         use sqlx::Row;
-        
+
         let headers_json: Option<String> = row.get("default_headers_json");
         let query_params_json: Option<String> = row.get("default_query_params_json");
         let body_json: Option<String> = row.get("default_body_json");
@@ -343,12 +365,16 @@ impl ConnectionRepository {
         }))
     }
 
-    fn parse_optional_json<T>(&self, row: &sqlx::sqlite::SqliteRow, column: &str) -> Result<Option<T>>
+    fn parse_optional_json<T>(
+        &self,
+        row: &sqlx::sqlite::SqliteRow,
+        column: &str,
+    ) -> Result<Option<T>>
     where
         T: serde::de::DeserializeOwned,
     {
         use sqlx::Row;
-        
+
         let json: Option<String> = row.get(column);
         match json {
             Some(j) => Ok(Some(serde_json::from_str(&j)?)),
@@ -360,7 +386,7 @@ impl ConnectionRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AuthorizationType, ApiKeyAuthParameters};
+    use crate::models::{ApiKeyAuthParameters, AuthorizationType};
     use tempfile::tempdir;
 
     async fn create_test_repo() -> (ConnectionRepository, tempfile::TempDir) {
@@ -369,7 +395,7 @@ mod tests {
         let database_url = format!("sqlite://{}?mode=rwc", db_path.display());
 
         let pool = SqlitePool::connect(&database_url).await.unwrap();
-        
+
         // Initialize the database schema
         sqlx::query(
             r#"
@@ -423,12 +449,12 @@ mod tests {
         // Test get
         let retrieved = repo.get_by_trn(&connection.trn).await.unwrap();
         assert!(retrieved.is_some());
-        
+
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.trn, connection.trn);
         assert_eq!(retrieved.name, connection.name);
         assert_eq!(retrieved.authorization_type, connection.authorization_type);
-        
+
         // Check that sensitive data was encrypted/decrypted correctly
         assert!(retrieved.auth_parameters.api_key_auth_parameters.is_some());
         let api_key_params = retrieved.auth_parameters.api_key_auth_parameters.unwrap();
@@ -462,7 +488,10 @@ mod tests {
         // Test list by type
         let api_key_connections = repo.list(Some("api_key"), None, None).await.unwrap();
         assert_eq!(api_key_connections.len(), 1);
-        assert_eq!(api_key_connections[0].authorization_type, AuthorizationType::ApiKey);
+        assert_eq!(
+            api_key_connections[0].authorization_type,
+            AuthorizationType::ApiKey
+        );
 
         // Test count
         let total_count = repo.count_by_type(None).await.unwrap();

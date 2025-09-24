@@ -1,24 +1,24 @@
 #!/bin/bash
 
-# GitHub OAuth2 真实授权演示脚本（更新为 CLI 流程）
+# GitHub OAuth2 Real Authorization Demo Script (Updated for CLI Process)
 
 set -euo pipefail
 
-echo "🚀 GitHub OAuth2 真实授权演示 (CLI)"
+echo "🚀 GitHub OAuth2 Real Authorization Demo (CLI)"
 echo "===================================="
 
 if ! command -v jq >/dev/null 2>&1; then
-  echo "ℹ️ 未检测到 jq，将以纯文本方式展示结果"
+  echo "ℹ️ jq not detected, results will be displayed in plain text"
 fi
 
 if [ -z "${GITHUB_CLIENT_ID:-}" ] || [ -z "${GITHUB_CLIENT_SECRET:-}" ]; then
-  echo "❌ 请设置 GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET 环境变量"
+  echo "❌ Please set GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET environment variables"
   exit 1
 fi
 
 TMPDIR=$(mktemp -d)
 DSL="$TMPDIR/github_oauth.yaml"
-# 使用占位符，避免 $config 在 shell 中被展开
+# Use placeholders to prevent $config from being expanded in the shell
 cat > "$DSL" <<'YAML'
 comment: "GitHub OAuth AC (CLI demo)"
 startAt: "Auth"
@@ -55,7 +55,7 @@ states:
         code_verifier: "{% vars.cb.code_verifier ? vars.cb.code_verifier : '' %}"
     end: true
 YAML
-# 注入实际的 client_id/secret
+# Inject actual client_id/secret
 sed -i '' -e "s/CLIENT_ID/${GITHUB_CLIENT_ID}/g" -e "s/CLIENT_SECRET/${GITHUB_CLIENT_SECRET}/g" "$DSL"
 
 python3 scripts/callback_server.py >/dev/null 2>&1 &
@@ -63,10 +63,10 @@ CB_PID=$!
 trap 'kill $CB_PID 2>/dev/null || true' EXIT
 sleep 0.3
 
-echo "🟢 回调服务器: http://localhost:8080/oauth/callback (pid=$CB_PID)"
-# 使用纯文本输出，便于兼容
+echo "🟢 Callback server: http://localhost:8080/oauth/callback (pid=$CB_PID)"
+# Use plain text output for compatibility
 OUT=$(RUST_LOG=error cargo run -q --features server --bin openact-cli -- oauth start --dsl "$DSL")
-# 兼容 JSON 或纯文本两种输出
+# Compatible with both JSON and plain text output
 if echo "$OUT" | grep -q '^{'; then
   RUN_ID=$(echo "$OUT" | jq -r .run_id)
   AUTH_URL=$(echo "$OUT" | jq -r .authorize_url)
@@ -77,26 +77,26 @@ else
   STATE=$(echo "$OUT" | sed -n 's/^state: \(.*\)$/\1/p' | head -1)
 fi
 if [ -z "${AUTH_URL:-}" ] || [ -z "${RUN_ID:-}" ] || [ -z "${STATE:-}" ]; then
-  echo "❌ 无法解析授权输出:"; echo "$OUT"; exit 1
+  echo "❌ Unable to parse authorization output:"; echo "$OUT"; exit 1
 fi
 
-echo "🔗 授权 URL: $AUTH_URL"
+echo "🔗 Authorization URL: $AUTH_URL"
 if command -v open >/dev/null 2>&1; then open "$AUTH_URL"; fi
 
-echo "⏳ 等待 GitHub 回调 (最多180s)..."
+echo "⏳ Waiting for GitHub callback (up to 180s)..."
 for i in {1..180}; do
   if [ -f /tmp/github_auth_code.txt ]; then break; fi
   sleep 1
 done
 if [ ! -f /tmp/github_auth_code.txt ]; then
-  echo "❌ 超时未收到回调"
+  echo "❌ Timeout waiting for callback"
   exit 1
 fi
 CODE=$(cat /tmp/github_auth_code.txt)
-echo "✅ 获取授权码"
+echo "✅ Authorization code received"
 
-echo "➡️  交换 token..."
+echo "➡️  Exchanging token..."
 RES=$(RUST_LOG=error cargo run -q --features server --bin openact-cli -- oauth resume --dsl "$DSL" --run-id "$RUN_ID" --code "$CODE" --state "$STATE")
 echo "$RES"
 
-echo "🎉 完成 GitHub OAuth2 授权演示"
+echo "🎉 GitHub OAuth2 Authorization Demo Completed"

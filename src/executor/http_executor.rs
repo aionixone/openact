@@ -1,6 +1,6 @@
-//! HTTP执行器
+//! HTTP Executor
 //!
-//! 处理直接HTTP调用：API Key、Basic Auth、OAuth2 Client Credentials
+//! Handles direct HTTP calls: API Key, Basic Auth, OAuth2 Client Credentials
 
 use super::auth_injector::create_auth_injector;
 use super::parameter_merger::ParameterMerger;
@@ -16,28 +16,28 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tracing::instrument;
 
-// HTTP Client 池已移动至 crate::executor::client_pool
+// HTTP Client pool has been moved to crate::executor::client_pool
 
-/// HTTP执行器：处理直接HTTP调用
+/// HTTP Executor: Handles direct HTTP calls
 pub struct HttpExecutor {
-    /// 重试策略
+    /// Retry policy
     pub retry_policy: RetryPolicy,
 }
 
 impl HttpExecutor {
-    /// 创建新的HTTP执行器
+    /// Create a new HTTP Executor
     pub fn new() -> Self {
         Self {
             retry_policy: RetryPolicy::default(),
         }
     }
 
-    /// 创建带自定义重试策略的HTTP执行器
+    /// Create an HTTP Executor with a custom retry policy
     pub fn with_retry_policy(retry_policy: RetryPolicy) -> Self {
         Self { retry_policy }
     }
 
-    /// 执行HTTP请求
+    /// Execute an HTTP request
     #[instrument(
         level = "info",
         skip(self, connection, task),
@@ -86,21 +86,21 @@ impl HttpExecutor {
         result
     }
 
-    /// 执行HTTP请求（带重试逻辑）
+    /// Execute an HTTP request (with retry logic)
     async fn execute_with_retry(
         &self,
         connection: &ConnectionConfig,
         task: &TaskConfig,
         request_id: &str,
     ) -> Result<Response> {
-        // 合并重试策略：任务级 > 连接级 > 默认
+        // Merge retry policies: Task-level > Connection-level > Default
         let effective_retry_policy = self.merge_retry_policies(connection, task);
 
         let mut last_error = None;
         let mut retry_after_delay: Option<Duration> = None;
 
         for attempt in 0..=effective_retry_policy.max_retries {
-            // 延迟（除了第一次尝试）
+            // Delay (except for the first attempt)
             if attempt > 0 {
                 let delay = self
                     .calculate_delay(&effective_retry_policy, attempt, retry_after_delay)
@@ -121,11 +121,11 @@ impl HttpExecutor {
 
             match self.execute_single_request(connection, task).await {
                 Ok(response) => {
-                    // 检查是否需要重试（基于状态码）
+                    // Check if a retry is needed (based on status code)
                     if self.should_retry_response(&response, &effective_retry_policy)
                         && attempt < effective_retry_policy.max_retries
                     {
-                        // 解析 Retry-After 头以供下次重试使用
+                        // Parse Retry-After header for the next retry
                         retry_after_delay = self.parse_retry_after(&response);
                         last_error = Some(anyhow!(
                             "HTTP {} (attempt {}/{}) - will retry after {:?}",
@@ -137,14 +137,14 @@ impl HttpExecutor {
                         continue;
                     }
 
-                    // 请求成功 (attempt: {}次重试)
+                    // Request succeeded (attempt: {} retries)
                     return Ok(response);
                 }
                 Err(e) => {
                     last_error = Some(e);
 
                     if attempt < effective_retry_policy.max_retries {
-                        // 请求失败，将重试 (attempt {}/{})
+                        // Request failed, will retry (attempt {}/{})
                         continue;
                     }
                 }
@@ -154,28 +154,28 @@ impl HttpExecutor {
         Err(last_error.unwrap_or_else(|| anyhow!("HTTP request failed with no error details")))
     }
 
-    /// 执行单次HTTP请求
+    /// Execute a single HTTP request
     async fn execute_single_request(
         &self,
         connection: &ConnectionConfig,
         task: &TaskConfig,
     ) -> Result<Response> {
-        // 1. 合并参数（ConnectionWins策略）
+        // 1. Merge parameters (ConnectionWins strategy)
         let mut merged =
             ParameterMerger::merge(connection, task).context("Failed to merge parameters")?;
 
-        // 2. 注入认证信息
+        // 2. Inject authentication
         self.inject_authentication(&mut merged.headers, &mut merged.query_params, connection)
             .await
             .context("Failed to inject authentication")?;
 
-        // 3. 构建完整URL
+        // 3. Build the complete URL
         let url = self.build_url(&merged.endpoint, &merged.query_params)?;
 
-        // 4. 获取对应配置的HTTP客户端（委托 client_pool）
+        // 4. Get the HTTP client for the configuration (delegated to client_pool)
         let client = crate::executor::client_pool::get_client_for(connection, task)?;
 
-        // 5. 构建HTTP请求
+        // 5. Build the HTTP request
         let mut request_builder = client
             .request(
                 merged
@@ -186,12 +186,12 @@ impl HttpExecutor {
             )
             .headers(merged.headers);
 
-        // 6. 添加请求体（如果有）
+        // 6. Add request body (if any)
         if let Some(body) = merged.body {
             request_builder = request_builder.json(&body);
         }
 
-        // 7. 执行请求
+        // 7. Execute the request
         let response = request_builder
             .send()
             .await
@@ -200,13 +200,13 @@ impl HttpExecutor {
         Ok(response)
     }
 
-    /// 判断是否应该基于响应重试
+    /// Determine if a retry should be based on the response
     fn should_retry_response(&self, response: &Response, retry_policy: &RetryPolicy) -> bool {
-        // 使用重试策略中配置的状态码
+        // Use status codes configured in the retry policy
         retry_policy.should_retry_status(response.status().as_u16())
     }
 
-    /// 注入认证信息（包括OAuth2 token自动刷新）
+    /// Inject authentication (including OAuth2 token auto-refresh)
     async fn inject_authentication(
         &self,
         headers: &mut reqwest::header::HeaderMap,
@@ -220,7 +220,7 @@ impl HttpExecutor {
 
         match connection.authorization_type {
             AuthorizationType::OAuth2ClientCredentials => {
-                // OAuth2 Client Credentials: 通过 AuthRuntime 获取或刷新 token
+                // OAuth2 Client Credentials: Get or refresh token via AuthRuntime
                 use crate::oauth::runtime as oauth_rt;
                 let outcome = oauth_rt::get_cc_token(&connection.trn).await?;
                 let token = match outcome {
@@ -234,7 +234,7 @@ impl HttpExecutor {
                 headers.insert(AUTHORIZATION, header_value);
             }
             AuthorizationType::OAuth2AuthorizationCode => {
-                // OAuth2 Authorization Code: 通过 AuthRuntime 刷新/获取 token，优先使用绑定的 auth_ref
+                // OAuth2 Authorization Code: Refresh/get token via AuthRuntime, prefer using bound auth_ref
                 use crate::oauth::runtime as oauth_rt;
                 tracing::debug!(target: "executor", trn=%connection.trn, auth_ref=?connection.auth_ref, "AC auth path dispatch");
                 let outcome = if let Some(ref auth_ref) = connection.auth_ref {
@@ -254,7 +254,7 @@ impl HttpExecutor {
                 headers.insert(AUTHORIZATION, header_value);
             }
             _ => {
-                // API Key和Basic Auth: 直接注入，无需token刷新
+                // API Key and Basic Auth: Direct injection, no token refresh needed
                 let injector = create_auth_injector(&connection.authorization_type);
                 injector
                     .inject_auth(headers, query_params, connection)
@@ -265,15 +265,15 @@ impl HttpExecutor {
         Ok(())
     }
 
-    // OAuth2 Client Credentials 分支逻辑已迁移至 oauth::runtime
+    // OAuth2 Client Credentials branch logic has been moved to oauth::runtime
 
-    // client_key 逻辑已移动至 crate::executor::client_pool
+    // client_key logic has been moved to crate::executor::client_pool
 
-    // client 构建已提取至 client_pool 模块
+    // client construction has been extracted to client_pool module
 
-    // OAuth2 Authorization Code 分支逻辑已迁移至 oauth::runtime
+    // OAuth2 Authorization Code branch logic has been moved to oauth::runtime
 
-    /// 构建完整URL（包含query参数）
+    /// Build the complete URL (including query parameters)
     fn build_url(&self, endpoint: &str, query_params: &HashMap<String, String>) -> Result<String> {
         if query_params.is_empty() {
             return Ok(endpoint.to_string());
@@ -289,30 +289,30 @@ impl HttpExecutor {
         Ok(format!("{}{}{}", endpoint, separator, query_string))
     }
 
-    /// 合并重试策略：任务级 > 连接级 > 默认
+    /// Merge retry policies: Task-level > Connection-level > Default
     fn merge_retry_policies(
         &self,
         connection: &ConnectionConfig,
         task: &TaskConfig,
     ) -> RetryPolicy {
-        // 任务级优先
+        // Task-level takes precedence
         if let Some(ref task_policy) = task.retry_policy {
             return task_policy.clone();
         }
 
-        // 连接级次之
+        // Connection-level is next
         if let Some(ref conn_policy) = connection.retry_policy {
             return conn_policy.clone();
         }
 
-        // 默认策略
+        // Default policy
         self.retry_policy.clone()
     }
 
-    /// 解析 Retry-After 头，返回建议的延迟时间
-    /// 支持两种格式：
-    /// 1. 秒数：120
-    /// 2. HTTP-date：Wed, 21 Oct 2015 07:28:00 GMT
+    /// Parse the Retry-After header, returning the suggested delay
+    /// Supports two formats:
+    /// 1. Seconds: 120
+    /// 2. HTTP-date: Wed, 21 Oct 2015 07:28:00 GMT
     fn parse_retry_after(&self, response: &Response) -> Option<Duration> {
         response
             .headers()
@@ -321,34 +321,34 @@ impl HttpExecutor {
             .and_then(|s| self.parse_retry_after_value(s))
     }
 
-    /// 解析 Retry-After 值的具体实现
+    /// Implementation of parsing the Retry-After value
     fn parse_retry_after_value(&self, value: &str) -> Option<Duration> {
         let trimmed = value.trim();
 
-        // 尝试解析为秒数
+        // Try to parse as seconds
         if let Ok(seconds) = trimmed.parse::<u64>() {
-            // 限制最大值以防止过长延迟（24小时）
+            // Limit the maximum value to prevent excessive delay (24 hours)
             const MAX_RETRY_AFTER_SECONDS: u64 = 24 * 60 * 60;
             let capped_seconds = seconds.min(MAX_RETRY_AFTER_SECONDS);
             return Some(Duration::from_secs(capped_seconds));
         }
 
-        // 尝试解析为 HTTP-date 格式
+        // Try to parse as HTTP-date format
         self.parse_http_date(trimmed)
     }
 
-    /// 解析 HTTP-date 格式，返回距当前时间的延迟
+    /// Parse HTTP-date format, returning the delay from the current time
     fn parse_http_date(&self, date_str: &str) -> Option<Duration> {
         use chrono::{DateTime, NaiveDateTime, Utc};
 
-        // 支持常见的 HTTP-date 格式：
+        // Support common HTTP-date formats:
         // RFC 1123: Wed, 21 Oct 2015 07:28:00 GMT
         // RFC 850: Wednesday, 21-Oct-15 07:28:00 GMT
         // asctime(): Wed Oct 21 07:28:00 2015
 
-        // 尝试 RFC 1123 格式（最常用）
+        // Try RFC 1123 format (most common)
         if date_str.ends_with(" GMT") {
-            let date_part = &date_str[..date_str.len() - 4]; // 移除 " GMT"
+            let date_part = &date_str[..date_str.len() - 4]; // Remove " GMT"
             if let Ok(naive_time) =
                 NaiveDateTime::parse_from_str(date_part, "%a, %d %b %Y %H:%M:%S")
             {
@@ -365,9 +365,9 @@ impl HttpExecutor {
             }
         }
 
-        // 尝试 RFC 850 格式
+        // Try RFC 850 format
         if date_str.ends_with(" GMT") && date_str.contains("-") {
-            let date_part = &date_str[..date_str.len() - 4]; // 移除 " GMT"
+            let date_part = &date_str[..date_str.len() - 4]; // Remove " GMT"
             if let Ok(naive_time) =
                 NaiveDateTime::parse_from_str(date_part, "%A, %d-%b-%y %H:%M:%S")
             {
@@ -384,7 +384,7 @@ impl HttpExecutor {
             }
         }
 
-        // 尝试 asctime 格式（无时区，假设 UTC）
+        // Try asctime format (no timezone, assume UTC)
         if let Ok(naive_time) = NaiveDateTime::parse_from_str(date_str, "%a %b %d %H:%M:%S %Y") {
             let target_time = DateTime::<Utc>::from_naive_utc_and_offset(naive_time, Utc);
             let now = Utc::now();
@@ -401,7 +401,7 @@ impl HttpExecutor {
         None
     }
 
-    /// 计算延迟时间，考虑 Retry-After 头
+    /// Calculate the delay time, considering the Retry-After header
     async fn calculate_delay(
         &self,
         retry_policy: &RetryPolicy,
@@ -412,7 +412,7 @@ impl HttpExecutor {
 
         if retry_policy.respect_retry_after {
             if let Some(server_delay) = retry_after {
-                // 使用服务器建议的延迟时间，但不超过最大延迟
+                // Use the server-suggested delay, but do not exceed the maximum delay
                 let max_delay = Duration::from_millis(retry_policy.max_delay_ms);
                 return server_delay.min(max_delay);
             }
@@ -502,7 +502,7 @@ mod tests {
         let url = executor
             .build_url("https://api.example.com/users", &params)
             .unwrap();
-        // URL参数顺序可能不同，所以检查包含关系
+        // The order of URL parameters may vary, so check for containment
         assert!(url.starts_with("https://api.example.com/users?"));
         assert!(url.contains("limit=10"));
         assert!(url.contains("offset=20"));
@@ -522,7 +522,7 @@ mod tests {
         assert!(url.contains("&"));
     }
 
-    // 注意：实际的HTTP请求测试需要mock服务器，这里只测试URL构建逻辑
+    // Note: Actual HTTP request tests require a mock server, here we only test URL construction logic
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_oauth2_ac_with_auth_ref_and_refresh() {
@@ -639,26 +639,26 @@ mod tests {
     fn test_parse_retry_after_seconds() {
         let executor = HttpExecutor::new();
 
-        // 测试正常的秒数
+        // Test normal seconds
         assert_eq!(
             executor.parse_retry_after_value("60"),
             Some(Duration::from_secs(60))
         );
 
-        // 测试带空格的秒数
+        // Test seconds with spaces
         assert_eq!(
             executor.parse_retry_after_value("  120  "),
             Some(Duration::from_secs(120))
         );
 
-        // 测试大数值（应该被限制在24小时内）
+        // Test large value (should be capped at 24 hours)
         let max_seconds = 24 * 60 * 60;
         assert_eq!(
             executor.parse_retry_after_value(&(max_seconds + 1000).to_string()),
             Some(Duration::from_secs(max_seconds))
         );
 
-        // 测试零值
+        // Test zero value
         assert_eq!(
             executor.parse_retry_after_value("0"),
             Some(Duration::from_secs(0))
@@ -669,24 +669,24 @@ mod tests {
     fn test_parse_retry_after_http_date() {
         let executor = HttpExecutor::new();
 
-        // 创建一个未来的时间（当前时间+60秒）
+        // Create a future time (current time + 60 seconds)
         let future_time = chrono::Utc::now() + chrono::Duration::seconds(60);
 
-        // 测试 RFC 1123 格式
+        // Test RFC 1123 format
         let rfc1123_str = future_time.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let parsed = executor.parse_retry_after_value(&rfc1123_str);
 
         assert!(parsed.is_some());
         let duration = parsed.unwrap();
-        // 允许几秒的误差（测试执行时间）
+        // Allow a few seconds of error (test execution time)
         assert!(duration.as_secs() >= 55 && duration.as_secs() <= 65);
 
-        // 测试过去的时间（应该返回 None）
+        // Test past time (should return None)
         let past_time = chrono::Utc::now() - chrono::Duration::seconds(60);
         let past_str = past_time.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         assert_eq!(executor.parse_retry_after_value(&past_str), None);
 
-        // 测试 RFC 850 格式
+        // Test RFC 850 format
         let future_time_850 = chrono::Utc::now() + chrono::Duration::seconds(30);
         let rfc850_str = future_time_850
             .format("%A, %d-%b-%y %H:%M:%S GMT")
@@ -694,7 +694,7 @@ mod tests {
         let parsed_850 = executor.parse_retry_after_value(&rfc850_str);
         assert!(parsed_850.is_some());
 
-        // 测试 asctime 格式
+        // Test asctime format
         let future_time_asc = chrono::Utc::now() + chrono::Duration::seconds(90);
         let asctime_str = future_time_asc.format("%a %b %d %H:%M:%S %Y").to_string();
         let parsed_asc = executor.parse_retry_after_value(&asctime_str);
@@ -707,12 +707,12 @@ mod tests {
     fn test_parse_retry_after_invalid_formats() {
         let executor = HttpExecutor::new();
 
-        // 测试无效的字符串
+        // Test invalid strings
         assert_eq!(executor.parse_retry_after_value("invalid"), None);
         assert_eq!(executor.parse_retry_after_value(""), None);
         assert_eq!(executor.parse_retry_after_value("abc123"), None);
 
-        // 测试无效的日期格式
+        // Test invalid date formats
         assert_eq!(
             executor.parse_retry_after_value("32 Oct 2023 10:00:00 GMT"),
             None
@@ -722,7 +722,7 @@ mod tests {
             None
         );
 
-        // 测试负数（应该解析失败）
+        // Test negative numbers (should fail to parse)
         assert_eq!(executor.parse_retry_after_value("-10"), None);
     }
 
@@ -730,14 +730,14 @@ mod tests {
     fn test_parse_retry_after_max_delay_cap() {
         let executor = HttpExecutor::new();
 
-        // 测试超过24小时的日期（应该被限制）
+        // Test date beyond 24 hours (should be capped)
         let far_future = chrono::Utc::now() + chrono::Duration::hours(48);
         let far_future_str = far_future.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let parsed = executor.parse_retry_after_value(&far_future_str);
 
         assert!(parsed.is_some());
         let duration = parsed.unwrap();
-        // 应该被限制在24小时内
+        // Should be capped at 24 hours
         assert_eq!(duration, Duration::from_secs(24 * 60 * 60));
     }
 
@@ -745,10 +745,10 @@ mod tests {
     fn test_parse_http_date_edge_cases() {
         let executor = HttpExecutor::new();
 
-        // 测试不同的星期几缩写
+        // Test different day of the week abbreviations
         let future = chrono::Utc::now() + chrono::Duration::seconds(300);
 
-        // 测试所有可能的格式变体
+        // Test all possible format variants
         let formats = vec![
             "%a, %d %b %Y %H:%M:%S GMT", // RFC 1123
             "%A, %d-%b-%y %H:%M:%S GMT", // RFC 850
@@ -760,7 +760,7 @@ mod tests {
             let parsed = executor.parse_http_date(&formatted);
             if parsed.is_some() {
                 let duration = parsed.unwrap();
-                // 允许一些时间差异
+                // Allow some time variance
                 assert!(
                     duration.as_secs() >= 290 && duration.as_secs() <= 310,
                     "Failed for format: {} with duration: {:?}",
@@ -777,7 +777,7 @@ mod tests {
 
         let executor = HttpExecutor::new();
 
-        // 测试延迟计算逻辑（无需实际网络请求）
+        // Test delay calculation logic (no actual network request needed)
         let retry_policy = RetryPolicy {
             max_retries: 3,
             base_delay_ms: 100,
@@ -787,29 +787,29 @@ mod tests {
             respect_retry_after: true,
         };
 
-        // 测试没有 Retry-After 时的延迟
+        // Test delay without Retry-After
         let delay_no_retry_after = executor.calculate_delay(&retry_policy, 1, None).await;
         assert_eq!(delay_no_retry_after, Duration::from_millis(100)); // 100 * 2^0 = 100ms (attempt 1)
 
-        // 测试有 Retry-After 时的延迟（服务器建议更短）
+        // Test delay with Retry-After (server suggests shorter)
         let server_delay = Duration::from_millis(50);
         let delay_with_retry_after = executor
             .calculate_delay(&retry_policy, 1, Some(server_delay))
             .await;
         assert_eq!(delay_with_retry_after, server_delay);
 
-        // 测试 Retry-After 超过最大延迟时（应该被限制）
+        // Test Retry-After exceeding max delay (should be capped)
         let long_server_delay = Duration::from_millis(10000);
         let delay_capped = executor
             .calculate_delay(&retry_policy, 1, Some(long_server_delay))
             .await;
         assert_eq!(delay_capped, Duration::from_millis(5000)); // max_delay_ms
 
-        // 测试第二次重试的延迟计算
+        // Test delay calculation for second retry
         let delay_attempt_2 = executor.calculate_delay(&retry_policy, 2, None).await;
         assert_eq!(delay_attempt_2, Duration::from_millis(200)); // 100 * 2^1 = 200ms (attempt 2)
 
-        // 测试禁用 respect_retry_after 时
+        // Test with respect_retry_after disabled
         let retry_policy_no_respect = RetryPolicy {
             max_retries: 3,
             base_delay_ms: 100,
@@ -821,6 +821,6 @@ mod tests {
         let delay_ignored = executor
             .calculate_delay(&retry_policy_no_respect, 1, Some(Duration::from_millis(50)))
             .await;
-        assert_eq!(delay_ignored, Duration::from_millis(100)); // 应该忽略 Retry-After，使用策略延迟
+        assert_eq!(delay_ignored, Duration::from_millis(100)); // Should ignore Retry-After, use policy delay
     }
 }

@@ -1,51 +1,51 @@
 #!/bin/bash
 
-# GitHub OAuth2 完整流程测试脚本
-# 从授权 URL 生成到数据库写入的端到端测试
+# GitHub OAuth2 Complete Flow Test Script
+# End-to-end test from generating authorization URL to database entry
 
 set -e
 
 BASE_URL="http://localhost:8080/api/v1/authflow"
 
-echo "🚀 GitHub OAuth2 完整流程测试"
+echo "🚀 GitHub OAuth2 Complete Flow Test"
 echo "=============================="
 
-# 检查环境变量
+# Check environment variables
 if [ -z "$GITHUB_CLIENT_ID" ]; then
-    echo "❌ 错误: 请设置 GITHUB_CLIENT_ID 环境变量"
-    echo "💡 设置方法: export GITHUB_CLIENT_ID=your_client_id"
+    echo "❌ Error: Please set the GITHUB_CLIENT_ID environment variable"
+    echo "💡 How to set: export GITHUB_CLIENT_ID=your_client_id"
     exit 1
 fi
 
 if [ -z "$GITHUB_CLIENT_SECRET" ]; then
-    echo "❌ 错误: 请设置 GITHUB_CLIENT_SECRET 环境变量"
-    echo "💡 设置方法: export GITHUB_CLIENT_SECRET=your_client_secret"
+    echo "❌ Error: Please set the GITHUB_CLIENT_SECRET environment variable"
+    echo "💡 How to set: export GITHUB_CLIENT_SECRET=your_client_secret"
     exit 1
 fi
 
-echo "✅ 环境变量检查通过"
+echo "✅ Environment variables check passed"
 echo "   Client ID: ${GITHUB_CLIENT_ID:0:8}..."
 
-# 检查服务器是否运行
+# Check if the server is running
 echo ""
-echo "🔍 检查服务器状态..."
+echo "🔍 Checking server status..."
 if ! curl -s "$BASE_URL/health" > /dev/null; then
-    echo "❌ 错误: 服务器未运行，请先启动 openact 服务器"
-    echo "💡 启动方法: cargo run --bin openact-server"
+    echo "❌ Error: Server is not running, please start the openact server"
+    echo "💡 How to start: cargo run --bin openact-server"
     exit 1
 fi
-echo "✅ 服务器运行正常"
+echo "✅ Server is running"
 
-# 1. 创建工作流
+# 1. Create workflow
 echo ""
-echo "📋 步骤 1: 创建 GitHub OAuth2 工作流..."
+echo "📋 Step 1: Create GitHub OAuth2 workflow..."
 
-# 创建临时的工作流定义文件
+# Create a temporary workflow definition file
 TEMP_WORKFLOW="/tmp/github_oauth_workflow_$$.json"
 cat > "$TEMP_WORKFLOW" << 'EOF'
 {
   "name": "GitHub OAuth2 Complete Test",
-  "description": "完整的 GitHub OAuth2 认证流程测试",
+  "description": "Complete GitHub OAuth2 authentication flow test",
   "dsl": {
     "version": "1.0",
     "provider": {
@@ -168,21 +168,21 @@ WORKFLOW_RESPONSE=$(curl -s -X POST "$BASE_URL/workflows" \
   -H "Content-Type: application/json" \
   -d @"$TEMP_WORKFLOW")
 
-# 清理临时文件
+# Clean up temporary file
 rm -f "$TEMP_WORKFLOW"
 
 WORKFLOW_ID=$(echo "$WORKFLOW_RESPONSE" | jq -r '.id')
 if [ "$WORKFLOW_ID" = "null" ] || [ -z "$WORKFLOW_ID" ]; then
-    echo "❌ 创建工作流失败:"
+    echo "❌ Failed to create workflow:"
     echo "$WORKFLOW_RESPONSE" | jq '.'
     exit 1
 fi
 
-echo "✅ 工作流创建成功: $WORKFLOW_ID"
+echo "✅ Workflow created successfully: $WORKFLOW_ID"
 
-# 2. 启动执行
+# 2. Start execution
 echo ""
-echo "🚀 步骤 2: 启动 OAuth2 流程执行..."
+echo "🚀 Step 2: Start OAuth2 flow execution..."
 EXECUTION_RESPONSE=$(curl -s -X POST "$BASE_URL/executions" \
   -H "Content-Type: application/json" \
   -d "{
@@ -202,54 +202,54 @@ EXECUTION_RESPONSE=$(curl -s -X POST "$BASE_URL/executions" \
 
 EXECUTION_ID=$(echo "$EXECUTION_RESPONSE" | jq -r '.execution_id')
 if [ "$EXECUTION_ID" = "null" ] || [ -z "$EXECUTION_ID" ]; then
-    echo "❌ 启动执行失败:"
+    echo "❌ Failed to start execution:"
     echo "$EXECUTION_RESPONSE" | jq '.'
     exit 1
 fi
 
-echo "✅ 执行启动成功: $EXECUTION_ID"
+echo "✅ Execution started successfully: $EXECUTION_ID"
 
-# 3. 检查执行状态
+# 3. Check execution status
 echo ""
-echo "⏳ 步骤 3: 检查执行状态..."
+echo "⏳ Step 3: Check execution status..."
 sleep 2
 
 STATUS_RESPONSE=$(curl -s "$BASE_URL/executions/$EXECUTION_ID")
 STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status')
 
-echo "📊 当前状态: $STATUS"
+echo "📊 Current status: $STATUS"
 
 if [ "$STATUS" = "pending" ]; then
-    echo "✅ 流程已暂停，等待用户授权"
+    echo "✅ Flow is paused, waiting for user authorization"
     
-    # 获取授权 URL
+    # Get authorization URL
     AUTHORIZE_URL=$(echo "$STATUS_RESPONSE" | jq -r '.pending_info.authorize_url')
     if [ "$AUTHORIZE_URL" != "null" ] && [ -n "$AUTHORIZE_URL" ]; then
         echo ""
-        echo "🔗 授权 URL:"
+        echo "🔗 Authorization URL:"
         echo "$AUTHORIZE_URL"
         echo ""
-        echo "📝 下一步操作:"
-        echo "   1. 在浏览器中访问上面的授权 URL"
-        echo "   2. 登录 GitHub 并授权应用"
-        echo "   3. GitHub 会重定向到回调 URL"
-        echo "   4. 运行以下命令继续流程:"
+        echo "📝 Next steps:"
+        echo "   1. Visit the authorization URL above in your browser"
+        echo "   2. Log in to GitHub and authorize the application"
+        echo "   3. GitHub will redirect to the callback URL"
+        echo "   4. Run the following command to continue the flow:"
         echo "      curl -X POST \"$BASE_URL/executions/$EXECUTION_ID/resume\" \\"
         echo "        -H \"Content-Type: application/json\" \\"
-        echo "        -d '{\"code\": \"<从回调URL获取的code>\"}'"
+        echo "        -d '{\"code\": \"<code from callback URL>\"}'"
         echo ""
-        echo "💡 或者使用模拟回调继续测试:"
+        echo "💡 Or use the simulate callback to continue testing:"
         echo "   ./scripts/simulate_callback.sh $EXECUTION_ID"
     else
-        echo "⚠️  未找到授权 URL"
+        echo "⚠️  Authorization URL not found"
     fi
 else
-    echo "📊 执行状态: $STATUS"
-    echo "📋 执行详情:"
+    echo "📊 Execution status: $STATUS"
+    echo "📋 Execution details:"
     echo "$STATUS_RESPONSE" | jq '.'
 fi
 
 echo ""
-echo "🎯 测试完成！"
-echo "📋 工作流 ID: $WORKFLOW_ID"
-echo "📋 执行 ID: $EXECUTION_ID"
+echo "🎯 Test completed!"
+echo "📋 Workflow ID: $WORKFLOW_ID"
+echo "📋 Execution ID: $EXECUTION_ID"

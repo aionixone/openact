@@ -3,10 +3,10 @@
 //! This module provides CRUD operations for Task configurations,
 //! with support for JSON serialization of complex parameters.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
-use sqlx::{SqlitePool, Row};
 use serde_json;
+use sqlx::{Row, SqlitePool};
 
 use crate::models::TaskConfig;
 
@@ -24,42 +24,50 @@ impl TaskRepository {
     /// Create or update a task
     pub async fn upsert(&self, task: &TaskConfig) -> Result<()> {
         // Serialize optional JSON fields
-        let headers_json = task.headers
+        let headers_json = task
+            .headers
             .as_ref()
             .map(|h| serde_json::to_string(h))
             .transpose()?;
 
-        let query_params_json = task.query_params
+        let query_params_json = task
+            .query_params
             .as_ref()
             .map(|q| serde_json::to_string(q))
             .transpose()?;
 
-        let request_body_json = task.request_body
+        let request_body_json = task
+            .request_body
             .as_ref()
             .map(|b| serde_json::to_string(b))
             .transpose()?;
 
-        let timeout_config_json = task.timeout_config
+        let timeout_config_json = task
+            .timeout_config
             .as_ref()
             .map(|tc| serde_json::to_string(tc))
             .transpose()?;
 
-        let network_config_json = task.network_config
+        let network_config_json = task
+            .network_config
             .as_ref()
             .map(|nc| serde_json::to_string(nc))
             .transpose()?;
 
-        let http_policy_json = task.http_policy
+        let http_policy_json = task
+            .http_policy
             .as_ref()
             .map(|hp| serde_json::to_string(hp))
             .transpose()?;
 
-        let response_policy_json = task.response_policy
+        let response_policy_json = task
+            .response_policy
             .as_ref()
             .map(|rp| serde_json::to_string(rp))
             .transpose()?;
 
-        let retry_policy_json = task.retry_policy
+        let retry_policy_json = task
+            .retry_policy
             .as_ref()
             .map(|rp| serde_json::to_string(rp))
             .transpose()?;
@@ -123,7 +131,12 @@ impl TaskRepository {
     }
 
     /// List tasks with optional filtering
-    pub async fn list(&self, connection_trn: Option<&str>, limit: Option<i64>, offset: Option<i64>) -> Result<Vec<TaskConfig>> {
+    pub async fn list(
+        &self,
+        connection_trn: Option<&str>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<TaskConfig>> {
         let query = if let Some(conn_trn) = connection_trn {
             sqlx::query(
                 r#"
@@ -251,17 +264,19 @@ impl TaskRepository {
     }
 
     /// Parse optional JSON field from database row
-    fn parse_optional_json<T>(&self, row: &sqlx::sqlite::SqliteRow, column: &str) -> Result<Option<T>>
+    fn parse_optional_json<T>(
+        &self,
+        row: &sqlx::sqlite::SqliteRow,
+        column: &str,
+    ) -> Result<Option<T>>
     where
         T: serde::de::DeserializeOwned,
     {
         let json_str: Option<String> = row.try_get(column).ok();
         match json_str {
-            Some(s) if !s.is_empty() => {
-                serde_json::from_str(&s)
-                    .map(Some)
-                    .map_err(|e| anyhow!("Failed to parse JSON field {}: {}", column, e))
-            }
+            Some(s) if !s.is_empty() => serde_json::from_str(&s)
+                .map(Some)
+                .map_err(|e| anyhow!("Failed to parse JSON field {}: {}", column, e)),
             _ => Ok(None),
         }
     }
@@ -270,10 +285,10 @@ impl TaskRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
+    use crate::models::{ApiKeyAuthParameters, AuthorizationType, ConnectionConfig};
     use crate::store::database::DatabaseManager;
     use std::collections::HashMap;
-    use crate::models::{ConnectionConfig, AuthorizationType, ApiKeyAuthParameters};
 
     async fn create_test_repo() -> (TaskRepository, DatabaseManager) {
         let database_url = "sqlite::memory:";
@@ -344,7 +359,7 @@ mod tests {
         // Test delete
         let deleted = repo.delete(&task.trn).await.unwrap();
         assert!(deleted);
-        
+
         let not_found = repo.get_by_trn(&task.trn).await.unwrap();
         assert!(not_found.is_none());
     }
@@ -363,7 +378,7 @@ mod tests {
             "https://api.example.com/users".to_string(),
             "GET".to_string(),
         );
-        
+
         let task2 = TaskConfig::new(
             "trn:task:test-2".to_string(),
             "Task 2".to_string(),
@@ -376,7 +391,10 @@ mod tests {
         repo.upsert(&task2).await.unwrap();
 
         // Test filtering by connection
-        let conn1_tasks = repo.list(Some("trn:connection:conn1"), None, None).await.unwrap();
+        let conn1_tasks = repo
+            .list(Some("trn:connection:conn1"), None, None)
+            .await
+            .unwrap();
         assert_eq!(conn1_tasks.len(), 1);
         assert_eq!(conn1_tasks[0].trn, "trn:task:test-1");
 

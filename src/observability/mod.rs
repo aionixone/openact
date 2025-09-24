@@ -1,5 +1,5 @@
 //! Observability module for logging, metrics, and tracing
-//! 
+//!
 //! This module provides unified observability capabilities including:
 //! - Structured logging with tracing
 //! - Metrics collection and export

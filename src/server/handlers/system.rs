@@ -7,10 +7,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "openapi")]
-use utoipa::ToSchema;
-#[cfg(feature = "openapi")]
 #[allow(unused_imports)] // Used in schema examples and utoipa path examples
 use serde_json::json;
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
 
 /// Client pool statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -352,7 +352,6 @@ fn get_version_info() -> VersionInfo {
 ))]
 /// Add health check endpoint
 pub async fn health(State(svc): State<OpenActService>) -> impl IntoResponse {
-
     // Quick health checks
     let storage_ok = svc.stats().await.is_ok();
     let cache_ok = svc.cache_stats().await.is_ok();
@@ -465,18 +464,16 @@ pub async fn cleanup(State(svc): State<OpenActService>) -> impl IntoResponse {
 ))]
 /// Prometheus metrics endpoint
 pub async fn metrics() -> impl IntoResponse {
-    use axum::response::Response;
     use axum::body::Body;
     use axum::http::{StatusCode, header};
-    
+    use axum::response::Response;
+
     match crate::observability::metrics::export_prometheus() {
-        Ok(metrics_text) => {
-            Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-                .body(Body::from(metrics_text))
-                .unwrap()
-        }
+        Ok(metrics_text) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .body(Body::from(metrics_text))
+            .unwrap(),
         Err(e) => {
             let error = helpers::storage_error(format!("Failed to export metrics: {}", e));
             error.into_response()

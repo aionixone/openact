@@ -1,19 +1,19 @@
 //! Metrics collection and export
-//! 
+//!
 //! Provides application metrics using the metrics crate with optional Prometheus export
-//! 
+//!
 //! When the `metrics` feature is enabled, metrics are exported via Prometheus.
 //! Otherwise, a no-op implementation is used for zero performance overhead.
 
-use std::time::Duration;
 use anyhow::Result;
+use std::time::Duration;
 
 // Conditional imports based on metrics feature
 #[cfg(feature = "metrics")]
-use metrics::{counter, gauge, histogram, Counter, Gauge, Histogram};
+use metrics::{Counter, Gauge, Histogram, counter, gauge, histogram};
 
 #[cfg(not(feature = "metrics"))]
-use crate::observability::noop_metrics::{counter, gauge, histogram, Counter, Gauge, Histogram};
+use crate::observability::noop_metrics::{Counter, Gauge, Histogram, counter, gauge, histogram};
 
 /// Metrics registry for OpenAct
 pub struct OpenActMetrics {
@@ -22,23 +22,23 @@ pub struct OpenActMetrics {
     pub http_request_duration: Histogram,
     pub task_executions_total: Counter,
     pub task_execution_duration: Histogram,
-    
+
     // Retry metrics
     pub retries_total: Counter,
     pub retry_delay_seconds: Histogram,
-    
+
     // Connection metrics
     pub active_connections: Gauge,
     pub connection_pool_size: Gauge,
     pub connection_pool_hits: Counter,
     pub connection_pool_misses: Counter,
-    
+
     // Storage metrics
     pub database_operations_total: Counter,
     pub database_operation_duration: Histogram,
     pub cache_operations_total: Counter,
     pub cache_hit_ratio: Gauge,
-    
+
     // Error metrics
     pub errors_total: Counter,
     pub http_errors_by_status: Counter,
@@ -52,23 +52,23 @@ impl Default for OpenActMetrics {
             http_request_duration: histogram!("openact_http_request_duration_seconds"),
             task_executions_total: counter!("openact_task_executions_total"),
             task_execution_duration: histogram!("openact_task_execution_duration_seconds"),
-            
+
             // Retry metrics
             retries_total: counter!("openact_retries_total"),
             retry_delay_seconds: histogram!("openact_retry_delay_seconds"),
-            
+
             // Connection metrics
             active_connections: gauge!("openact_active_connections"),
             connection_pool_size: gauge!("openact_connection_pool_size"),
             connection_pool_hits: counter!("openact_connection_pool_hits_total"),
             connection_pool_misses: counter!("openact_connection_pool_misses_total"),
-            
+
             // Storage metrics
             database_operations_total: counter!("openact_database_operations_total"),
             database_operation_duration: histogram!("openact_database_operation_duration_seconds"),
             cache_operations_total: counter!("openact_cache_operations_total"),
             cache_hit_ratio: gauge!("openact_cache_hit_ratio"),
-            
+
             // Error metrics
             errors_total: counter!("openact_errors_total"),
             http_errors_by_status: counter!("openact_http_errors_by_status_total"),
@@ -83,11 +83,12 @@ static METRICS: LazyLock<OpenActMetrics> = LazyLock::new(|| {
     // Initialize metrics recorder based on feature and environment
     #[cfg(feature = "metrics")]
     {
-        if std::env::var("OPENACT_METRICS_ENABLED").unwrap_or_else(|_| "true".to_string()) == "true" {
+        if std::env::var("OPENACT_METRICS_ENABLED").unwrap_or_else(|_| "true".to_string()) == "true"
+        {
             init_prometheus_recorder();
         }
     }
-    
+
     OpenActMetrics::default()
 });
 
@@ -95,15 +96,18 @@ static METRICS: LazyLock<OpenActMetrics> = LazyLock::new(|| {
 fn init_prometheus_recorder() {
     use metrics_exporter_prometheus::PrometheusBuilder;
     use std::net::SocketAddr;
-    
-    let listen_addr = std::env::var("OPENACT_METRICS_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0:9090".to_string());
-    
+
+    let listen_addr =
+        std::env::var("OPENACT_METRICS_ADDR").unwrap_or_else(|_| "0.0.0.0:9090".to_string());
+
     let socket_addr: SocketAddr = listen_addr.parse().unwrap_or_else(|_| {
-        tracing::warn!("Invalid metrics address '{}', using default 0.0.0.0:9090", listen_addr);
+        tracing::warn!(
+            "Invalid metrics address '{}', using default 0.0.0.0:9090",
+            listen_addr
+        );
         "0.0.0.0:9090".parse().unwrap()
     });
-        
+
     match PrometheusBuilder::new()
         .with_http_listener(socket_addr)
         .build()
@@ -113,11 +117,9 @@ fn init_prometheus_recorder() {
                 tracing::error!("Failed to set Prometheus metrics recorder: {}", e);
             } else {
                 tracing::info!("Prometheus metrics enabled on {}", socket_addr);
-                
+
                 // Start the HTTP server in a background task
-                tokio::spawn(async move {
-                    future.await
-                });
+                tokio::spawn(async move { future.await });
             }
         }
         Err(e) => {
@@ -144,7 +146,7 @@ pub fn record_http_request(_method: &str, _path: &str, status: u16, duration: Du
     // In a real implementation, we'd use a proper metrics backend
     counter!("openact_http_requests_total").increment(1);
     histogram!("openact_http_request_duration_seconds").record(duration.as_secs_f64());
-    
+
     // Record errors separately
     if status >= 400 {
         counter!("openact_http_errors_by_status_total").increment(1);
@@ -161,7 +163,7 @@ pub fn record_task_execution(
 ) {
     counter!("openact_task_executions_total").increment(1);
     histogram!("openact_task_execution_duration_seconds").record(duration.as_secs_f64());
-    
+
     // Record retries if any
     if retry_count > 0 {
         counter!("openact_retries_total").increment(retry_count as u64);
@@ -177,7 +179,7 @@ pub fn record_retry_attempt(_task_trn: &str, _attempt: u32, delay: Duration, _re
 /// Update connection pool metrics  
 pub fn update_connection_pool_metrics(size: u64, hits: u64, misses: u64) {
     gauge!("openact_connection_pool_size").set(size as f64);
-    
+
     // Record incremental hits/misses (simplified)
     counter!("openact_connection_pool_hits_total").increment(hits);
     counter!("openact_connection_pool_misses_total").increment(misses);
@@ -203,11 +205,11 @@ pub fn record_error(_error_type: &str, _component: &str) {
 /// Get current metrics snapshot for debugging
 pub fn get_metrics_snapshot() -> serde_json::Value {
     use serde_json::json;
-    
+
     let metrics_feature_enabled = cfg!(feature = "metrics");
-    let metrics_env_enabled = std::env::var("OPENACT_METRICS_ENABLED")
-        .unwrap_or_else(|_| "true".to_string()) == "true";
-    
+    let metrics_env_enabled =
+        std::env::var("OPENACT_METRICS_ENABLED").unwrap_or_else(|_| "true".to_string()) == "true";
+
     let recorder_type = if metrics_feature_enabled && metrics_env_enabled {
         "prometheus"
     } else if metrics_feature_enabled {
@@ -215,13 +217,13 @@ pub fn get_metrics_snapshot() -> serde_json::Value {
     } else {
         "noop"
     };
-    
+
     let listen_addr = if metrics_feature_enabled && metrics_env_enabled {
         Some(std::env::var("OPENACT_METRICS_ADDR").unwrap_or_else(|_| "0.0.0.0:9090".to_string()))
     } else {
         None
     };
-    
+
     json!({
         "metrics_feature_enabled": metrics_feature_enabled,
         "metrics_env_enabled": metrics_env_enabled,
@@ -240,15 +242,17 @@ pub fn get_metrics_snapshot() -> serde_json::Value {
 pub fn export_prometheus() -> Result<String> {
     use metrics_exporter_prometheus::PrometheusHandle;
     use std::sync::OnceLock;
-    
+
     static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
-    
+
     let handle = PROMETHEUS_HANDLE.get_or_init(|| {
         // Create a Prometheus recorder and get a handle to it
         let builder = metrics_exporter_prometheus::PrometheusBuilder::new();
-        builder.install_recorder().expect("Failed to install Prometheus recorder")
+        builder
+            .install_recorder()
+            .expect("Failed to install Prometheus recorder")
     });
-    
+
     Ok(handle.render())
 }
 
@@ -278,10 +282,10 @@ mod tests {
         unsafe {
             std::env::set_var("OPENACT_METRICS_ENABLED", "false");
         }
-        
+
         let result = init();
         assert!(result.is_ok());
-        
+
         // Clean up
         unsafe {
             std::env::remove_var("OPENACT_METRICS_ENABLED");
@@ -291,14 +295,14 @@ mod tests {
     #[test]
     fn test_metrics_snapshot_without_feature() {
         let snapshot = get_metrics_snapshot();
-        
+
         // When metrics feature is disabled, should use noop
         #[cfg(not(feature = "metrics"))]
         {
             assert_eq!(snapshot["metrics_feature_enabled"], false);
             assert_eq!(snapshot["recorder_type"], "noop");
         }
-        
+
         // When metrics feature is enabled, depends on environment
         #[cfg(feature = "metrics")]
         {
@@ -319,11 +323,11 @@ mod tests {
         record_error("validation_error", "api");
     }
 
-    #[test]  
+    #[test]
     fn test_metrics_struct_creation() {
         // Test that metrics struct can be created
         let metrics = OpenActMetrics::default();
-        
+
         // Verify that all fields are present (compile-time check)
         let _ = &metrics.http_requests_total;
         let _ = &metrics.http_request_duration;
@@ -351,13 +355,13 @@ mod tests {
             std::env::set_var("OPENACT_METRICS_ADDR", "127.0.0.1:9091");
             std::env::set_var("OPENACT_METRICS_ENABLED", "true");
         }
-        
+
         let snapshot = get_metrics_snapshot();
         assert_eq!(snapshot["metrics_feature_enabled"], true);
         assert_eq!(snapshot["metrics_env_enabled"], true);
         assert_eq!(snapshot["recorder_type"], "prometheus");
         assert_eq!(snapshot["listen_addr"], "127.0.0.1:9091");
-        
+
         // Clean up
         unsafe {
             std::env::remove_var("OPENACT_METRICS_ADDR");
@@ -369,21 +373,21 @@ mod tests {
     #[test]
     fn test_noop_metrics_zero_overhead() {
         use crate::observability::noop_metrics::*;
-        
+
         // Test that noop implementations exist and can be called
         let counter = counter("test_counter");
         counter.increment(5);
         counter.inc();
-        
+
         let gauge = gauge("test_gauge");
         gauge.set(42.0);
         gauge.increment(1.0);
         gauge.decrement(0.5);
-        
+
         let histogram = histogram("test_histogram");
         histogram.record(3.14);
         histogram.record_duration(Duration::from_millis(100));
-        
+
         // All operations should be no-ops and not panic
     }
 }
