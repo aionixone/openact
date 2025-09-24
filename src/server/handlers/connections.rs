@@ -6,7 +6,7 @@ use crate::interface::error::helpers;
 use crate::utils::trn;
 use axum::{
     Json,
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     response::IntoResponse,
 };
 use serde::Deserialize;
@@ -44,8 +44,10 @@ pub struct ListQuery {
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn list(Query(q): Query<ListQuery>) -> impl IntoResponse {
-    let svc = OpenActService::from_env().await.unwrap();
+pub async fn list(
+    State(svc): State<OpenActService>,
+    Query(q): Query<ListQuery>
+) -> impl IntoResponse {
     match svc
         .list_connections(q.auth_type.as_deref(), q.limit, q.offset)
         .await
@@ -69,8 +71,10 @@ pub async fn list(Query(q): Query<ListQuery>) -> impl IntoResponse {
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn create(Json(req): Json<ConnectionUpsertRequest>) -> impl IntoResponse {
-    let svc = OpenActService::from_env().await.unwrap();
+pub async fn create(
+    axum::extract::State(svc): axum::extract::State<OpenActService>,
+    Json(req): Json<ConnectionUpsertRequest>
+) -> impl IntoResponse {
     
     // Validate TRN format
     use crate::utils::trn::parse_connection_trn;
@@ -104,11 +108,13 @@ pub async fn create(Json(req): Json<ConnectionUpsertRequest>) -> impl IntoRespon
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn get(Path(trn): Path<String>) -> impl IntoResponse {
+pub async fn get(
+    State(svc): State<OpenActService>,
+    Path(trn): Path<String>
+) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }
-    let svc = OpenActService::from_env().await.unwrap();
     match svc.get_connection(&trn).await {
         Ok(Some(conn)) => Json(serde_json::json!(conn)).into_response(),
         Ok(None) => helpers::not_found_error("connection").into_response(),
@@ -135,6 +141,7 @@ pub async fn get(Path(trn): Path<String>) -> impl IntoResponse {
     )
 ))]
 pub async fn update(
+    State(svc): State<OpenActService>,
     Path(trn): Path<String>,
     Json(req): Json<ConnectionUpsertRequest>,
 ) -> impl IntoResponse {
@@ -144,8 +151,6 @@ pub async fn update(
     if req.trn != trn {
         return helpers::validation_error("trn_mismatch", "trn mismatch").into_response();
     }
-    
-    let svc = OpenActService::from_env().await.unwrap();
     
     // Get existing version and created_at for proper versioning
     let (existing_version, existing_created_at) = match svc.get_connection(&trn).await {
@@ -180,11 +185,13 @@ pub async fn update(
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn del(Path(trn): Path<String>) -> impl IntoResponse {
+pub async fn del(
+    State(svc): State<OpenActService>,
+    Path(trn): Path<String>
+) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }
-    let svc = OpenActService::from_env().await.unwrap();
     match svc.delete_connection(&trn).await {
         Ok(true) => axum::http::StatusCode::NO_CONTENT.into_response(),
         Ok(false) => helpers::not_found_error("connection").into_response(),
@@ -210,11 +217,13 @@ pub async fn del(Path(trn): Path<String>) -> impl IntoResponse {
     )
 ))]
 /// Get connection auth status (no network)
-pub async fn status(Path(trn): Path<String>) -> impl IntoResponse {
+pub async fn status(
+    State(svc): State<OpenActService>,
+    Path(trn): Path<String>
+) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }
-    let svc = OpenActService::from_env().await.unwrap();
     match svc.connection_status(&trn).await {
         Ok(Some(s)) => Json(serde_json::json!(s)).into_response(),
         Ok(None) => helpers::not_found_error("connection").into_response(),
@@ -251,13 +260,13 @@ fn default_test_endpoint() -> String { "https://httpbin.org/get".to_string() }
 ))]
 /// Test a connection by performing a simple GET to the given endpoint
 pub async fn test(
+    State(svc): State<OpenActService>,
     Path(trn): Path<String>,
     Json(req): Json<ConnectionTestRequest>,
 ) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }
-    let svc = OpenActService::from_env().await.unwrap();
     let exists = match svc.get_connection(&trn).await {
         Ok(Some(_)) => true,
         Ok(None) => false,

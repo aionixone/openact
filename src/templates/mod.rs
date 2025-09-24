@@ -70,6 +70,7 @@ pub struct TemplateListItem {
 }
 
 /// Template loader for managing provider templates
+#[derive(Clone)]
 pub struct TemplateLoader {
     template_root: String,
 }

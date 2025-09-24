@@ -6,7 +6,7 @@ use crate::interface::error::helpers;
 use crate::utils::trn;
 use axum::{
     Json,
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     response::IntoResponse,
 };
 use serde::Deserialize;
@@ -40,8 +40,10 @@ pub struct ListQuery {
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn list(Query(q): Query<ListQuery>) -> impl IntoResponse {
-    let svc = OpenActService::from_env().await.unwrap();
+pub async fn list(
+    State(svc): State<OpenActService>,
+    Query(q): Query<ListQuery>
+) -> impl IntoResponse {
     match svc
         .list_tasks(q.connection_trn.as_deref(), q.limit, q.offset)
         .await
@@ -65,8 +67,10 @@ pub async fn list(Query(q): Query<ListQuery>) -> impl IntoResponse {
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn create(Json(req): Json<TaskUpsertRequest>) -> impl IntoResponse {
-    let svc = OpenActService::from_env().await.unwrap();
+pub async fn create(
+    State(svc): State<OpenActService>,
+    Json(req): Json<TaskUpsertRequest>
+) -> impl IntoResponse {
 
     // Validate TRN format
     use crate::utils::trn::parse_task_trn;
@@ -110,11 +114,13 @@ pub async fn create(Json(req): Json<TaskUpsertRequest>) -> impl IntoResponse {
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn get(Path(trn): Path<String>) -> impl IntoResponse {
+pub async fn get(
+    State(svc): State<OpenActService>,
+    Path(trn): Path<String>
+) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }
-    let svc = OpenActService::from_env().await.unwrap();
     match svc.get_task(&trn).await {
         Ok(Some(task)) => Json(serde_json::json!(task)).into_response(),
         Ok(None) => helpers::not_found_error("task").into_response(),
@@ -141,6 +147,7 @@ pub async fn get(Path(trn): Path<String>) -> impl IntoResponse {
     )
 ))]
 pub async fn update(
+    State(svc): State<OpenActService>,
     Path(trn): Path<String>,
     Json(req): Json<TaskUpsertRequest>,
 ) -> impl IntoResponse {
@@ -150,8 +157,6 @@ pub async fn update(
     if req.trn != trn {
         return helpers::validation_error("trn_mismatch", "trn mismatch").into_response();
     }
-
-    let svc = OpenActService::from_env().await.unwrap();
 
     // Get existing version and created_at for proper versioning
     let (existing_version, existing_created_at) = match svc.get_task(&trn).await {
@@ -186,11 +191,13 @@ pub async fn update(
         (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
     )
 ))]
-pub async fn del(Path(trn): Path<String>) -> impl IntoResponse {
+pub async fn del(
+    State(svc): State<OpenActService>,
+    Path(trn): Path<String>
+) -> impl IntoResponse {
     if let Err(e) = trn::validate_trn(&trn) {
         return helpers::validation_error("invalid_trn", e.to_string()).into_response();
     }
-    let svc = OpenActService::from_env().await.unwrap();
     match svc.delete_task(&trn).await {
         Ok(true) => axum::http::StatusCode::NO_CONTENT.into_response(),
         Ok(false) => helpers::not_found_error("task").into_response(),

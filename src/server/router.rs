@@ -4,14 +4,17 @@ use axum::{
     Router,
     routing::{get, post},
 };
+use crate::app::service::OpenActService;
 
 #[cfg(feature = "openapi")]
 use utoipa_swagger_ui::SwaggerUi;
 
-pub fn core_api_router() -> Router {
+/// Create router with injected service state
+pub fn core_api_router_with_state(service: OpenActService) -> Router {
     // Ensure background tasks started (idempotent)
     crate::server::init_background_tasks();
 
+    #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
     let mut router = Router::new()
         .route(
             "/api/v1/connections",
@@ -99,5 +102,11 @@ pub fn core_api_router() -> Router {
         ));
     }
 
-    router
+    router.with_state(service)
+}
+
+/// Create router with service from environment (backward compatibility)
+pub async fn core_api_router() -> Router {
+    let service = OpenActService::from_env().await.expect("Failed to create OpenActService");
+    core_api_router_with_state(service)
 }

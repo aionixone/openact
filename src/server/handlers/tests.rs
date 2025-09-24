@@ -206,41 +206,46 @@ mod http_handler_tests {
     use tower::ServiceExt;
 
     async fn setup_test_service() -> OpenActService {
-        // 设置环境变量一次
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| {
-            unsafe {
-                std::env::set_var(
-                    "OPENACT_MASTER_KEY",
-                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-                );
-                std::env::set_var("OPENACT_DB_URL", "sqlite::memory:");
-            }
-        });
+        // 为每个测试创建唯一的数据库文件，避免内存数据库的连接问题
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let test_id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let test_db_file = format!("/tmp/openact_test_handler_{}.db", test_id);
         
-        // 每个测试都创建新的内存数据库实例
-        let db = DatabaseManager::new("sqlite::memory:").await.unwrap();
+        // 清理之前的测试数据
+        let _ = std::fs::remove_file(&test_db_file);
+        
+        let test_db_url = format!("sqlite://{}", test_db_file);
+        
+        // 设置环境变量（每个测试使用自己的数据库）
+        unsafe {
+            std::env::set_var(
+                "OPENACT_MASTER_KEY",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            );
+            std::env::set_var("OPENACT_DB_URL", &test_db_url);
+        }
+        
+        // 创建服务实例（会自动运行迁移）
+        let db = DatabaseManager::new(&test_db_url).await.unwrap();
         let storage = std::sync::Arc::new(StorageService::new(db));
         OpenActService::from_storage(storage)
     }
 
-    fn create_test_router() -> Router {
+    /// 创建注入了服务状态的测试路由器（新版本）
+    async fn create_test_router_with_service() -> Router {
+        let service = setup_test_service().await;
+        
         Router::new()
             .route(
                 "/api/v1/connections",
-                axum::routing::post(handlers::connections::create),
-            )
-            .route(
-                "/api/v1/connections",
-                axum::routing::get(handlers::connections::list),
+                axum::routing::post(handlers::connections::create)
+                    .get(handlers::connections::list),
             )
             .route(
                 "/api/v1/connections/{trn}",
-                axum::routing::get(handlers::connections::get),
-            )
-            .route(
-                "/api/v1/connections/{trn}",
-                axum::routing::put(handlers::connections::update),
+                axum::routing::get(handlers::connections::get)
+                    .put(handlers::connections::update),
             )
             .route(
                 "/api/v1/connections/{trn}/status",
@@ -248,31 +253,21 @@ mod http_handler_tests {
             )
             .route(
                 "/api/v1/tasks",
-                axum::routing::post(handlers::tasks::create),
-            )
-            .route("/api/v1/tasks", axum::routing::get(handlers::tasks::list))
-            .route(
-                "/api/v1/tasks/{trn}",
-                axum::routing::get(handlers::tasks::get),
+                axum::routing::post(handlers::tasks::create)
+                    .get(handlers::tasks::list),
             )
             .route(
                 "/api/v1/tasks/{trn}",
-                axum::routing::put(handlers::tasks::update),
+                axum::routing::get(handlers::tasks::get)
+                    .put(handlers::tasks::update),
             )
-            .route(
-                "/api/v1/tasks/{trn}/execute",
-                axum::routing::post(handlers::execute::execute),
-            )
-            .route(
-                "/api/v1/execute",
-                axum::routing::post(handlers::execute::execute_adhoc),
-            )
+            .with_state(service)
     }
+
 
     #[tokio::test]
     async fn test_connection_create_success() {
-        let _service = setup_test_service().await;
-        let app = create_test_router();
+        let app = create_test_router_with_service().await;
 
         let req_body = json!(create_test_connection_request());
         let request = Request::builder()
@@ -297,8 +292,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_connection_create_invalid_trn() {
-        let _service = setup_test_service().await;
-        let app = create_test_router();
+        let app = create_test_router_with_service().await;
 
         let mut req = create_test_connection_request();
         req.trn = "invalid-trn".to_string();
@@ -324,8 +318,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_connection_get_not_found() {
-        let _service = setup_test_service().await;
-        let app = create_test_router();
+        let app = create_test_router_with_service().await;
 
         let request = Request::builder()
             .method("GET")
@@ -353,8 +346,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_connection_get_invalid_trn() {
-        let _service = setup_test_service().await;
-        let app = create_test_router();
+        let app = create_test_router_with_service().await;
 
         let request = Request::builder()
             .method("GET")
@@ -374,8 +366,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_task_create_success() {
-        let _service = setup_test_service().await;
-        let app = create_test_router();
+        let app = create_test_router_with_service().await;
 
         // First create the required connection
         let conn_req = json!(create_test_connection_request());
@@ -413,8 +404,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_task_create_invalid_connection_trn() {
-        let _service = setup_test_service().await;
-        let app = create_test_router();
+        let app = create_test_router_with_service().await;
 
         let mut req = create_test_task_request();
         req.connection_trn = "invalid-conn-trn".to_string();
@@ -439,8 +429,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_connections_list_empty() {
-        let _service = setup_test_service().await;
-        let app = create_test_router();
+        let app = create_test_router_with_service().await;
 
         let request = Request::builder()
             .method("GET")
@@ -466,8 +455,7 @@ mod http_handler_tests {
 
     #[tokio::test]
     async fn test_tasks_list_empty() {
-        let _service = setup_test_service().await;
-        let app = create_test_router();
+        let app = create_test_router_with_service().await;
 
         let request = Request::builder()
             .method("GET")

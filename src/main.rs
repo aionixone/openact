@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("🚀 启动 openact 服务器...");
     
     let authflow_router = openact::server::authflow::router::create_router_async().await;
-    let core_router = openact::server::router::core_api_router();
+    let core_router = openact::server::router::core_api_router().await;
     let app: Router = authflow_router.merge(core_router);
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
     

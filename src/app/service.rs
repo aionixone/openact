@@ -9,6 +9,7 @@ use crate::templates::{TemplateInputs, TemplateLoader};
 
 use crate::interface::dto::{AdhocExecuteRequestDto, ConnectionStatusDto, ExecuteOverridesDto};
 
+#[derive(Clone)]
 pub struct OpenActService {
     storage: Arc<StorageService>,
     template_loader: TemplateLoader,
