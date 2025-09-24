@@ -2,6 +2,9 @@
 // use axum::extract::ws::Message;
 #[cfg(feature = "server")]
 use serde::{Deserialize, Serialize};
+
+#[cfg(all(feature = "server", feature = "openapi"))]
+use utoipa::ToSchema;
 #[cfg(feature = "server")]
 // use serde_json::json;
 #[cfg(feature = "server")]
@@ -47,6 +50,7 @@ pub struct WorkflowConfig {
 
 #[cfg(feature = "server")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(all(feature = "server", feature = "openapi"), derive(ToSchema))]
 pub enum WorkflowStatus { Active, Inactive }
 
 #[cfg(feature = "server")]
@@ -77,6 +81,7 @@ pub struct StateHistoryEntry {
 
 #[cfg(feature = "server")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(all(feature = "server", feature = "openapi"), derive(ToSchema))]
 pub enum ExecutionStatus { Running, Paused, Completed, Failed, Cancelled }
 
 #[cfg(feature = "server")]

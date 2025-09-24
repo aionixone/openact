@@ -206,16 +206,20 @@ mod http_handler_tests {
     use tower::ServiceExt;
 
     async fn setup_test_service() -> OpenActService {
-        // Use in-memory SQLite for isolation
-        let test_db_url = "sqlite::memory:";
-        unsafe {
-            std::env::set_var(
-                "OPENACT_MASTER_KEY",
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            );
-            std::env::set_var("OPENACT_DB_URL", test_db_url);
-        }
-        let db = DatabaseManager::new(test_db_url).await.unwrap();
+        // 设置环境变量一次
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            unsafe {
+                std::env::set_var(
+                    "OPENACT_MASTER_KEY",
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                );
+                std::env::set_var("OPENACT_DB_URL", "sqlite::memory:");
+            }
+        });
+        
+        // 每个测试都创建新的内存数据库实例
+        let db = DatabaseManager::new("sqlite::memory:").await.unwrap();
         let storage = std::sync::Arc::new(StorageService::new(db));
         OpenActService::from_storage(storage)
     }
@@ -373,20 +377,35 @@ mod http_handler_tests {
         let _service = setup_test_service().await;
         let app = create_test_router();
 
-        let req_body = json!(create_test_task_request());
-        let request = Request::builder()
+        // First create the required connection
+        let conn_req = json!(create_test_connection_request());
+        let conn_request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/connections")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&conn_req).unwrap()))
+            .unwrap();
+        
+        let conn_response = app.clone().oneshot(conn_request).await.unwrap();
+        assert_eq!(conn_response.status(), StatusCode::CREATED);
+
+        // Now create the task
+        let task_req = json!(create_test_task_request());
+        let task_request = Request::builder()
             .method("POST")
             .uri("/api/v1/tasks")
             .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_string(&req_body).unwrap()))
+            .body(Body::from(serde_json::to_string(&task_req).unwrap()))
             .unwrap();
 
-        let response = app.oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::CREATED);
-
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let response = app.oneshot(task_request).await.unwrap();
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        
+        if status != StatusCode::CREATED {
+            let error_msg = String::from_utf8_lossy(&body);
+            panic!("Expected CREATED but got {:?}. Body: {}", status, error_msg);
+        }
         let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(result["trn"], "trn:openact:test:task/test@v1");
         assert_eq!(result["version"], 1);
@@ -430,7 +449,12 @@ mod http_handler_tests {
             .unwrap();
 
         let response = app.oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        let status = response.status();
+        if status != StatusCode::OK {
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let error_msg = String::from_utf8_lossy(&body);
+            panic!("Expected OK but got {:?}. Body: {}", status, error_msg);
+        }
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -452,13 +476,21 @@ mod http_handler_tests {
             .unwrap();
 
         let response = app.oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        let status = response.status();
+        if status != StatusCode::OK {
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let error_msg = String::from_utf8_lossy(&body);
+            panic!("Expected OK but got {:?}. Body: {}", status, error_msg);
+        }
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(result.is_array());
+        if result.as_array().unwrap().len() != 0 {
+            eprintln!("Expected empty tasks list but found: {}", serde_json::to_string_pretty(&result).unwrap());
+        }
         assert_eq!(result.as_array().unwrap().len(), 0);
     }
 }

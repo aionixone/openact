@@ -4,6 +4,7 @@
 pub mod dsl;
 pub mod engine;
 pub mod actions;
+pub mod workflow;
 // moved to crate::server::authflow::* (behind features)
 #[cfg(feature = "callback")]
 pub use crate::server::authflow::callback as callback;

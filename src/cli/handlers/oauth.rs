@@ -12,7 +12,7 @@ pub async fn handle_oauth_command(cli: &Cli, service: &OpenActService, cmd: &Oau
             let run_store = crate::store::MemoryRunStore::default();
             let router = crate::authflow::actions::DefaultRouter; // not Default
             let res =
-                crate::api::start_obtain(&wf, &router, &run_store, serde_json::json!({}))?;
+                crate::authflow::workflow::start_obtain(&wf, &router, &run_store, serde_json::json!({}))?;
             if cli.json {
                 println!(
                     "{}",
@@ -58,11 +58,11 @@ pub async fn handle_oauth_command(cli: &Cli, service: &OpenActService, cmd: &Oau
             let dsl: stepflow_dsl::WorkflowDSL = serde_yaml::from_str(&yaml)?;
             let run_store = crate::store::MemoryRunStore::default();
             let router = crate::authflow::actions::DefaultRouter; // not Default
-            let out = crate::api::resume_obtain(
+            let out = crate::authflow::workflow::resume_obtain(
                 &dsl,
                 &router,
                 &run_store,
-                crate::api::ResumeObtainArgs {
+                crate::authflow::workflow::ResumeObtainArgs {
                     run_id: run_id.clone(),
                     code: code.clone(),
                     state: state.clone(),

@@ -8,18 +8,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use anyhow::Result;
 
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
+
 use crate::store::auth_trn::AuthConnectionTrn;
 
 /// Authentication connection state, including tokens and metadata
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AuthConnection {
     /// TRN identifier
     pub trn: AuthConnectionTrn,
     /// Access token
+    #[cfg_attr(feature = "openapi", schema(example = "***redacted***"))]
     pub access_token: String,
     /// Refresh token (optional)
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(example = "***redacted***"))]
     pub refresh_token: Option<String>,
     /// Token expiration time (ISO8601 format)
     #[serde(default)]

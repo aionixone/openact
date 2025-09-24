@@ -24,9 +24,22 @@ mkdir -p data
 # 启动 HTTP API 服务器
 RUST_LOG=info OPENACT_DB_URL=sqlite:./data/openact.db?mode=rwc \
 cargo run --features server --bin openact
+
+# 启动带 OpenAPI 文档的服务器
+RUST_LOG=info OPENACT_DB_URL=sqlite:./data/openact.db?mode=rwc \
+cargo run --features server,openapi --bin openact
 ```
 
 服务器将在 `http://127.0.0.1:8080` 启动。
+
+### 📚 API 文档
+
+启用 `openapi` 特性后，可以访问交互式 API 文档：
+
+- **Swagger UI**: `http://127.0.0.1:8080/docs`
+- **OpenAPI JSON**: `http://127.0.0.1:8080/api-docs/openapi.json`
+
+API 文档包含完整的端点说明、请求/响应示例和认证信息。
 
 ### 3. 基本使用
 
@@ -194,6 +207,43 @@ openact-cli system cleanup
 ```
 
 ## 高级功能
+
+### 🔄 实时事件订阅 (WebSocket)
+
+OpenAct 支持通过 WebSocket 实时订阅 AuthFlow 执行事件：
+
+```javascript
+// 连接到 WebSocket
+const ws = new WebSocket('ws://127.0.0.1:8080/ws');
+
+ws.onopen = () => {
+    console.log('Connected to OpenAct events');
+};
+
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log('Event received:', data);
+    
+    // 处理不同类型的事件
+    switch (data.type) {
+        case 'execution_state_change':
+            console.log(`Execution ${data.execution_id} changed from ${data.from_state} to ${data.to_state}`);
+            break;
+        case 'workflow_completed':
+            console.log(`Workflow ${data.workflow_id} completed`);
+            break;
+    }
+};
+
+ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+};
+```
+
+**事件类型示例**:
+- `execution_state_change`: 执行状态变更
+- `workflow_completed`: 工作流完成
+- `error_occurred`: 错误发生
 
 ### HTTP 策略配置
 

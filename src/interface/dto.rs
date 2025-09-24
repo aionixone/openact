@@ -1,9 +1,18 @@
+use crate::models::common::{
+    HttpPolicy, MultiValue, NetworkConfig, ResponsePolicy, RetryPolicy, TimeoutConfig,
+};
+use crate::models::connection::{AuthParameters, AuthorizationType, InvocationHttpParameters};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::models::common::{RetryPolicy, MultiValue, NetworkConfig, TimeoutConfig, HttpPolicy, ResponsePolicy};
-use crate::models::connection::{AuthorizationType, AuthParameters, InvocationHttpParameters};
+
+#[cfg(feature = "openapi")]
+#[allow(unused_imports)] // Used in schema examples via json! macro
+use serde_json::json;
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ExecuteOverridesDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub method: Option<String>,
@@ -20,6 +29,7 @@ pub struct ExecuteOverridesDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ExecuteRequestDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub overrides: Option<ExecuteOverridesDto>,
@@ -28,6 +38,21 @@ pub struct ExecuteRequestDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[cfg_attr(feature = "openapi", schema(example = json!({
+    "status": 200,
+    "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-ratelimit-remaining": "4999"
+    },
+    "body": {
+        "id": 123456789,
+        "login": "octocat",
+        "name": "The Octocat",
+        "public_repos": 8,
+        "followers": 4000
+    }
+})))]
 pub struct ExecuteResponseDto {
     pub status: u16,
     pub headers: HashMap<String, String>,
@@ -36,6 +61,21 @@ pub struct ExecuteResponseDto {
 
 /// Ad-hoc execution request - execute action without persistent task
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[cfg_attr(feature = "openapi", schema(example = json!({
+    "connection_trn": "trn:openact:default:connection/github-api@v1",
+    "method": "GET",
+    "endpoint": "/user/repos",
+    "query_params": {
+        "type": ["owner"],
+        "sort": ["updated"],
+        "per_page": ["10"]
+    },
+    "headers": {
+        "Accept": ["application/vnd.github+json"]
+    },
+    "timeout_ms": 10000
+})))]
 pub struct AdhocExecuteRequestDto {
     /// Connection TRN to use for authentication
     pub connection_trn: String,
@@ -70,6 +110,16 @@ pub struct AdhocExecuteRequestDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[cfg_attr(feature = "openapi", schema(example = json!({
+    "trn": "trn:openact:default:connection/github-api@v1",
+    "authorization_type": "oauth2",
+    "has_auth_ref": true,
+    "status": "ready",
+    "expires_at": "2023-12-31T23:59:59Z",
+    "seconds_to_expiry": 2592000,
+    "message": null
+})))]
 pub struct ConnectionStatusDto {
     pub trn: String,
     pub authorization_type: AuthorizationType,
@@ -86,6 +136,7 @@ pub struct ConnectionStatusDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ListQueryDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pattern: Option<String>,
@@ -97,6 +148,32 @@ pub struct ListQueryDto {
 
 /// Connection upsert request DTO (without metadata fields)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[cfg_attr(feature = "openapi", schema(example = json!({
+    "trn": "trn:openact:default:connection/github-api@v1",
+    "name": "GitHub API Connection",
+    "authorization_type": "oauth2",
+    "auth_parameters": {
+        "oauth_parameters": {
+            "authorization_url": "https://github.com/login/oauth/authorize",
+            "token_url": "https://github.com/login/oauth/access_token",
+            "client_id": "github_client_123",
+            "client_secret": "***redacted***",
+            "scope": "user:email repo"
+        }
+    },
+    "invocation_http_parameters": {
+        "base_url": "https://api.github.com",
+        "default_headers": {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "OpenAct/1.0"
+        }
+    },
+    "timeout_config": {
+        "connect_timeout_ms": 5000,
+        "request_timeout_ms": 30000
+    }
+})))]
 pub struct ConnectionUpsertRequest {
     pub trn: String,
     pub name: String,
@@ -118,6 +195,28 @@ pub struct ConnectionUpsertRequest {
 
 /// Task upsert request DTO (without metadata fields)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
+#[cfg_attr(feature = "openapi", schema(example = json!({
+    "trn": "trn:openact:default:task/get-user-repos@v1",
+    "name": "Get User Repositories",
+    "connection_trn": "trn:openact:default:connection/github-api@v1",
+    "api_endpoint": "/user/repos",
+    "method": "GET",
+    "query_params": {
+        "type": {"value": "owner"},
+        "sort": {"value": "updated"},
+        "per_page": {"value": "50"}
+    },
+    "timeout_config": {
+        "request_timeout_ms": 10000
+    },
+    "retry_policy": {
+        "max_attempts": 3,
+        "initial_delay_ms": 1000,
+        "max_delay_ms": 5000,
+        "backoff_multiplier": 2.0
+    }
+})))]
 pub struct TaskUpsertRequest {
     pub trn: String,
     pub name: String,
@@ -146,14 +245,18 @@ impl ConnectionUpsertRequest {
     /// Convert to ConnectionConfig with metadata
     /// For create operations, pass None for existing_created_at
     /// For update operations, pass Some(existing.created_at)
-    pub fn to_config(self, existing_version: Option<i64>, existing_created_at: Option<chrono::DateTime<chrono::Utc>>) -> crate::models::ConnectionConfig {
-        use chrono::Utc;
+    pub fn to_config(
+        self,
+        existing_version: Option<i64>,
+        existing_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> crate::models::ConnectionConfig {
         use crate::models::ConnectionConfig;
-        
+        use chrono::Utc;
+
         let now = Utc::now();
         let version = existing_version.map(|v| v + 1).unwrap_or(1);
         let created_at = existing_created_at.unwrap_or(now);
-        
+
         ConnectionConfig {
             trn: self.trn,
             name: self.name,
@@ -176,14 +279,18 @@ impl TaskUpsertRequest {
     /// Convert to TaskConfig with metadata
     /// For create operations, pass None for existing_created_at
     /// For update operations, pass Some(existing.created_at)
-    pub fn to_config(self, existing_version: Option<i64>, existing_created_at: Option<chrono::DateTime<chrono::Utc>>) -> crate::models::TaskConfig {
-        use chrono::Utc;
+    pub fn to_config(
+        self,
+        existing_version: Option<i64>,
+        existing_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> crate::models::TaskConfig {
         use crate::models::TaskConfig;
-        
+        use chrono::Utc;
+
         let now = Utc::now();
         let version = existing_version.map(|v| v + 1).unwrap_or(1);
         let created_at = existing_created_at.unwrap_or(now);
-        
+
         TaskConfig {
             trn: self.trn,
             name: self.name,
@@ -205,14 +312,11 @@ impl TaskUpsertRequest {
     }
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::connection::{AuthParameters, AuthorizationType};
     use chrono::{DateTime, Utc};
-    use crate::models::connection::{AuthorizationType, AuthParameters};
 
     #[test]
     fn test_connection_upsert_request_to_config() {

@@ -1,7 +1,10 @@
 #[cfg(feature = "server")]
-use axum::{Router, routing::{get, post}};
-#[cfg(feature = "server")]
 use crate::server::authflow::state::ServerState;
+#[cfg(feature = "server")]
+use axum::{
+    Router,
+    routing::{get, post},
+};
 
 #[cfg(feature = "server")]
 pub fn create_router() -> Router {
@@ -80,5 +83,3 @@ pub fn create_router_with_state(state: ServerState) -> Router {
         )
         .with_state(state)
 }
-
-

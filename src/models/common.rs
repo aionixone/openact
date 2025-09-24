@@ -2,11 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
+
 /// Multi-value parameter support
 pub type MultiValue = Vec<String>;
 
 /// HTTP parameter key-value pair
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct HttpParameter {
     pub key: String,
     pub value: String,
@@ -14,6 +18,7 @@ pub struct HttpParameter {
 
 /// Timeout configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct TimeoutConfig {
     pub connect_ms: u64,
     pub read_ms: u64,
@@ -32,6 +37,7 @@ impl Default for TimeoutConfig {
 
 /// TLS configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct TlsConfig {
     pub verify_peer: bool,
     pub ca_pem: Option<Vec<u8>>,
@@ -54,6 +60,7 @@ impl Default for TlsConfig {
 
 /// Network configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct NetworkConfig {
     pub proxy_url: Option<String>,
     pub tls: Option<TlsConfig>,
@@ -70,6 +77,7 @@ impl Default for NetworkConfig {
 
 /// HTTP policy configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct HttpPolicy {
     pub denied_headers: Vec<String>,
     pub reserved_headers: Vec<String>,
@@ -113,6 +121,7 @@ impl Default for HttpPolicy {
 
 /// Response policy configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ResponsePolicy {
     pub allow_binary: bool,
     pub max_body_bytes: usize,
@@ -129,6 +138,7 @@ impl Default for ResponsePolicy {
 
 /// Retry policy configuration for HTTP requests
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct RetryPolicy {
     /// Maximum number of retries (excluding initial attempt)
     pub max_retries: u32,

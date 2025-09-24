@@ -3,6 +3,9 @@
 use axum::{Json, extract::Query, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
+
 use crate::app::service::OpenActService;
 use crate::interface::dto::{AdhocExecuteRequestDto, ExecuteResponseDto};
 use crate::interface::error::helpers;
@@ -10,6 +13,7 @@ use crate::store::ConnectionStore;
 use crate::templates::TemplateInputs;
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectMode {
     Cc,
@@ -18,6 +22,7 @@ pub enum ConnectMode {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ConnectRequest {
     pub provider: String,
     pub template: String,
@@ -38,6 +43,7 @@ pub struct ConnectRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ConnectAcStartResponse {
     pub connection_trn: String,
     pub run_id: String,
@@ -48,6 +54,7 @@ pub struct ConnectAcStartResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ConnectResult {
     pub connection: crate::models::ConnectionConfig,
     pub status: Option<crate::interface::dto::ConnectionStatusDto>,
@@ -56,6 +63,20 @@ pub struct ConnectResult {
     pub next_hints: Option<Vec<String>>,
 }
 
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    path = "/api/v1/connect",
+    tag = "connect",
+    operation_id = "connect_one_click",
+    summary = "One-click connect",
+    description = "Create a connection and initiate OAuth flow in one step",
+    request_body = ConnectRequest,
+    responses(
+        (status = 200, description = "OAuth flow initiated successfully", body = ConnectAcStartResponse),
+        (status = 400, description = "Invalid request or unsupported connect mode", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn connect(Json(req): Json<ConnectRequest>) -> impl IntoResponse {
     let svc = OpenActService::from_env().await.unwrap();
     // Build template inputs
@@ -164,7 +185,7 @@ pub async fn connect(Json(req): Json<ConnectRequest>) -> impl IntoResponse {
             let run_store = connect_run_store();
             // Execute with empty context; DSL should embed provider params explicitly
             let start =
-                match crate::api::start_obtain(&dsl, &router, run_store, serde_json::json!({})) {
+                match crate::authflow::workflow::start_obtain(&dsl, &router, run_store, serde_json::json!({})) {
                     Ok(s) => s,
                     Err(e) => return helpers::execution_error(e.to_string())
                         .with_hints(["Verify client credentials and redirect URI", "Check DSL mapping for inputs"]) 
@@ -192,6 +213,7 @@ pub async fn connect(Json(req): Json<ConnectRequest>) -> impl IntoResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ConnectAcResumeRequest {
     pub connection_trn: String,
     pub run_id: String,
@@ -199,6 +221,21 @@ pub struct ConnectAcResumeRequest {
     pub state: String,
 }
 
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    path = "/api/v1/connect/ac/resume",
+    tag = "connect",
+    operation_id = "connect_ac_resume",
+    summary = "Resume OAuth Authorization Code flow",
+    description = "Resume an OAuth2 Authorization Code flow with authorization code",
+    request_body = ConnectAcResumeRequest,
+    responses(
+        (status = 200, description = "OAuth flow completed successfully", body = ConnectResult),
+        (status = 400, description = "Invalid authorization code or state", body = crate::interface::error::ApiError),
+        (status = 404, description = "OAuth flow not found or expired", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn connect_ac_resume(Json(req): Json<ConnectAcResumeRequest>) -> impl IntoResponse {
     let svc = OpenActService::from_env().await.unwrap();
     let run_store = connect_run_store();
@@ -225,12 +262,12 @@ states:
         Err(e) => return helpers::validation_error("dsl_error", e.to_string()).into_response(),
     };
     let router = crate::authflow::actions::DefaultRouter; // not Default
-    let args = crate::api::ResumeObtainArgs {
+    let args = crate::authflow::workflow::ResumeObtainArgs {
         run_id: req.run_id.clone(),
         code: req.code.clone(),
         state: req.state.clone(),
     };
-    let out = match crate::api::resume_obtain(&dsl, &router, run_store, args) {
+    let out = match crate::authflow::workflow::resume_obtain(&dsl, &router, run_store, args) {
         Ok(v) => v,
         Err(e) => return helpers::execution_error(e.to_string()).into_response(),
     };
@@ -321,10 +358,27 @@ pub(crate) struct AcResultRecord {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct AcStatusQuery {
     pub run_id: String,
 }
 
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    path = "/api/v1/connect/ac/status",
+    tag = "connect",
+    operation_id = "connect_ac_status",
+    summary = "Check OAuth Authorization Code status",
+    description = "Poll the status of an OAuth2 Authorization Code flow",
+    params(
+        ("run_id" = String, Query, description = "OAuth flow run ID")
+    ),
+    responses(
+        (status = 200, description = "OAuth flow status", body = ConnectResult),
+        (status = 404, description = "OAuth flow not found", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn connect_ac_status(Query(q): Query<AcStatusQuery>) -> impl IntoResponse {
     if let Some(mut rec) = get_ac_result(&q.run_id) {
         if rec.next_hints.is_none() {
@@ -410,6 +464,7 @@ pub(crate) fn spawn_ac_ttl_cleaner() {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct DeviceCodeRequest {
     pub token_url: String,
     pub device_code_url: String,
@@ -428,6 +483,7 @@ pub struct DeviceCodeRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct DeviceCodeResponse {
     pub auth_trn: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -438,6 +494,20 @@ pub struct DeviceCodeResponse {
     pub next_hints: Option<Vec<String>>,
 }
 
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    path = "/api/v1/connect/device-code",
+    tag = "connect",
+    operation_id = "connect_device_code",
+    summary = "Device Code OAuth flow",
+    description = "Complete OAuth2 Device Code flow synchronously",
+    request_body = DeviceCodeRequest,
+    responses(
+        (status = 200, description = "Device Code flow completed successfully", body = DeviceCodeResponse),
+        (status = 400, description = "Invalid device code request or polling failed", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 /// Complete Device Code flow synchronously (issue code, poll token, persist, optional bind)
 pub async fn connect_device_code(Json(req): Json<DeviceCodeRequest>) -> impl IntoResponse {
     let svc = OpenActService::from_env().await.unwrap();

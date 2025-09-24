@@ -8,9 +8,13 @@ use std::collections::HashMap;
 use std::fmt;
 use trn_rust::{Trn, TrnBuilder};
 
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
+
 /// openact Connection TRN
 /// Format: trn:openact:tenant:connection/provider-user_id
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct AuthConnectionTrn {
     /// Tenant identifier
     pub tenant: String,
@@ -232,6 +236,7 @@ impl fmt::Display for AuthConnectionTrn {
 /// openact Session TRN
 /// Format: trn:openact:tenant:session:connection_id:session_id
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct AuthSessionTrn {
     pub tenant: String,
     pub connection_id: String,
@@ -299,6 +304,7 @@ impl fmt::Display for AuthSessionTrn {
 /// openact Execution TRN
 /// Format: trn:openact:tenant:execution:flow_name:execution_id
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct AuthExecutionTrn {
     pub tenant: String,
     pub flow_name: String,

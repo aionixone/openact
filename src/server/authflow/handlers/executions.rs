@@ -12,8 +12,27 @@ use crate::server::authflow::state::ExecutionStatus;
 #[cfg(feature = "server")]
 use crate::server::authflow::state::ServerState;
 
+#[cfg(all(feature = "server", feature = "openapi"))]
+use utoipa;
+
 /// Get specific execution information
 #[cfg(feature = "server")]
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    get,
+    path = "/api/v1/authflow/executions/{id}",
+    tag = "authflow",
+    operation_id = "authflow_get_execution",
+    summary = "Get execution",
+    description = "Retrieve specific authflow execution status and details",
+    params(
+        ("id" = String, Path, description = "Execution ID")
+    ),
+    responses(
+        (status = 200, description = "Execution found", body = crate::server::authflow::dto::ExecutionDetail),
+        (status = 404, description = "Execution not found", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn get_execution(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -101,6 +120,22 @@ pub async fn get_execution(
 
 /// Get execution trace
 #[cfg(feature = "server")]
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    get,
+    path = "/api/v1/authflow/executions/{id}/trace",
+    tag = "authflow",
+    operation_id = "authflow_get_execution_trace",
+    summary = "Get execution trace",
+    description = "Retrieve detailed execution trace and step history",
+    params(
+        ("id" = String, Path, description = "Execution ID")
+    ),
+    responses(
+        (status = 200, description = "Execution trace data", body = crate::server::authflow::dto::ExecutionTraceResponse),
+        (status = 404, description = "Execution not found", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn get_execution_trace(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -163,6 +198,18 @@ pub async fn get_execution_trace(
 
 /// List executions
 #[cfg(feature = "server")]
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    get,
+    path = "/api/v1/authflow/executions",
+    tag = "authflow",
+    operation_id = "authflow_list_executions",
+    summary = "List executions",
+    description = "Retrieve a list of all authflow executions",
+    responses(
+        (status = 200, description = "List of executions", body = crate::server::authflow::dto::ExecutionListResponse),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn list_executions(State(state): State<ServerState>) -> impl IntoResponse {
     let executions = state.executions.read().unwrap();
     let execution_list: Vec<_> = executions.values().cloned().collect();
@@ -172,6 +219,21 @@ pub async fn list_executions(State(state): State<ServerState>) -> impl IntoRespo
 
 /// Start workflow execution
 #[cfg(feature = "server")]
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    post,
+    path = "/api/v1/authflow/executions",
+    tag = "authflow",
+    operation_id = "authflow_start_execution",
+    summary = "Start execution",
+    description = "Start a new authflow execution with specified workflow and parameters",
+    request_body = crate::server::authflow::dto::StartExecutionRequest,
+    responses(
+        (status = 201, description = "Execution started successfully", body = crate::server::authflow::dto::ExecutionCreatedResponse),
+        (status = 400, description = "Invalid execution request", body = crate::interface::error::ApiError),
+        (status = 404, description = "Workflow not found", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn start_execution(
     State(state): State<ServerState>,
     Json(req): Json<crate::server::authflow::dto::StartExecutionRequest>,
@@ -244,6 +306,24 @@ pub async fn start_execution(
 
 /// Resume paused execution
 #[cfg(feature = "server")]
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    post,
+    path = "/api/v1/authflow/executions/{id}/resume",
+    tag = "authflow",
+    operation_id = "authflow_resume_execution",
+    summary = "Resume execution",
+    description = "Resume a paused authflow execution with additional input",
+    params(
+        ("id" = String, Path, description = "Execution ID")
+    ),
+    request_body = crate::server::authflow::dto::ResumeExecutionRequest,
+    responses(
+        (status = 200, description = "Execution resumed successfully", body = crate::server::authflow::dto::ExecutionActionResponse),
+        (status = 400, description = "Invalid resume request or execution not pausable", body = crate::interface::error::ApiError),
+        (status = 404, description = "Execution not found", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn resume_execution(
     State(state): State<ServerState>,
     Path(id): Path<String>,
@@ -318,6 +398,23 @@ pub async fn resume_execution(
 
 /// Cancel execution
 #[cfg(feature = "server")]
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    post,
+    path = "/api/v1/authflow/executions/{id}/cancel",
+    tag = "authflow",
+    operation_id = "authflow_cancel_execution",
+    summary = "Cancel execution",
+    description = "Cancel a running or paused authflow execution",
+    params(
+        ("id" = String, Path, description = "Execution ID")
+    ),
+    responses(
+        (status = 200, description = "Execution cancelled successfully", body = crate::server::authflow::dto::ExecutionActionResponse),
+        (status = 400, description = "Execution cannot be cancelled", body = crate::interface::error::ApiError),
+        (status = 404, description = "Execution not found", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn cancel_execution(
     State(state): State<ServerState>,
     Path(id): Path<String>,

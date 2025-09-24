@@ -6,10 +6,14 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
+
 use super::common::{HttpParameter, NetworkConfig, TimeoutConfig, HttpPolicy, RetryPolicy};
 
 /// Authorization type for connections
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub enum AuthorizationType {
     #[serde(rename = "api_key")]
     ApiKey,
@@ -23,8 +27,10 @@ pub enum AuthorizationType {
 
 /// API Key authentication parameters
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ApiKeyAuthParameters {
     pub api_key_name: String,
+    #[cfg_attr(feature = "openapi", schema(example = "***redacted***"))]
     pub api_key_value: String, // Will be encrypted when stored
 }
 
@@ -39,8 +45,10 @@ impl std::fmt::Debug for ApiKeyAuthParameters {
 
 /// Basic authentication parameters
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct BasicAuthParameters {
     pub username: String,
+    #[cfg_attr(feature = "openapi", schema(example = "***redacted***"))]
     pub password: String, // Will be encrypted when stored
 }
 
@@ -55,8 +63,10 @@ impl std::fmt::Debug for BasicAuthParameters {
 
 /// OAuth2 parameters
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct OAuth2Parameters {
     pub client_id: String,
+    #[cfg_attr(feature = "openapi", schema(example = "***redacted***"))]
     pub client_secret: String, // Will be encrypted when stored
     pub token_url: String,
     pub scope: Option<String>,
@@ -79,6 +89,7 @@ impl std::fmt::Debug for OAuth2Parameters {
 
 /// Authentication parameters container
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct AuthParameters {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key_auth_parameters: Option<ApiKeyAuthParameters>,
@@ -90,6 +101,7 @@ pub struct AuthParameters {
 
 /// Invocation HTTP parameters (connection-level defaults)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct InvocationHttpParameters {
     #[serde(default)]
     pub header_parameters: Vec<HttpParameter>,
@@ -101,6 +113,7 @@ pub struct InvocationHttpParameters {
 
 /// Connection configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct ConnectionConfig {
     pub trn: String,
     pub name: String,

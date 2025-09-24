@@ -11,21 +11,81 @@ use serde_json::json;
 #[cfg(feature = "server")]
 use std::time::SystemTime;
 
+#[cfg(all(feature = "server", feature = "openapi"))]
+use utoipa::ToSchema;
+
 #[cfg(feature = "server")]
 use crate::server::authflow::state::ServerState;
 #[cfg(feature = "server")]
 use crate::server::authflow::state::ExecutionStatus;
 use crate::server::authflow::runtime::execute_workflow;
 
+/// OAuth2 callback parameters received from authorization server
+/// 
+/// This structure represents the standard OAuth2 authorization code callback parameters
+/// that are received when the user completes the authorization flow and is redirected
+/// back to the application.
 #[cfg(feature = "server")]
 #[derive(Debug, Deserialize)]
+#[cfg_attr(all(feature = "server", feature = "openapi"), derive(ToSchema))]
+#[cfg_attr(all(feature = "server", feature = "openapi"), schema(example = json!({
+    "code": "auth_code_12345",
+    "state": "random_state_67890", 
+    "execution_id": "exec_abc123def456"
+})))]
 pub struct CallbackParams {
+    /// Authorization code received from the OAuth2 provider
+    #[cfg_attr(all(feature = "server", feature = "openapi"), schema(example = "auth_code_12345"))]
     code: Option<String>,
+    /// State parameter to prevent CSRF attacks (should match the one sent in the authorization request)
+    #[cfg_attr(all(feature = "server", feature = "openapi"), schema(example = "random_state_67890"))]
     state: Option<String>,
+    /// Optional execution ID to directly target a specific AuthFlow execution
+    #[cfg_attr(all(feature = "server", feature = "openapi"), schema(example = "exec_abc123def456"))]
     execution_id: Option<String>,
 }
 
+/// OAuth2 authorization callback endpoint
+/// 
+/// This endpoint receives OAuth2 authorization callbacks from external providers
+/// and resumes the corresponding AuthFlow execution with the authorization code.
+/// 
+/// **Flow Process:**
+/// 1. User is redirected here after authorizing with OAuth2 provider
+/// 2. Server extracts `code` and `state` from query parameters  
+/// 3. Finds the matching paused AuthFlow execution using the state
+/// 4. Injects the authorization code into the execution context
+/// 5. Resumes the workflow execution to exchange code for tokens
+/// 
+/// **State Matching Strategy:**
+/// - If `execution_id` is provided, targets that specific execution
+/// - If `state` is provided, searches for execution with matching state
+/// - Otherwise, uses the most recently updated running/paused execution
+/// 
+/// **Security Notes:**
+/// - The `state` parameter is critical for CSRF protection
+/// - Only running or paused executions can be resumed
+/// - Invalid state values will result in 400 Bad Request
 #[cfg(feature = "server")]
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    get,
+    path = "/oauth/callback",
+    operation_id = "authflow_oauth_callback",
+    tag = "authflow",
+    summary = "Handle OAuth2 authorization callback",
+    description = "Processes OAuth2 authorization callbacks from external providers and resumes the corresponding AuthFlow execution with the received authorization code.",
+    params(
+        ("code" = Option<String>, Query, description = "Authorization code from OAuth2 provider"),
+        ("state" = Option<String>, Query, description = "State parameter for CSRF protection"),
+        ("execution_id" = Option<String>, Query, description = "Optional execution ID to target specific execution")
+    ),
+    responses(
+        (status = 200, description = "Callback processed successfully", body = serde_json::Value),
+        (status = 400, description = "No matching execution found or invalid parameters", body = crate::interface::error::ApiError),
+        (status = 404, description = "Execution not found", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn oauth_callback(
     State(state): State<ServerState>,
     Query(params): Query<CallbackParams>,

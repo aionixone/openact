@@ -1,13 +1,13 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
 
 use crate::executor::{ExecutionResult, Executor};
 use crate::models::{ConnectionConfig, TaskConfig};
-use crate::store::service::StorageService;
 use crate::store::ConnectionStore; // bring trait for get/put on auth store into scope
-use crate::templates::{TemplateLoader, TemplateInputs};
+use crate::store::service::StorageService;
+use crate::templates::{TemplateInputs, TemplateLoader};
 
-use crate::interface::dto::{ExecuteOverridesDto, AdhocExecuteRequestDto, ConnectionStatusDto};
+use crate::interface::dto::{AdhocExecuteRequestDto, ConnectionStatusDto, ExecuteOverridesDto};
 
 pub struct OpenActService {
     storage: Arc<StorageService>,
@@ -16,35 +16,69 @@ pub struct OpenActService {
 
 impl OpenActService {
     pub async fn from_env() -> Result<Self> {
-        let templates_dir = std::env::var("OPENACT_TEMPLATES_DIR").unwrap_or_else(|_| "templates".to_string());
-        Ok(Self { 
+        let templates_dir =
+            std::env::var("OPENACT_TEMPLATES_DIR").unwrap_or_else(|_| "templates".to_string());
+        Ok(Self {
             storage: StorageService::global().await,
             template_loader: TemplateLoader::new(templates_dir),
         })
     }
 
-    pub fn from_storage(storage: Arc<StorageService>) -> Self { 
-        let templates_dir = std::env::var("OPENACT_TEMPLATES_DIR").unwrap_or_else(|_| "templates".to_string());
-        Self { 
+    pub fn from_storage(storage: Arc<StorageService>) -> Self {
+        let templates_dir =
+            std::env::var("OPENACT_TEMPLATES_DIR").unwrap_or_else(|_| "templates".to_string());
+        Self {
             storage,
             template_loader: TemplateLoader::new(templates_dir),
         }
     }
 
     // Connections
-    pub async fn upsert_connection(&self, c: &ConnectionConfig) -> Result<()> { self.storage.upsert_connection(c).await }
-    pub async fn get_connection(&self, trn: &str) -> Result<Option<ConnectionConfig>> { self.storage.get_connection(trn).await }
-    pub async fn list_connections(&self, auth_type: Option<&str>, limit: Option<i64>, offset: Option<i64>) -> Result<Vec<ConnectionConfig>> { self.storage.list_connections(auth_type, limit, offset).await }
-    pub async fn delete_connection(&self, trn: &str) -> Result<bool> { self.storage.delete_connection(trn).await }
+    pub async fn upsert_connection(&self, c: &ConnectionConfig) -> Result<()> {
+        self.storage.upsert_connection(c).await
+    }
+    pub async fn get_connection(&self, trn: &str) -> Result<Option<ConnectionConfig>> {
+        self.storage.get_connection(trn).await
+    }
+    pub async fn list_connections(
+        &self,
+        auth_type: Option<&str>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<ConnectionConfig>> {
+        self.storage
+            .list_connections(auth_type, limit, offset)
+            .await
+    }
+    pub async fn delete_connection(&self, trn: &str) -> Result<bool> {
+        self.storage.delete_connection(trn).await
+    }
 
     // Tasks
-    pub async fn upsert_task(&self, t: &TaskConfig) -> Result<()> { self.storage.upsert_task(t).await }
-    pub async fn get_task(&self, trn: &str) -> Result<Option<TaskConfig>> { self.storage.get_task(trn).await }
-    pub async fn list_tasks(&self, connection_trn: Option<&str>, limit: Option<i64>, offset: Option<i64>) -> Result<Vec<TaskConfig>> { self.storage.list_tasks(connection_trn, limit, offset).await }
-    pub async fn delete_task(&self, trn: &str) -> Result<bool> { self.storage.delete_task(trn).await }
+    pub async fn upsert_task(&self, t: &TaskConfig) -> Result<()> {
+        self.storage.upsert_task(t).await
+    }
+    pub async fn get_task(&self, trn: &str) -> Result<Option<TaskConfig>> {
+        self.storage.get_task(trn).await
+    }
+    pub async fn list_tasks(
+        &self,
+        connection_trn: Option<&str>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<TaskConfig>> {
+        self.storage.list_tasks(connection_trn, limit, offset).await
+    }
+    pub async fn delete_task(&self, trn: &str) -> Result<bool> {
+        self.storage.delete_task(trn).await
+    }
 
     // Execute
-    pub async fn execute_task(&self, task_trn: &str, overrides: Option<ExecuteOverridesDto>) -> Result<ExecutionResult> {
+    pub async fn execute_task(
+        &self,
+        task_trn: &str,
+        overrides: Option<ExecuteOverridesDto>,
+    ) -> Result<ExecutionResult> {
         let (conn, mut task) = self
             .storage
             .get_execution_context(task_trn)
@@ -52,12 +86,32 @@ impl OpenActService {
             .ok_or_else(|| anyhow!("Task not found: {}", task_trn))?;
 
         if let Some(ov) = overrides {
-            if let Some(m) = ov.method { task.method = m; }
-            if let Some(ep) = ov.endpoint { task.api_endpoint = ep; }
-            if let Some(h) = ov.headers { let mut headers = task.headers.unwrap_or_default(); for (k, vs) in h { headers.insert(k, vs); } task.headers = Some(headers); }
-            if let Some(q) = ov.query { let mut qs = task.query_params.unwrap_or_default(); for (k, vs) in q { qs.insert(k, vs); } task.query_params = Some(qs); }
-            if let Some(b) = ov.body { task.request_body = Some(b); }
-            if let Some(rp) = ov.retry_policy { task.retry_policy = Some(rp); }
+            if let Some(m) = ov.method {
+                task.method = m;
+            }
+            if let Some(ep) = ov.endpoint {
+                task.api_endpoint = ep;
+            }
+            if let Some(h) = ov.headers {
+                let mut headers = task.headers.unwrap_or_default();
+                for (k, vs) in h {
+                    headers.insert(k, vs);
+                }
+                task.headers = Some(headers);
+            }
+            if let Some(q) = ov.query {
+                let mut qs = task.query_params.unwrap_or_default();
+                for (k, vs) in q {
+                    qs.insert(k, vs);
+                }
+                task.query_params = Some(qs);
+            }
+            if let Some(b) = ov.body {
+                task.request_body = Some(b);
+            }
+            if let Some(rp) = ov.retry_policy {
+                task.retry_policy = Some(rp);
+            }
         }
 
         let executor = Executor::new();
@@ -106,12 +160,22 @@ impl OpenActService {
     }
 
     // System
-    pub async fn stats(&self) -> Result<crate::store::service::StorageStats> { self.storage.get_stats().await }
-    pub async fn get_stats(&self) -> Result<crate::store::service::StorageStats> { self.storage.get_stats().await }
-    pub async fn cleanup(&self) -> Result<crate::store::service::CleanupResult> { self.storage.cleanup().await }
-    pub async fn cache_stats(&self) -> Result<crate::store::service::CacheStats> { Ok(self.storage.get_cache_stats().await) }
-    pub async fn get_cache_stats(&self) -> crate::store::service::CacheStats { self.storage.get_cache_stats().await }
-    
+    pub async fn stats(&self) -> Result<crate::store::service::StorageStats> {
+        self.storage.get_stats().await
+    }
+    pub async fn get_stats(&self) -> Result<crate::store::service::StorageStats> {
+        self.storage.get_stats().await
+    }
+    pub async fn cleanup(&self) -> Result<crate::store::service::CleanupResult> {
+        self.storage.cleanup().await
+    }
+    pub async fn cache_stats(&self) -> Result<crate::store::service::CacheStats> {
+        Ok(self.storage.get_cache_stats().await)
+    }
+    pub async fn get_cache_stats(&self) -> crate::store::service::CacheStats {
+        self.storage.get_cache_stats().await
+    }
+
     // Connection status (no network calls)
     pub async fn connection_status(&self, trn: &str) -> Result<Option<ConnectionStatusDto>> {
         use crate::models::connection::AuthorizationType;
@@ -154,7 +218,7 @@ impl OpenActService {
             }
             AuthorizationType::OAuth2ClientCredentials => {
                 // Token stored under derived TRN; fetch if present to compute expiry
-                use crate::utils::trn::{parse_connection_trn, make_auth_cc_token_trn};
+                use crate::utils::trn::{make_auth_cc_token_trn, parse_connection_trn};
                 let (tenant, id) = parse_connection_trn(&conn.trn)?;
                 let token_ref = make_auth_cc_token_trn(&tenant, &id);
                 let store = self.storage.clone();
@@ -164,9 +228,13 @@ impl OpenActService {
                     if let Some(exp) = ac.expires_at {
                         let now = chrono::Utc::now();
                         status.seconds_to_expiry = Some((exp - now).num_seconds());
-                        if exp <= now { status.status = "expired".to_string(); }
-                        else if exp <= now + chrono::Duration::seconds(600) { status.status = "expiring_soon".to_string(); }
-                        else { status.status = "ready".to_string(); }
+                        if exp <= now {
+                            status.status = "expired".to_string();
+                        } else if exp <= now + chrono::Duration::seconds(600) {
+                            status.status = "expiring_soon".to_string();
+                        } else {
+                            status.status = "ready".to_string();
+                        }
                     } else {
                         status.status = "ready".to_string();
                     }
@@ -184,16 +252,21 @@ impl OpenActService {
                         if let Some(exp) = ac.expires_at {
                             let now = chrono::Utc::now();
                             status.seconds_to_expiry = Some((exp - now).num_seconds());
-                            if exp <= now { status.status = "expired".to_string(); }
-                            else if exp <= now + chrono::Duration::seconds(600) { status.status = "expiring_soon".to_string(); }
-                            else { status.status = "ready".to_string(); }
+                            if exp <= now {
+                                status.status = "expired".to_string();
+                            } else if exp <= now + chrono::Duration::seconds(600) {
+                                status.status = "expiring_soon".to_string();
+                            } else {
+                                status.status = "ready".to_string();
+                            }
                         } else {
                             // No expiry info - assume ready but cannot predict
                             status.status = "ready".to_string();
                         }
                     } else {
                         status.status = "not_authorized".to_string();
-                        status.message = Some("auth_ref bound but no token record in store".to_string());
+                        status.message =
+                            Some("auth_ref bound but no token record in store".to_string());
                     }
                 } else {
                     status.status = "unbound".to_string();
@@ -204,12 +277,15 @@ impl OpenActService {
 
         Ok(Some(status))
     }
-    
+
     // Execution context
-    pub async fn get_execution_context(&self, task_trn: &str) -> Result<Option<(crate::models::ConnectionConfig, crate::models::TaskConfig)>> {
+    pub async fn get_execution_context(
+        &self,
+        task_trn: &str,
+    ) -> Result<Option<(crate::models::ConnectionConfig, crate::models::TaskConfig)>> {
         self.storage.get_execution_context(task_trn).await
     }
-    
+
     // Direct storage access for advanced operations
     pub fn database(&self) -> &crate::store::DatabaseManager {
         self.storage.database()
@@ -221,10 +297,26 @@ impl OpenActService {
     }
 
     // Config
-    pub async fn import(&self, connections: Vec<ConnectionConfig>, tasks: Vec<TaskConfig>) -> Result<(usize, usize)> { self.storage.import_configurations(connections, tasks).await }
-    pub async fn import_configurations(&self, connections: Vec<ConnectionConfig>, tasks: Vec<TaskConfig>) -> Result<(usize, usize)> { self.storage.import_configurations(connections, tasks).await }
-    pub async fn export(&self) -> Result<(Vec<ConnectionConfig>, Vec<TaskConfig>)> { self.storage.export_configurations().await }
-    pub async fn export_configurations(&self) -> Result<(Vec<ConnectionConfig>, Vec<TaskConfig>)> { self.storage.export_configurations().await }
+    pub async fn import(
+        &self,
+        connections: Vec<ConnectionConfig>,
+        tasks: Vec<TaskConfig>,
+    ) -> Result<(usize, usize)> {
+        self.storage.import_configurations(connections, tasks).await
+    }
+    pub async fn import_configurations(
+        &self,
+        connections: Vec<ConnectionConfig>,
+        tasks: Vec<TaskConfig>,
+    ) -> Result<(usize, usize)> {
+        self.storage.import_configurations(connections, tasks).await
+    }
+    pub async fn export(&self) -> Result<(Vec<ConnectionConfig>, Vec<TaskConfig>)> {
+        self.storage.export_configurations().await
+    }
+    pub async fn export_configurations(&self) -> Result<(Vec<ConnectionConfig>, Vec<TaskConfig>)> {
+        self.storage.export_configurations().await
+    }
 
     // Templates
     /// Instantiate a connection template and register it in the database
@@ -237,29 +329,38 @@ impl OpenActService {
         inputs: TemplateInputs,
     ) -> Result<ConnectionConfig> {
         // Load template
-        let template = self.template_loader.load_connection_template(provider, template_name)?;
-        
+        let template = self
+            .template_loader
+            .load_connection_template(provider, template_name)?;
+
         // Instantiate to DTO
         let connection_dto = self.template_loader.instantiate_connection(
-            &template, tenant, connection_name, &inputs
+            &template,
+            tenant,
+            connection_name,
+            &inputs,
         )?;
-        
+
         // Check if connection already exists to get version info
         let existing = self.get_connection(&connection_dto.trn).await?;
         let (existing_version, existing_created_at) = match existing {
             Some(conn) => (Some(conn.version), Some(conn.created_at)),
             None => (None, None),
         };
-        
+
         // Convert DTO to Config with proper metadata
         let connection_config = connection_dto.to_config(existing_version, existing_created_at);
-        
+
         // Upsert using existing service
         self.upsert_connection(&connection_config).await?;
-        
-        tracing::info!("Template connection registered: provider={}, template={}, trn={}", 
-                      provider, template_name, connection_config.trn);
-        
+
+        tracing::info!(
+            "Template connection registered: provider={}, template={}, trn={}",
+            provider,
+            template_name,
+            connection_config.trn
+        );
+
         Ok(connection_config)
     }
 
@@ -275,41 +376,48 @@ impl OpenActService {
     ) -> Result<TaskConfig> {
         // Load template
         let template = self.template_loader.load_task_template(provider, action)?;
-        
+
         // Instantiate to DTO
         let task_dto = self.template_loader.instantiate_task(
-            &template, tenant, task_name, connection_trn, &inputs
+            &template,
+            tenant,
+            task_name,
+            connection_trn,
+            &inputs,
         )?;
-        
+
         // Check if task already exists to get version info
         let existing = self.get_task(&task_dto.trn).await?;
         let (existing_version, existing_created_at) = match existing {
             Some(task) => (Some(task.version), Some(task.created_at)),
             None => (None, None),
         };
-        
+
         // Convert DTO to Config with proper metadata
         let task_config = task_dto.to_config(existing_version, existing_created_at);
-        
+
         // Upsert using existing service
         self.upsert_task(&task_config).await?;
-        
-        tracing::info!("Template task registered: provider={}, action={}, trn={}", 
-                      provider, action, task_config.trn);
-        
+
+        tracing::info!(
+            "Template task registered: provider={}, action={}, trn={}",
+            provider,
+            action,
+            task_config.trn
+        );
+
         Ok(task_config)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::connection::AuthorizationType;
-    use crate::models::{ApiKeyAuthParameters, OAuth2Parameters, ConnectionConfig};
+    use crate::models::{ApiKeyAuthParameters, ConnectionConfig, OAuth2Parameters};
+    use crate::store::ConnectionStore;
     use crate::store::DatabaseManager;
     use chrono::Utc;
-    use crate::store::ConnectionStore;
 
     async fn make_service() -> OpenActService {
         let db = DatabaseManager::new("sqlite::memory:").await.unwrap();
@@ -325,15 +433,29 @@ mod tests {
     async fn status_api_key_ready_and_misconfigured() {
         let svc = make_service().await;
         // Ready
-        let mut c1 = make_conn("trn:openact:tenant:connection/ak1", "ak1", AuthorizationType::ApiKey);
-        c1.auth_parameters.api_key_auth_parameters = Some(ApiKeyAuthParameters { api_key_name: "X-API-Key".to_string(), api_key_value: "secret".to_string() });
+        let mut c1 = make_conn(
+            "trn:openact:tenant:connection/ak1",
+            "ak1",
+            AuthorizationType::ApiKey,
+        );
+        c1.auth_parameters.api_key_auth_parameters = Some(ApiKeyAuthParameters {
+            api_key_name: "X-API-Key".to_string(),
+            api_key_value: "secret".to_string(),
+        });
         svc.upsert_connection(&c1).await.unwrap();
         let s1 = svc.connection_status(&c1.trn).await.unwrap().unwrap();
         assert_eq!(s1.status, "ready");
 
         // Misconfigured
-        let mut c2 = make_conn("trn:openact:tenant:connection/ak2", "ak2", AuthorizationType::ApiKey);
-        c2.auth_parameters.api_key_auth_parameters = Some(ApiKeyAuthParameters { api_key_name: "".to_string(), api_key_value: "".to_string() });
+        let mut c2 = make_conn(
+            "trn:openact:tenant:connection/ak2",
+            "ak2",
+            AuthorizationType::ApiKey,
+        );
+        c2.auth_parameters.api_key_auth_parameters = Some(ApiKeyAuthParameters {
+            api_key_name: "".to_string(),
+            api_key_value: "".to_string(),
+        });
         svc.upsert_connection(&c2).await.unwrap();
         let s2 = svc.connection_status(&c2.trn).await.unwrap().unwrap();
         assert_eq!(s2.status, "misconfigured");
@@ -385,10 +507,12 @@ mod tests {
         )
         .unwrap();
         // store under the auth_ref key using the same storage instance
-        let _ = svc.storage.put("trn:openact:tenant:auth/oauth2_ac-user", &ac).await;
+        let _ = svc
+            .storage
+            .put("trn:openact:tenant:auth/oauth2_ac-user", &ac)
+            .await;
 
         let s_ready = svc.connection_status(&c2.trn).await.unwrap().unwrap();
         assert_eq!(s_ready.status, "ready");
     }
 }
-

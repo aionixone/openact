@@ -6,10 +6,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
+
 use super::common::{MultiValue, TimeoutConfig, NetworkConfig, HttpPolicy, ResponsePolicy, RetryPolicy};
 
 /// HTTP Task configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct TaskConfig {
     pub trn: String,
     pub name: String,

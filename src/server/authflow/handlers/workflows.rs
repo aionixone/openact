@@ -1,16 +1,31 @@
 #[cfg(feature = "server")]
 use axum::extract::{Path, State};
 #[cfg(feature = "server")]
-use axum::response::{IntoResponse, Json};
-#[cfg(feature = "server")]
 use axum::http::StatusCode;
+#[cfg(feature = "server")]
+use axum::response::{IntoResponse, Json};
 #[cfg(feature = "server")]
 use serde_json::json;
 
 #[cfg(feature = "server")]
 use crate::server::authflow::state::ServerState;
 
+#[cfg(all(feature = "server", feature = "openapi"))]
+use utoipa;
+
 #[cfg(feature = "server")]
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    get,
+    path = "/api/v1/authflow/workflows",
+    tag = "authflow",
+    operation_id = "authflow_list_workflows",
+    summary = "List workflows",
+    description = "Retrieve a list of all authflow workflows",
+    responses(
+        (status = 200, description = "List of workflows", body = crate::server::authflow::dto::WorkflowListResponse),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn list_workflows(State(state): State<ServerState>) -> impl IntoResponse {
     let workflows = state.workflows.read().unwrap();
     let workflow_list: Vec<_> = workflows.values().cloned().collect();
@@ -18,6 +33,20 @@ pub async fn list_workflows(State(state): State<ServerState>) -> impl IntoRespon
 }
 
 #[cfg(feature = "server")]
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    post,
+    path = "/api/v1/authflow/workflows",
+    tag = "authflow",
+    operation_id = "authflow_create_workflow",
+    summary = "Create workflow",
+    description = "Create a new authflow workflow with DSL definition",
+    request_body = crate::server::authflow::dto::CreateWorkflowRequest,
+    responses(
+        (status = 201, description = "Workflow created successfully", body = crate::server::authflow::dto::WorkflowDetail),
+        (status = 400, description = "Invalid DSL or validation error", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
 pub async fn create_workflow(
     State(state): State<ServerState>,
     Json(req): Json<crate::server::authflow::dto::CreateWorkflowRequest>,
@@ -52,29 +81,86 @@ pub async fn create_workflow(
         created_at: now,
         updated_at: now,
     };
-    state.workflows.write().unwrap().insert(workflow_id.clone(), workflow.clone());
-    (StatusCode::CREATED, Json(serde_json::to_value(workflow).unwrap())).into_response()
+    state
+        .workflows
+        .write()
+        .unwrap()
+        .insert(workflow_id.clone(), workflow.clone());
+    (
+        StatusCode::CREATED,
+        Json(serde_json::to_value(workflow).unwrap()),
+    )
+        .into_response()
 }
 
 #[cfg(feature = "server")]
-pub async fn get_workflow(State(state): State<ServerState>, Path(id): Path<String>) -> impl IntoResponse {
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    get,
+    path = "/api/v1/authflow/workflows/{id}",
+    tag = "authflow",
+    operation_id = "authflow_get_workflow",
+    summary = "Get workflow",
+    description = "Retrieve a specific workflow by ID",
+    params(
+        ("id" = String, Path, description = "Workflow ID")
+    ),
+    responses(
+        (status = 200, description = "Workflow found", body = crate::server::authflow::dto::WorkflowDetail),
+        (status = 404, description = "Workflow not found", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
+pub async fn get_workflow(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     let workflows = state.workflows.read().unwrap();
     match workflows.get(&id) {
         Some(workflow) => Json(serde_json::to_value(workflow).unwrap()).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(json!({
-            "error": {"code": "WORKFLOW_NOT_FOUND", "message": "Workflow not found"}
-        }))).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": {"code": "WORKFLOW_NOT_FOUND", "message": "Workflow not found"}
+            })),
+        )
+            .into_response(),
     }
 }
 
 #[cfg(feature = "server")]
-pub async fn get_workflow_graph(State(state): State<ServerState>, Path(id): Path<String>) -> impl IntoResponse {
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    get,
+    path = "/api/v1/authflow/workflows/{id}/graph",
+    tag = "authflow",
+    operation_id = "authflow_get_workflow_graph",
+    summary = "Get workflow graph",
+    description = "Retrieve the visual graph representation of a workflow",
+    params(
+        ("id" = String, Path, description = "Workflow ID")
+    ),
+    responses(
+        (status = 200, description = "Workflow graph data", body = crate::server::authflow::dto::WorkflowGraphResponse),
+        (status = 404, description = "Workflow not found", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
+pub async fn get_workflow_graph(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     let workflows = state.workflows.read().unwrap();
-    let workflow = match workflows.get(&id) { Some(w) => w, None => {
-        return (StatusCode::NOT_FOUND, Json(json!({
-            "error": {"code": "WORKFLOW_NOT_FOUND", "message": "Workflow not found"}
-        }))).into_response();
-    } };
+    let workflow = match workflows.get(&id) {
+        Some(w) => w,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": {"code": "WORKFLOW_NOT_FOUND", "message": "Workflow not found"}
+                })),
+            )
+                .into_response();
+        }
+    };
     let mut graphs = serde_json::Map::new();
     for (flow_name, flow) in &workflow.dsl.provider.flows {
         let mut nodes = Vec::new();
@@ -91,7 +177,10 @@ pub async fn get_workflow_graph(State(state): State<ServerState>, Path(id): Path
                 stepflow_dsl::State::Parallel(_) => "parallel",
                 stepflow_dsl::State::Map(_) => "map",
             };
-            let resource = match state { stepflow_dsl::State::Task(task_state) => task_state.resource.as_str(), _ => "" };
+            let resource = match state {
+                stepflow_dsl::State::Task(task_state) => task_state.resource.as_str(),
+                _ => "",
+            };
             let node = json!({
                 "id": state_name,
                 "type": state_type,
@@ -100,20 +189,25 @@ pub async fn get_workflow_graph(State(state): State<ServerState>, Path(id): Path
                 "position": { "x": x_pos, "y": 100 },
                 "properties": { "description": format!("{} state", state_type), "canPause": matches!(state_type, "task") }
             });
-            nodes.push(node); x_pos += 200;
+            nodes.push(node);
+            x_pos += 200;
         }
         for (state_name, state) in &flow.states {
             let next_state = match state {
                 stepflow_dsl::State::Task(task_state) => task_state.base.next.as_deref(),
                 stepflow_dsl::State::Pass(pass_state) => pass_state.base.next.as_deref(),
                 stepflow_dsl::State::Wait(wait_state) => wait_state.base.next.as_deref(),
-                stepflow_dsl::State::Choice(choice_state) => choice_state.choices.first().map(|c| c.next.as_str()),
+                stepflow_dsl::State::Choice(choice_state) => {
+                    choice_state.choices.first().map(|c| c.next.as_str())
+                }
                 stepflow_dsl::State::Parallel(_) => None,
                 stepflow_dsl::State::Map(_) => None,
                 stepflow_dsl::State::Succeed(_) => None,
                 stepflow_dsl::State::Fail(_) => None,
             };
-            if let Some(next) = next_state { edges.push(json!({ "id": format!("{}_{}", state_name, next), "source": state_name, "target": next, "type": "success", "label": "success" })); }
+            if let Some(next) = next_state {
+                edges.push(json!({ "id": format!("{}_{}", state_name, next), "source": state_name, "target": next, "type": "success", "label": "success" }));
+            }
         }
         graphs.insert(flow_name.clone(), json!({ "nodes": nodes, "edges": edges }));
     }
@@ -121,13 +215,39 @@ pub async fn get_workflow_graph(State(state): State<ServerState>, Path(id): Path
 }
 
 #[cfg(feature = "server")]
-pub async fn validate_workflow(State(state): State<ServerState>, Path(id): Path<String>) -> impl IntoResponse {
+#[cfg_attr(all(feature = "server", feature = "openapi"), utoipa::path(
+    post,
+    path = "/api/v1/authflow/workflows/{id}/validate",
+    tag = "authflow",
+    operation_id = "authflow_validate_workflow",
+    summary = "Validate workflow",
+    description = "Validate a workflow's DSL definition and configuration",
+    params(
+        ("id" = String, Path, description = "Workflow ID")
+    ),
+    responses(
+        (status = 200, description = "Workflow validation result", body = crate::server::authflow::dto::ValidationResult),
+        (status = 404, description = "Workflow not found", body = crate::interface::error::ApiError),
+        (status = 500, description = "Internal server error", body = crate::interface::error::ApiError)
+    )
+))]
+pub async fn validate_workflow(
+    State(state): State<ServerState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     let workflows = state.workflows.read().unwrap();
-    let workflow = match workflows.get(&id) { Some(w) => w, None => {
-        return (StatusCode::NOT_FOUND, Json(json!({
-            "error": {"code": "WORKFLOW_NOT_FOUND", "message": "Workflow not found"}
-        }))).into_response();
-    } };
+    let workflow = match workflows.get(&id) {
+        Some(w) => w,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": {"code": "WORKFLOW_NOT_FOUND", "message": "Workflow not found"}
+                })),
+            )
+                .into_response();
+        }
+    };
     let validation_result = workflow.dsl.validate();
     match validation_result {
         Ok(_) => {
@@ -156,5 +276,3 @@ pub async fn validate_workflow(State(state): State<ServerState>, Path(id): Path<
         })).into_response(),
     }
 }
-
-

@@ -208,7 +208,7 @@ mod callback_impl {
             mut context: Value,
         ) -> Result<Value> {
             // 1. Start the OAuth2 flow
-            let start_result = crate::api::start_obtain(dsl, handler, run_store, context.take())?;
+            let start_result = crate::authflow::workflow::start_obtain(dsl, handler, run_store, context.take())?;
 
             println!("🔗 Please visit the following URL in your browser to authorize:");
             println!("   {}", start_result.authorize_url);
