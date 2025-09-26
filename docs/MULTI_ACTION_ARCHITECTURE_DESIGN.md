@@ -27,16 +27,16 @@ This document outlines the architectural design for transforming OpenAct from an
 
 ### Core Principles
 
-1. **Kind-Based Organization**: Each action type (HTTP, PostgreSQL, Redis, MCP) is a separate "Kind"
-2. **Conditional Compilation**: Users compile only needed Kinds via feature flags
+1. **Connector-Based Organization**: Each action type (HTTP, PostgreSQL, Redis, MCP) is a separate connector type
+2. **Conditional Compilation**: Users compile only needed connectors via feature flags
 3. **Dual Manifest System**: Actions support multiple client protocols (OpenAPI + MCP)
 4. **Configuration Flexibility**: YAML + Database persistence with environment variable substitution
-5. **Plugin Architecture**: Easy to add new Kinds without modifying core
+5. **Plugin Architecture**: Easy to add new connectors without modifying core
 
 ### Three-Layer Architecture
 
 ```
-Kind (Action Type)
+Connector (Action Type)
   ├── Connections (Resource Configuration)
   │   ├── Action 1 (Specific Operations)
   │   ├── Action 2
@@ -48,7 +48,7 @@ Kind (Action Type)
 
 #### Layer Definitions
 
-**1. Kind Layer** - Protocol/Service Types
+**1. Connector Layer** - Protocol/Service Types
 - `http` - HTTP API calls
 - `postgresql` - PostgreSQL database operations
 - `mysql` - MySQL database operations
@@ -61,11 +61,11 @@ Kind (Action Type)
 - `elasticsearch` - Elasticsearch search operations
 
 **2. Connection Layer** - Service Instances
-- Each Kind can have multiple connections
+- Each connector type can have multiple connections
 - Examples:
-  - HTTP Kind: `github-api`, `slack-api`, `internal-service`
-  - PostgreSQL Kind: `prod-db`, `dev-db`, `analytics-db`
-  - Redis Kind: `session-store`, `cache-store`
+  - HTTP: `github-api`, `slack-api`, `internal-service`
+  - PostgreSQL: `prod-db`, `dev-db`, `analytics-db`
+  - Redis: `session-store`, `cache-store`
 
 **3. Action Layer** - Specific Operations
 - Each connection supports multiple actions
@@ -78,7 +78,7 @@ Kind (Action Type)
 
 ```
 src/
-├── kinds/  # internal module name remains 'kinds' (type discriminator)
+├── connectors/
 │   ├── mod.rs                    # Core interfaces & registry
 │   ├── registry.rs               # Kind registration system
 │   │
@@ -129,41 +129,41 @@ src/
 
 ## 🔧 Core Interfaces
 
-### Kind Registration System
+### Connector Registration System
 
 ```rust
-// src/kinds/mod.rs (internal)
+// src/connectors/mod.rs
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 
-/// Kind registry manages all action types
-pub struct KindRegistry {
+/// Connector registry manages all action types
+pub struct ConnectorRegistry {
     connection_factories: HashMap<String, Box<dyn ConnectionFactory>>,
     action_factories: HashMap<String, Box<dyn ActionFactory>>,
 }
 
-/// Each Kind must implement this trait
-pub trait Kind {
-    fn kind_name() -> &'static str;
-    fn register(registry: &mut KindRegistry);
+/// Each connector type must implement this trait
+pub trait Connector {
+    fn connector_name() -> &'static str;
+    fn register(registry: &mut ConnectorRegistry);
 }
 
-/// Compile-time registration of all enabled Kinds
-pub fn register_all_kinds() -> KindRegistry {
-    let mut registry = KindRegistry::new();
+/// Compile-time registration of all enabled connectors
+pub fn register_all_connectors() -> ConnectorRegistry {
+    let mut registry = ConnectorRegistry::new();
     
     #[cfg(feature = "http")]
-    http::HttpKind::register(&mut registry);
+    http::HttpConnector::register(&mut registry);
     
     #[cfg(feature = "postgresql")]
-    postgresql::PostgreSQLKind::register(&mut registry);
+    postgresql::PostgreSQLConnector::register(&mut registry);
     
     #[cfg(feature = "redis")]
-    redis::RedisKind::register(&mut registry);
+    redis::RedisConnector::register(&mut registry);
     
     #[cfg(feature = "mcp")]
-    mcp::MCPKind::register(&mut registry);
+    mcp::MCPConnector::register(&mut registry);
     
     registry
 }
@@ -240,7 +240,7 @@ server = ["axum", "tokio", "tower"]
 openapi = ["utoipa", "utoipa-swagger-ui"]
 metrics = ["prometheus"]
 
-# Kind features - each Kind is optional
+# Connector features - each connector is optional
 http = ["reqwest", "url"]
 postgresql = ["sqlx/postgres", "sqlx/runtime-tokio-rustls"]
 mysql = ["sqlx/mysql", "sqlx/runtime-tokio-rustls"]
@@ -254,7 +254,7 @@ sqlite = ["sqlx/sqlite", "sqlx/runtime-tokio-rustls"]
 database = ["postgresql", "mysql", "redis", "mongodb", "sqlite"]
 cloud = ["grpc"]
 messaging = ["kafka", "mcp"]
-all-kinds = ["http", "database", "cloud", "messaging"]
+all-connectors = ["http", "database", "cloud", "messaging"]
 ```
 
 ### Build Examples
@@ -267,7 +267,7 @@ cargo build --features "http,server"
 cargo build --features "database,server"
 
 # Full-featured build
-cargo build --features "all-kinds,server,openapi,metrics"
+cargo build --features "all-connectors,server,openapi,metrics"
 
 # Custom combination
 cargo build --features "http,postgresql,redis,mcp,server"
@@ -342,8 +342,8 @@ connectors:
 ### Database Schema Extension
 
 ```sql
--- New tables for Kind-based architecture
-CREATE TABLE kind_connections (
+-- New tables for connector-based architecture
+CREATE TABLE connector_connections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     trn TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
@@ -353,7 +353,7 @@ CREATE TABLE kind_connections (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE kind_actions (
+CREATE TABLE connector_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     trn TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
@@ -362,10 +362,10 @@ CREATE TABLE kind_actions (
     config_data TEXT NOT NULL, -- JSON configuration
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (connection_trn) REFERENCES kind_connections(trn)
+    FOREIGN KEY (connection_trn) REFERENCES connector_connections(trn)
 );
 
-CREATE TABLE kind_action_sets (
+CREATE TABLE connector_action_sets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     trn TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
@@ -378,9 +378,9 @@ CREATE TABLE kind_action_sets (
 ### TRN (Tenant Resource Name) Format
 
 ```
-# New TRN format with Kind specification
-trn:openact:{tenant}:connection/{kind}/{name}@v{version}
-trn:openact:{tenant}:action/{kind}/{name}@v{version}
+# New TRN format with connector specification
+trn:openact:{tenant}:connection/{connector}/{name}@v{version}
+trn:openact:{tenant}:action/{connector}/{name}@v{version}
 
 # Examples
 trn:openact:demo:connection/postgresql/prod-db@v1
@@ -472,7 +472,7 @@ type Tool interface {
 ```rust
 // MCP server automatically exposes all actions as tools
 pub struct McpServer {
-    registry: Arc<KindRegistry>,
+    registry: Arc<ConnectorRegistry>,
     version: String,
 }
 
@@ -506,18 +506,18 @@ impl McpServer {
 ### Phase 1: Foundation (Week 1-2)
 1. ✅ Create new directory structure
 2. ✅ Define core traits and interfaces
-3. ✅ Implement Kind registration system
+3. ✅ Implement connector registration system
 4. ✅ Add conditional compilation support
 
 ### Phase 2: HTTP Migration (Week 3)
-1. Migrate existing HTTP functionality to new `http` Kind
+1. Migrate existing HTTP functionality to new `http` connector
 2. Ensure backward compatibility
 3. Update tests for new architecture
 4. Verify no regression in existing functionality
 
 ### Phase 3: Database Support (Week 4-5)
-1. Implement `postgresql` Kind with basic actions
-2. Implement `mysql` and `redis` Kinds
+1. Implement `postgresql` connector with basic actions
+2. Implement `mysql` and `redis` connectors
 3. Add database connection pooling
 4. Create SQL execution safety mechanisms
 
@@ -528,7 +528,7 @@ impl McpServer {
 4. Test with MCP clients
 
 ### Phase 5: Enhanced Features (Week 8+)
-1. Add remaining Kinds (gRPC, Kafka, S3, etc.)
+1. Add remaining connectors (gRPC, Kafka, S3, etc.)
 2. Implement action sets/toolsets
 3. Add advanced configuration features
 4. Performance optimization
@@ -551,7 +551,7 @@ impl McpServer {
 - Faster compilation times
 
 **Extensibility**
-- Easy to add custom Kinds
+- Easy to add custom connectors
 - Plugin-like architecture
 - Community contributions encouraged
 - Future-proof design
@@ -581,18 +581,18 @@ impl McpServer {
 - **Binary Size Reduction**: 50%+ smaller binaries with minimal features
 - **Compilation Time**: Faster builds with fewer dependencies
 - **Memory Usage**: Reduced runtime memory footprint
-- **Test Coverage**: Maintain >90% coverage across all Kinds
+- **Test Coverage**: Maintain >90% coverage across all connectors
 
 ### Functional Metrics
-- **Kind Ecosystem**: Support for 10+ different action types
+- **Connector Ecosystem**: Support for 10+ different action types
 - **Protocol Support**: REST API + MCP + future protocols
 - **Configuration Flexibility**: YAML + DB + environment variables
 - **Migration Success**: 100% backward compatibility during transition
 
 ### Community Metrics
 - **Adoption Rate**: Track feature flag usage
-- **Contribution Rate**: New Kind contributions from community
-- **Documentation Quality**: Clear examples for each Kind
+- **Contribution Rate**: New connector contributions from community
+- **Documentation Quality**: Clear examples for each connector
 - **Support Load**: Reduced support requests due to better architecture
 
 ## 📝 Next Steps
