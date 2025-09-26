@@ -78,7 +78,7 @@ Kind (Action Type)
 
 ```
 src/
-├── kinds/
+├── kinds/  # internal module name remains 'kinds' (type discriminator)
 │   ├── mod.rs                    # Core interfaces & registry
 │   ├── registry.rs               # Kind registration system
 │   │
@@ -132,7 +132,7 @@ src/
 ### Kind Registration System
 
 ```rust
-// src/kinds/mod.rs
+// src/kinds/mod.rs (internal)
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -278,11 +278,11 @@ cargo build --features "sqlite" --no-default-features
 
 ## 📄 Configuration System
 
-### YAML Configuration Format
+### YAML Configuration Format (user-facing: connectors)
 
 ```yaml
-# config/kinds.yaml
-kinds:
+# config/connectors.yaml
+connectors:
   postgresql:
     connections:
       prod-db:
