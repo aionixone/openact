@@ -1,12 +1,12 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use aws_credential_types::Credentials;
 use aws_sigv4::http_request::{SignableBody, SignableRequest, SigningSettings};
 use aws_sigv4::sign::v4;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::time::SystemTime;
 
-use crate::authflow::actions::secrets::{MemorySecretsProvider, SecretsResolveHandler};
-use crate::authflow::engine::TaskHandler;
+use crate::actions::secrets::{MemorySecretsProvider, SecretsResolveHandler};
+use crate::engine::TaskHandler;
 
 #[derive(Default)]
 pub struct ComputeSigV4Handler;

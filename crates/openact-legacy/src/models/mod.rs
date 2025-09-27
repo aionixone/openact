@@ -1,5 +1,5 @@
 //! Data models for OpenAct
-//! 
+//!
 //! This module contains all data structures used throughout the OpenAct system,
 //! organized by domain and responsibility.
 
@@ -11,7 +11,7 @@ pub use connection::*;
 pub mod auth;
 pub use auth::*;
 
-// Task configuration models  
+// Task configuration models
 pub mod task;
 pub use task::*;
 

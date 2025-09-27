@@ -8,10 +8,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "openapi")]
-use utoipa::ToSchema;
-#[cfg(feature = "openapi")]
 #[allow(unused_imports)] // Used in utoipa path examples
 use serde_json::json;
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
 
 use crate::app::service::OpenActService;
 use crate::interface::dto::{AdhocExecuteRequestDto, ExecuteResponseDto};

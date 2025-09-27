@@ -4,10 +4,8 @@
 mod tests {
     use super::super::Executor;
     use crate::models::{
-        ConnectionConfig, TaskConfig, AuthorizationType, 
-        ApiKeyAuthParameters, OAuth2Parameters
+        ApiKeyAuthParameters, AuthorizationType, ConnectionConfig, OAuth2Parameters, TaskConfig,
     };
-    
 
     /// Create API Key test connection
     fn create_api_key_connection() -> ConnectionConfig {
@@ -16,12 +14,12 @@ mod tests {
             "API Key Test Connection".to_string(),
             AuthorizationType::ApiKey,
         );
-        
+
         connection.auth_parameters.api_key_auth_parameters = Some(ApiKeyAuthParameters {
             api_key_name: "X-API-Key".to_string(),
             api_key_value: "test-api-key-123".to_string(),
         });
-        
+
         connection
     }
 
@@ -32,7 +30,7 @@ mod tests {
             "OAuth2 CC Test Connection".to_string(),
             AuthorizationType::OAuth2ClientCredentials,
         );
-        
+
         connection.auth_parameters.oauth_parameters = Some(OAuth2Parameters {
             client_id: "test-client-id".to_string(),
             client_secret: "test-client-secret".to_string(),
@@ -41,7 +39,7 @@ mod tests {
             redirect_uri: None,
             use_pkce: Some(false),
         });
-        
+
         connection
     }
 
@@ -61,17 +59,17 @@ mod tests {
         // Test the complete process of API Key authentication
         let connection = create_api_key_connection();
         let task = create_test_task(&connection.trn);
-        
+
         // Create executor
         let _executor = Executor::new();
-        
+
         // This test verifies parameter merging and authentication injection logic
         // Actual HTTP requests require a mock server, here we mainly test internal logic
-        
+
         // Verify connection configuration
         assert_eq!(connection.authorization_type, AuthorizationType::ApiKey);
         assert!(connection.auth_parameters.api_key_auth_parameters.is_some());
-        
+
         // Verify task configuration
         assert_eq!(task.connection_trn, connection.trn);
         assert_eq!(task.method, "GET");
@@ -82,14 +80,21 @@ mod tests {
         // Test OAuth2 Client Credentials configuration
         let connection = create_oauth2_client_credentials_connection();
         let task = create_test_task(&connection.trn);
-        
+
         // Verify OAuth2 configuration
-        assert_eq!(connection.authorization_type, AuthorizationType::OAuth2ClientCredentials);
-        let oauth_params = connection.auth_parameters.oauth_parameters.as_ref().unwrap();
+        assert_eq!(
+            connection.authorization_type,
+            AuthorizationType::OAuth2ClientCredentials
+        );
+        let oauth_params = connection
+            .auth_parameters
+            .oauth_parameters
+            .as_ref()
+            .unwrap();
         assert_eq!(oauth_params.client_id, "test-client-id");
         assert_eq!(oauth_params.token_url, "https://auth.example.com/token");
         assert_eq!(oauth_params.scope.as_ref().unwrap(), "read write");
-        
+
         // Verify task association
         assert_eq!(task.connection_trn, connection.trn);
     }
@@ -98,7 +103,7 @@ mod tests {
     fn test_executor_creation() {
         // Test executor creation
         let _executor = Executor::new();
-        
+
         // The executor should be able to be created normally
         // This verifies that all dependencies are correctly initialized
     }

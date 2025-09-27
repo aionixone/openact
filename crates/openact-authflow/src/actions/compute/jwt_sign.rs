@@ -1,10 +1,10 @@
-use anyhow::{Context, Result, anyhow};
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use anyhow::{anyhow, Context, Result};
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
-use crate::authflow::actions::{MemorySecretsProvider, SecretsResolveHandler};
-use crate::authflow::engine::TaskHandler;
+use crate::actions::{MemorySecretsProvider, SecretsResolveHandler};
+use crate::engine::TaskHandler;
 
 #[derive(Default)]
 pub struct ComputeJwtSignHandler;

@@ -1,12 +1,12 @@
 //! Authentication models
-//! 
+//!
 //! This module contains data structures for managing authentication state,
 //! particularly OAuth token information and runtime authentication data.
 
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use anyhow::Result;
 
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
@@ -56,7 +56,10 @@ impl std::fmt::Debug for AuthConnection {
         f.debug_struct("AuthConnection")
             .field("trn", &self.trn)
             .field("access_token", &"[REDACTED]")
-            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "[REDACTED]"))
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "[REDACTED]"),
+            )
             .field("expires_at", &self.expires_at)
             .field("token_type", &self.token_type)
             .field("scope", &self.scope)

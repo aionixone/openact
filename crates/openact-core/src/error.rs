@@ -19,5 +19,3 @@ pub enum CoreError {
     #[error("other: {0}")]
     Other(String),
 }
-
-

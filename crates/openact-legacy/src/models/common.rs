@@ -28,9 +28,9 @@ pub struct TimeoutConfig {
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            connect_ms: 10_000,  // 10 seconds
-            read_ms: 30_000,     // 30 seconds
-            total_ms: 60_000,    // 60 seconds
+            connect_ms: 10_000, // 10 seconds
+            read_ms: 30_000,    // 30 seconds
+            total_ms: 60_000,   // 60 seconds
         }
     }
 }
@@ -130,7 +130,7 @@ pub struct ResponsePolicy {
 impl Default for ResponsePolicy {
     fn default() -> Self {
         Self {
-            allow_binary: true,  // Allow binary responses by default for compatibility
+            allow_binary: true, // Allow binary responses by default for compatibility
             max_body_bytes: 8 * 1024 * 1024, // 8MB
         }
     }
@@ -157,7 +157,7 @@ pub struct RetryPolicy {
 impl Default for RetryPolicy {
     fn default() -> Self {
         Self {
-            max_retries: 0,  // Default: no retries to maintain current behavior
+            max_retries: 0, // Default: no retries to maintain current behavior
             base_delay_ms: 100,
             max_delay_ms: 30_000, // 30 seconds
             backoff_multiplier: 2.0,
@@ -173,17 +173,18 @@ impl RetryPolicy {
         if attempt == 0 {
             return std::time::Duration::ZERO;
         }
-        
-        let delay_ms = (self.base_delay_ms as f64 * self.backoff_multiplier.powi(attempt as i32 - 1)) as u64;
+
+        let delay_ms =
+            (self.base_delay_ms as f64 * self.backoff_multiplier.powi(attempt as i32 - 1)) as u64;
         let delay_ms = delay_ms.min(self.max_delay_ms);
         std::time::Duration::from_millis(delay_ms)
     }
-    
+
     /// Check if a status code should trigger a retry
     pub fn should_retry_status(&self, status_code: u16) -> bool {
         self.retry_status_codes.contains(&status_code)
     }
-    
+
     /// Create a more aggressive retry policy for testing
     pub fn aggressive() -> Self {
         Self {
@@ -195,7 +196,7 @@ impl RetryPolicy {
             respect_retry_after: true,
         }
     }
-    
+
     /// Create a conservative retry policy
     pub fn conservative() -> Self {
         Self {

@@ -2,12 +2,12 @@
 
 pub mod router;
 pub mod handlers {
+    pub mod connect;
     pub mod connections;
-    pub mod tasks;
     pub mod execute;
     pub mod system;
-    pub mod connect;
-    
+    pub mod tasks;
+
     #[cfg(test)]
     mod tests;
 }
@@ -18,5 +18,3 @@ pub fn init_background_tasks() {
     // Spawn AC result TTL cleaner
     crate::server::handlers::connect::spawn_ac_ttl_cleaner();
 }
-
-

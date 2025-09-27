@@ -1,7 +1,7 @@
 //! No-op metrics implementation
 //!
 //! This module provides zero-overhead no-op implementations of metrics traits
-//! when the `metrics` feature is disabled. All operations are compile-time 
+//! when the `metrics` feature is disabled. All operations are compile-time
 //! eliminated, resulting in zero performance impact.
 
 use std::time::Duration;
@@ -14,8 +14,8 @@ impl Counter {
     /// Increment counter by the given amount (no-op)
     #[inline(always)]
     pub fn increment(&self, _value: u64) {}
-    
-    /// Increment counter by 1 (no-op) 
+
+    /// Increment counter by 1 (no-op)
     #[inline(always)]
     pub fn inc(&self) {}
 }
@@ -28,11 +28,11 @@ impl Gauge {
     /// Set gauge to the given value (no-op)
     #[inline(always)]
     pub fn set(&self, _value: f64) {}
-    
+
     /// Increment gauge by the given amount (no-op)
     #[inline(always)]
     pub fn increment(&self, _value: f64) {}
-    
+
     /// Decrement gauge by the given amount (no-op)
     #[inline(always)]
     pub fn decrement(&self, _value: f64) {}
@@ -46,7 +46,7 @@ impl Histogram {
     /// Record a value in the histogram (no-op)
     #[inline(always)]
     pub fn record(&self, _value: f64) {}
-    
+
     /// Record a duration in the histogram (no-op)
     #[inline(always)]
     pub fn record_duration(&self, _duration: Duration) {}

@@ -1,0 +1,114 @@
+//! REST API DTOs
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Response envelope wrapper
+#[derive(Serialize)]
+pub struct ResponseEnvelope<T> {
+    pub success: bool,
+    pub data: T,
+    pub metadata: ResponseMeta,
+}
+
+/// Response metadata
+#[derive(Serialize)]
+pub struct ResponseMeta {
+    pub request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_time_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_trn: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<String>>,
+}
+
+/// List query parameters
+#[derive(Deserialize)]
+pub struct ListQuery {
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub connection: Option<String>,
+    #[serde(default = "default_page")]
+    pub page: u32,
+    #[serde(default = "default_page_size")]
+    pub page_size: u32,
+}
+
+fn default_page() -> u32 {
+    1
+}
+fn default_page_size() -> u32 {
+    50
+}
+
+/// Pagination info
+#[derive(Serialize)]
+pub struct Pagination {
+    pub page: u32,
+    pub page_size: u32,
+    pub total: u64,
+}
+
+/// Kind summary
+#[derive(Serialize)]
+pub struct KindSummary {
+    pub name: String,
+    pub description: String,
+    pub category: String,
+}
+
+/// Action summary
+#[derive(Serialize)]
+pub struct ActionSummary {
+    pub name: String,
+    pub connector: String,
+    pub connection: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub action_trn: String,
+    pub mcp_enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_schema_digest: Option<String>,
+}
+
+/// Action schema response
+#[derive(Serialize)]
+pub struct ActionSchemaResponse {
+    pub input_schema: Value,
+    pub output_schema: Value,
+    pub examples: Vec<Example>,
+}
+
+/// Example for action usage
+#[derive(Serialize)]
+pub struct Example {
+    pub name: String,
+    pub input: Value,
+}
+
+/// Execute request
+#[derive(Deserialize)]
+pub struct ExecuteRequest {
+    pub input: Value,
+    #[serde(default)]
+    pub options: Option<ExecuteOptions>,
+}
+
+/// Execute options
+#[derive(Deserialize)]
+pub struct ExecuteOptions {
+    pub timeout_ms: Option<u64>,
+    pub dry_run: Option<bool>,
+}
+
+/// Execute response
+#[derive(Serialize)]
+pub struct ExecuteResponse {
+    pub result: Value,
+}

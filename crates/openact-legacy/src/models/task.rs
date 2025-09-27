@@ -1,5 +1,5 @@
 //! Task configuration models
-//! 
+//!
 //! This module contains data structures for managing HTTP task configurations.
 
 use chrono::{DateTime, Utc};
@@ -9,7 +9,9 @@ use std::collections::HashMap;
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 
-use super::common::{MultiValue, TimeoutConfig, NetworkConfig, HttpPolicy, ResponsePolicy, RetryPolicy};
+use super::common::{
+    HttpPolicy, MultiValue, NetworkConfig, ResponsePolicy, RetryPolicy, TimeoutConfig,
+};
 
 /// HTTP Task configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,7 +45,13 @@ pub struct TaskConfig {
 
 impl TaskConfig {
     /// Create a new HTTP task with default values
-    pub fn new(trn: String, name: String, connection_trn: String, api_endpoint: String, method: String) -> Self {
+    pub fn new(
+        trn: String,
+        name: String,
+        connection_trn: String,
+        api_endpoint: String,
+        method: String,
+    ) -> Self {
         let now = Utc::now();
         Self {
             trn,

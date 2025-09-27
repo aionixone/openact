@@ -3,8 +3,6 @@
 #[cfg(feature = "server")]
 use serde::{Deserialize, Serialize};
 
-#[cfg(all(feature = "server", feature = "openapi"))]
-use utoipa::ToSchema;
 #[cfg(feature = "server")]
 // use serde_json::json;
 #[cfg(feature = "server")]
@@ -12,9 +10,11 @@ use std::collections::HashMap;
 #[cfg(feature = "server")]
 use std::sync::{Arc, RwLock};
 #[cfg(feature = "server")]
-use tokio::sync::broadcast;
-#[cfg(feature = "server")]
 use std::time::SystemTime;
+#[cfg(feature = "server")]
+use tokio::sync::broadcast;
+#[cfg(all(feature = "server", feature = "openapi"))]
+use utoipa::ToSchema;
 
 #[cfg(feature = "server")]
 #[derive(Clone)]
@@ -51,7 +51,10 @@ pub struct WorkflowConfig {
 #[cfg(feature = "server")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(all(feature = "server", feature = "openapi"), derive(ToSchema))]
-pub enum WorkflowStatus { Active, Inactive }
+pub enum WorkflowStatus {
+    Active,
+    Inactive,
+}
 
 #[cfg(feature = "server")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,7 +85,13 @@ pub struct StateHistoryEntry {
 #[cfg(feature = "server")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(all(feature = "server", feature = "openapi"), derive(ToSchema))]
-pub enum ExecutionStatus { Running, Paused, Completed, Failed, Cancelled }
+pub enum ExecutionStatus {
+    Running,
+    Paused,
+    Completed,
+    Failed,
+    Cancelled,
+}
 
 #[cfg(feature = "server")]
 impl ServerState {
@@ -108,7 +117,9 @@ impl ServerState {
             executions: Arc::new(RwLock::new(HashMap::new())),
             connection_store: connection_store.clone(),
             run_store: Arc::new(crate::store::MemoryRunStore::default()),
-            task_handler: Arc::new(crate::authflow::actions::ActionRouter::new(connection_store)),
+            task_handler: Arc::new(crate::authflow::actions::ActionRouter::new(
+                connection_store,
+            )),
             ws_broadcaster: tx,
         }
     }
@@ -117,5 +128,3 @@ impl ServerState {
         let _ = self.ws_broadcaster.send(event);
     }
 }
-
-

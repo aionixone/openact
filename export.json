@@ -1,0 +1,1 @@
+{"version":"1.0","connectors":{"http":{"connections":{"test-api":{"auth_parameters":{},"authorization":"***REDACTED***","base_url":"https://api.example.com"}},"actions":{"ping":{"connection":"test-api","method":"GET","path":"/ping"}}}}}

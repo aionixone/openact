@@ -65,8 +65,11 @@ impl AuthInjector for ApiKeyInjector {
         if key_name.eq_ignore_ascii_case("authorization") {
             // Authorization header with Bearer prefix
             let auth_value = format!("Bearer {}", key_value);
-            let header_value = HeaderValue::from_str(&auth_value)
-                .map_err(|_| AuthInjectionError::InvalidHeaderValue { value_len: auth_value.len() })?;
+            let header_value = HeaderValue::from_str(&auth_value).map_err(|_| {
+                AuthInjectionError::InvalidHeaderValue {
+                    value_len: auth_value.len(),
+                }
+            })?;
             headers.insert(AUTHORIZATION, header_value);
         } else if key_name.starts_with("X-") || key_name.contains("-") {
             // Custom header
@@ -113,8 +116,11 @@ impl AuthInjector for BasicAuthInjector {
         let encoded = STANDARD.encode(credentials.as_bytes());
         let auth_value = format!("Basic {}", encoded);
 
-        let header_value = HeaderValue::from_str(&auth_value)
-            .map_err(|_| AuthInjectionError::InvalidHeaderValue { value_len: auth_value.len() })?;
+        let header_value = HeaderValue::from_str(&auth_value).map_err(|_| {
+            AuthInjectionError::InvalidHeaderValue {
+                value_len: auth_value.len(),
+            }
+        })?;
 
         headers.insert(AUTHORIZATION, header_value);
         Ok(())
@@ -133,7 +139,9 @@ impl AuthInjector for OAuth2Injector {
     ) -> Result<(), AuthInjectionError> {
         // Phase 0: interface only. Runtime integration will be added in Phase 3.
         // For now, return a placeholder error to avoid accidental use.
-        Err(AuthInjectionError::OAuth2TokenNotAvailable { connection_trn: connection.trn.clone() })
+        Err(AuthInjectionError::OAuth2TokenNotAvailable {
+            connection_trn: connection.trn.clone(),
+        })
     }
 }
 

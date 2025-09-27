@@ -1,0 +1,28 @@
+[package]
+name = "openact-server"
+version = "0.1.0"
+edition = "2021"
+description = "OpenAct Server facade combining MCP and REST (future)"
+
+[dependencies]
+openact-mcp = { path = "../openact-mcp" }
+openact-core = { path = "../openact-core" }
+openact-store = { path = "../openact-store" }
+openact-registry = { path = "../openact-registry" }
+anyhow = "1.0"
+axum = { version = "0.7", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+thiserror = "1.0"
+tower = "0.4"
+uuid = { version = "1.0", features = ["v4"] }
+jsonschema = "0.17"
+sha2 = "0.10"
+
+[features]
+default = ["http"]
+http = ["openact-registry/http"]
+
+

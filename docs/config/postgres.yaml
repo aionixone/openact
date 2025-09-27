@@ -1,0 +1,47 @@
+version: "1.0"
+
+connections:
+  my-postgres:
+    kind: postgres
+    host: 127.0.0.1
+    port: 5432
+    database: toolbox_db
+    user: toolbox_user
+    password: "${PG_PASSWORD}"
+
+actions:
+  search-users:
+    # kind omitted → inherits postgres
+    connection: my-postgres
+    description: "Search users by name (ILIKE)"
+    parameters:
+      - name: name
+        type: string
+        required: true
+    config:
+      statement: |
+        SELECT *
+        FROM users
+        WHERE name ILIKE '%' || $1 || '%';
+    mcp:
+      enabled: true
+
+  create-user:
+    connection: my-postgres
+    description: "Insert a user and return id"
+    parameters:
+      - name: name
+        type: string
+        required: true
+      - name: email
+        type: string
+        required: true
+    config:
+      statement: |
+        INSERT INTO users(name, email)
+        VALUES($1, $2)
+        RETURNING id;
+    mcp:
+      enabled: true
+
+

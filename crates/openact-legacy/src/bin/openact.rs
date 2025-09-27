@@ -11,5 +11,3 @@ async fn main() -> Result<()> {
     let cli = openact::cli::Cli::parse();
     openact::cli::run(cli).await
 }
-
-

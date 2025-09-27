@@ -9,7 +9,7 @@ mod tests {
 
     #[test]
     fn test_load_github_oauth2_connection_template() {
-        let loader = TemplateLoader::new("templates");
+        let loader = TemplateLoader::new("../../templates");
 
         // This test depends on the actual template file existing
         let result = loader.load_connection_template("github", "oauth2");
@@ -33,7 +33,7 @@ mod tests {
 
     #[test]
     fn test_load_github_get_user_task_template() {
-        let loader = TemplateLoader::new("templates");
+        let loader = TemplateLoader::new("../../templates");
 
         let result = loader.load_task_template("github", "get_user");
 
@@ -84,7 +84,7 @@ mod tests {
             }),
         };
 
-        let loader = TemplateLoader::new("templates");
+        let loader = TemplateLoader::new("../../templates");
 
         let mut inputs = TemplateInputs::default();
         inputs
@@ -169,7 +169,7 @@ mod tests {
             }),
         };
 
-        let loader = TemplateLoader::new("templates");
+        let loader = TemplateLoader::new("../../templates");
 
         let inputs = TemplateInputs::default();
         let connection_trn = "trn:openact:test_tenant:connection/github_test@v1";
@@ -231,7 +231,7 @@ mod tests {
             }),
         };
 
-        let loader = TemplateLoader::new("templates");
+        let loader = TemplateLoader::new("../../templates");
 
         let mut inputs = TemplateInputs::default();
         // Add required secrets
@@ -270,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_missing_required_secrets_validation() {
-        let loader = TemplateLoader::new("templates");
+        let loader = TemplateLoader::new("../../templates");
         let template = loader.load_connection_template("github", "oauth2").unwrap();
 
         // Create inputs WITHOUT required secrets
@@ -292,7 +292,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partial_missing_required_secrets() {
-        let loader = TemplateLoader::new("templates");
+        let loader = TemplateLoader::new("../../templates");
         let template = loader.load_connection_template("github", "oauth2").unwrap();
 
         // Provide only one of the two required secrets

@@ -1,0 +1,43 @@
+version: "1.0"
+
+connections:
+  my-redis:
+    kind: redis
+    host: 127.0.0.1
+    port: 6379
+    password: "${REDIS_PASSWORD}"   # optional
+    db: 0
+
+actions:
+  redis.get:
+    connection: my-redis
+    description: "GET key"
+    parameters:
+      - name: key
+        type: string
+        required: true
+    config:
+      command: ["GET", "{{key}}"]
+    mcp:
+      enabled: true
+
+  redis.set:
+    connection: my-redis
+    description: "SET key value [EX seconds]"
+    parameters:
+      - name: key
+        type: string
+        required: true
+      - name: value
+        type: string
+        required: true
+      - name: ex_seconds
+        type: number
+        required: false
+    config:
+      # At execution time, if ex_seconds is omitted, the trailing args should be pruned.
+      command: ["SET", "{{key}}", "{{value}}", "EX", "{{ex_seconds}}"]
+    mcp:
+      enabled: true
+
+

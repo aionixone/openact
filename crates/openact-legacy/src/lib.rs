@@ -1,8 +1,8 @@
-pub mod store;
-pub mod models;
-pub mod executor;
 pub mod cli;
+pub mod executor;
+pub mod models;
 pub mod oauth;
+pub mod store;
 
 // Workflow-related modules remain public (original paths)
 // Deprecated: moved under authflow
@@ -22,13 +22,12 @@ pub mod api;
 // Keep run_flow via authflow
 pub use authflow::engine::run_flow;
 
-pub mod utils;
 pub mod config;
+pub mod utils;
 
-pub mod interface;
 pub mod app;
+pub mod interface;
+pub mod observability;
 #[cfg(feature = "server")]
 pub mod server;
-pub mod observability;
 pub mod templates;
-

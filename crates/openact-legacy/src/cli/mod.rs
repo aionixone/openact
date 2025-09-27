@@ -797,7 +797,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let val = parse_json_or_yaml::<serde_json::Value>(&content)?;
                 task.request_body = Some(val);
             }
-            
+
             // 应用重试策略覆盖
             if let Some(retry_policy) = build_retry_policy_from_overrides(overrides)? {
                 task.retry_policy = Some(retry_policy);
@@ -1454,8 +1454,12 @@ pub async fn run(cli: Cli) -> Result<()> {
                     let wf: stepflow_dsl::WorkflowDSL = serde_yaml::from_str(&yaml)?;
                     let run_store = crate::store::MemoryRunStore::default();
                     let router = crate::authflow::actions::DefaultRouter; // not Default
-                    let res =
-                        crate::authflow::workflow::start_obtain(&wf, &router, &run_store, serde_json::json!({}))?;
+                    let res = crate::authflow::workflow::start_obtain(
+                        &wf,
+                        &router,
+                        &run_store,
+                        serde_json::json!({}),
+                    )?;
                     if cli.json {
                         println!(
                             "{}",
@@ -1545,7 +1549,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                         }
                     }
                     if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&out)?);
+                        println!("{}", serde_json::to_string_pretty(&out)?);
                     } else {
                         println!("✅ Authorization flow completed.");
                         // Try to detect auth_trn for guidance
@@ -1970,14 +1974,14 @@ fn build_retry_policy_from_overrides(overrides: &ExecuteOverrides) -> Result<Opt
     {
         return Ok(None);
     }
-    
+
     // 基础策略
     let mut policy = match overrides.retry_policy.as_deref() {
         Some("aggressive") => RetryPolicy::aggressive(),
         Some("conservative") => RetryPolicy::conservative(),
         _ => RetryPolicy::default(),
     };
-    
+
     // 应用覆盖参数
     if let Some(max_retries) = overrides.max_retries {
         if max_retries > 10 {
@@ -1985,14 +1989,14 @@ fn build_retry_policy_from_overrides(overrides: &ExecuteOverrides) -> Result<Opt
         }
         policy.max_retries = max_retries;
     }
-    
+
     if let Some(delay_ms) = overrides.retry_delay_ms {
         if delay_ms < 10 || delay_ms > 10000 {
             return Err(anyhow!("retry_delay_ms must be between 10 and 10000"));
         }
         policy.base_delay_ms = delay_ms;
     }
-    
+
     Ok(Some(policy))
 }
 
@@ -2006,7 +2010,10 @@ mod cli_integration_tests {
         let db = DatabaseManager::new("sqlite::memory:").await.unwrap();
         // Set a test encryption key for StorageService
         unsafe {
-            std::env::set_var("OPENACT_MASTER_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+            std::env::set_var(
+                "OPENACT_MASTER_KEY",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            );
         }
         let storage = std::sync::Arc::new(StorageService::new(db));
         OpenActService::from_storage(storage)
@@ -2267,13 +2274,24 @@ mod cli_integration_tests {
         });
 
         // Build CLI
-        let cli = Cli{
-            db_url: None, json: true, server: Some(server.base_url()),
-            command: Commands::Connect{
-                provider: "p".to_string(), template: "t".to_string(), tenant: "default".to_string(), name: "cc".to_string(),
-                secrets_file: None, inputs_file: None, overrides_file: None, auth_trn: None, endpoint: Some("https://httpbin.org/get".to_string()), dsl_file: None,
-                poll_interval_secs: 1, poll_timeout_secs: 3,
-            }
+        let cli = Cli {
+            db_url: None,
+            json: true,
+            server: Some(server.base_url()),
+            command: Commands::Connect {
+                provider: "p".to_string(),
+                template: "t".to_string(),
+                tenant: "default".to_string(),
+                name: "cc".to_string(),
+                secrets_file: None,
+                inputs_file: None,
+                overrides_file: None,
+                auth_trn: None,
+                endpoint: Some("https://httpbin.org/get".to_string()),
+                dsl_file: None,
+                poll_interval_secs: 1,
+                poll_timeout_secs: 3,
+            },
         };
         let _ = run(cli).await.unwrap();
         connect.assert();
@@ -2283,10 +2301,10 @@ mod cli_integration_tests {
     async fn cli_connect_server_ac_success_polling_mock() {
         let server = MockServer::start();
         // First call returns run_id and authorize_url
-        let connect = server.mock(|when, then|{
+        let connect = server.mock(|when, then| {
             when.method(POST).path("/api/v1/connect");
             then.status(200)
-                .header("Content-Type","application/json")
+                .header("Content-Type", "application/json")
                 .json_body(json!({
                     "connection_trn":"trn:openact:default:connection/ac",
                     "run_id":"RID1",
@@ -2308,13 +2326,24 @@ mod cli_integration_tests {
         let dsl_path = tmp.path().join("ac.yml");
         std::fs::write(&dsl_path, "startAt: X\nstates: {}\n").unwrap();
 
-        let cli = Cli{
-            db_url: None, json: true, server: Some(server.base_url()),
-            command: Commands::Connect{
-                provider: "p".to_string(), template: "t".to_string(), tenant: "default".to_string(), name: "ac".to_string(),
-                secrets_file: None, inputs_file: None, overrides_file: None, auth_trn: None, endpoint: None, dsl_file: Some(dsl_path),
-                poll_interval_secs: 1, poll_timeout_secs: 3,
-            }
+        let cli = Cli {
+            db_url: None,
+            json: true,
+            server: Some(server.base_url()),
+            command: Commands::Connect {
+                provider: "p".to_string(),
+                template: "t".to_string(),
+                tenant: "default".to_string(),
+                name: "ac".to_string(),
+                secrets_file: None,
+                inputs_file: None,
+                overrides_file: None,
+                auth_trn: None,
+                endpoint: None,
+                dsl_file: Some(dsl_path),
+                poll_interval_secs: 1,
+                poll_timeout_secs: 3,
+            },
         };
         let _ = run(cli).await.unwrap();
         connect.assert();
@@ -2335,13 +2364,24 @@ mod cli_integration_tests {
                     "next_hints": ["CC token acquisition failed: invalid_client"]
                 }));
         });
-        let cli = Cli{
-            db_url: None, json: true, server: Some(server.base_url()),
-            command: Commands::Connect{
-                provider: "p".to_string(), template: "t".to_string(), tenant: "default".to_string(), name: "cc".to_string(),
-                secrets_file: None, inputs_file: None, overrides_file: None, auth_trn: None, endpoint: Some("https://httpbin.org/get".to_string()), dsl_file: None,
-                poll_interval_secs: 1, poll_timeout_secs: 3,
-            }
+        let cli = Cli {
+            db_url: None,
+            json: true,
+            server: Some(server.base_url()),
+            command: Commands::Connect {
+                provider: "p".to_string(),
+                template: "t".to_string(),
+                tenant: "default".to_string(),
+                name: "cc".to_string(),
+                secrets_file: None,
+                inputs_file: None,
+                overrides_file: None,
+                auth_trn: None,
+                endpoint: Some("https://httpbin.org/get".to_string()),
+                dsl_file: None,
+                poll_interval_secs: 1,
+                poll_timeout_secs: 3,
+            },
         };
         let _ = run(cli).await.unwrap();
         connect.assert();
@@ -2361,13 +2401,24 @@ mod cli_integration_tests {
         let dsl_path = tmp.path().join("bad.yml");
         std::fs::write(&dsl_path, ":::").unwrap();
 
-        let cli = Cli{
-            db_url: None, json: true, server: Some(server.base_url()),
-            command: Commands::Connect{
-                provider: "p".to_string(), template: "t".to_string(), tenant: "default".to_string(), name: "ac".to_string(),
-                secrets_file: None, inputs_file: None, overrides_file: None, auth_trn: None, endpoint: None, dsl_file: Some(dsl_path),
-                poll_interval_secs: 1, poll_timeout_secs: 3,
-            }
+        let cli = Cli {
+            db_url: None,
+            json: true,
+            server: Some(server.base_url()),
+            command: Commands::Connect {
+                provider: "p".to_string(),
+                template: "t".to_string(),
+                tenant: "default".to_string(),
+                name: "ac".to_string(),
+                secrets_file: None,
+                inputs_file: None,
+                overrides_file: None,
+                auth_trn: None,
+                endpoint: None,
+                dsl_file: Some(dsl_path),
+                poll_interval_secs: 1,
+                poll_timeout_secs: 3,
+            },
         };
         let err = run(cli).await.unwrap_err();
         assert!(format!("{}", err).contains("server error"));
@@ -2383,9 +2434,10 @@ mod cli_integration_tests {
             then.status(200).header("Content-Type","application/json")
                 .json_body(json!({"device_code":"D","user_code":"U","verification_uri":"https://verify","interval":1}));
         });
-        let _tok = mock.mock(|when, then|{
+        let _tok = mock.mock(|when, then| {
             when.method(POST).path("/token");
-            then.status(200).header("Content-Type","application/json")
+            then.status(200)
+                .header("Content-Type", "application/json")
                 .json_body(json!({"access_token":"AT","refresh_token":"RT","expires_in":1800}));
         });
 
@@ -2401,11 +2453,23 @@ mod cli_integration_tests {
         svc.upsert_connection(&conn).await.unwrap();
 
         // Build CLI for oauth device-code
-        let cli = Cli{
-            db_url: None, json: true, server: None,
-            command: Commands::Oauth{ cmd: OauthCmd::DeviceCode{
-                token_url: mock.url("/token"), device_code_url: mock.url("/device"), client_id: "id".to_string(), client_secret: None, scope: Some("repo".to_string()), tenant: "default".to_string(), provider: "github".to_string(), user_id: "alice".to_string(), bind_connection: Some(conn.trn.clone())
-            } }
+        let cli = Cli {
+            db_url: None,
+            json: true,
+            server: None,
+            command: Commands::Oauth {
+                cmd: OauthCmd::DeviceCode {
+                    token_url: mock.url("/token"),
+                    device_code_url: mock.url("/device"),
+                    client_id: "id".to_string(),
+                    client_secret: None,
+                    scope: Some("repo".to_string()),
+                    tenant: "default".to_string(),
+                    provider: "github".to_string(),
+                    user_id: "alice".to_string(),
+                    bind_connection: Some(conn.trn.clone()),
+                },
+            },
         };
         let _ = run(cli).await.unwrap();
     }

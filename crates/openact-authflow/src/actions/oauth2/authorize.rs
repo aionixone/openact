@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use rand::{Rng, distributions::Alphanumeric};
-use serde_json::{Value, json};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use rand::{distributions::Alphanumeric, Rng};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::authflow::engine::TaskHandler;
+use crate::engine::TaskHandler;
 
 #[derive(Default)]
 pub struct OAuth2AuthorizeRedirectHandler;
@@ -87,8 +87,11 @@ pub struct OAuth2AwaitCallbackHandler;
 impl TaskHandler for OAuth2AwaitCallbackHandler {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
         // Log the context for debugging
-        println!("OAuth2AwaitCallbackHandler::execute called with context: {}", serde_json::to_string(ctx).unwrap_or_else(|_| "invalid json".to_string()));
-        
+        println!(
+            "OAuth2AwaitCallbackHandler::execute called with context: {}",
+            serde_json::to_string(ctx).unwrap_or_else(|_| "invalid json".to_string())
+        );
+
         // Recursively find the code in the context
         fn find_code_recursive(ctx: &Value) -> Option<&str> {
             if let Some(code) = ctx.get("code").and_then(|v| v.as_str()) {
@@ -106,7 +109,7 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
             }
             None
         }
-        
+
         let code = find_code_recursive(ctx);
         println!("[await_cb] found code: {:?}", code);
         if code.is_none() {
@@ -136,16 +139,16 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
             }
             None
         }
-        
+
         let returned = find_state_recursive(ctx);
-        
+
         // Find the expected state, prioritizing the result from StartAuth
         fn find_expected_state(ctx: &Value) -> Option<&str> {
             // First, look for an explicit expected_state
             if let Some(state) = ctx.get("expected_state").and_then(|v| v.as_str()) {
                 return Some(state);
             }
-            
+
             // Then, look for the state in the StartAuth result
             fn find_start_auth_state(ctx: &Value) -> Option<&str> {
                 if let Some(states) = ctx.get("states") {
@@ -157,7 +160,7 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
                         }
                     }
                 }
-                
+
                 // Recursively search
                 if let Some(obj) = ctx.as_object() {
                     for value in obj.values() {
@@ -168,18 +171,25 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
                 }
                 None
             }
-            
+
             find_start_auth_state(ctx)
         }
-        
+
         let expected = find_expected_state(ctx);
-        println!("[await_cb] state validation: returned={:?}, expected={:?}", returned, expected);
-        
+        println!(
+            "[await_cb] state validation: returned={:?}, expected={:?}",
+            returned, expected
+        );
+
         // Validate the state only if an explicit expected_state is found
         if let (Some(r), Some(e)) = (returned, expected) {
             if r != e {
                 println!("[await_cb] state mismatch: returned={}, expected={}", r, e);
-                return Err(anyhow::anyhow!("state mismatch: returned={}, expected={}", r, e));
+                return Err(anyhow::anyhow!(
+                    "state mismatch: returned={}, expected={}",
+                    r,
+                    e
+                ));
             }
             println!("[await_cb] state validation passed");
         } else {
@@ -195,7 +205,10 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
         {
             out["code_verifier"] = Value::String(v.to_string());
         }
-        println!("[await_cb] returning: {}", serde_json::to_string(&out).unwrap_or_else(|_| "invalid json".to_string()));
+        println!(
+            "[await_cb] returning: {}",
+            serde_json::to_string(&out).unwrap_or_else(|_| "invalid json".to_string())
+        );
         Ok(out)
     }
 }

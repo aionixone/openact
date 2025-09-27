@@ -1,13 +1,13 @@
 //! HTTP Client 池（按 Timeout/Network/TLS 组合复用）
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use reqwest::{Client, Proxy};
 use std::collections::HashMap;
-use std::time::Instant;
-use std::sync::atomic::{AtomicU64, Ordering};
-use tracing::debug;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 use tokio::sync::Mutex;
+use tracing::debug;
 
 use crate::models::{ConnectionConfig, TaskConfig};
 
@@ -17,7 +17,11 @@ static CLIENT_POOL: OnceLock<Mutex<HashMap<String, (Client, Instant)>>> = OnceLo
 fn pool_capacity() -> usize {
     const DEFAULT_CAP: usize = 64;
     match std::env::var("OPENACT_CLIENT_POOL_CAPACITY") {
-        Ok(v) => v.parse::<usize>().ok().filter(|c| *c > 0).unwrap_or(DEFAULT_CAP),
+        Ok(v) => v
+            .parse::<usize>()
+            .ok()
+            .filter(|c| *c > 0)
+            .unwrap_or(DEFAULT_CAP),
         Err(_) => DEFAULT_CAP,
     }
 }
@@ -167,7 +171,9 @@ pub fn get_client_for(connection: &ConnectionConfig, task: &TaskConfig) -> Resul
                 stale.push(k.clone());
             }
         }
-        for k in stale { let _ = guard.remove(&k); }
+        for k in stale {
+            let _ = guard.remove(&k);
+        }
 
         // insert current
         guard.insert(key.clone(), (client.clone(), Instant::now()));
@@ -189,5 +195,3 @@ pub fn get_client_for(connection: &ConnectionConfig, task: &TaskConfig) -> Resul
     }
     Ok(client)
 }
-
-

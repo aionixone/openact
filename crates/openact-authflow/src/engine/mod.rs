@@ -1,7 +1,7 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use indexmap::IndexMap;
-use serde_json::{Value, json};
-use stepflow_dsl::command::{Command, step_once};
+use serde_json::{json, Value};
+use stepflow_dsl::command::{step_once, Command};
 use stepflow_dsl::jsonada::WorkflowContext;
 use stepflow_dsl::{MappingFacade, State, WorkflowDSL};
 pub trait TaskHandler: Send + Sync {
@@ -348,10 +348,7 @@ pub fn run_until_pause_or_end(
                         }
                     }
                     Err(e) if e.to_string().contains("PAUSE_FOR_CALLBACK") => {
-                        println!(
-                            "[engine] state {} paused for callback (await)",
-                            state_name
-                        );
+                        println!("[engine] state {} paused for callback (await)", state_name);
                         let run_id = uuid::Uuid::new_v4().to_string();
                         let await_meta = json!({
                             "expected_state": context.pointer("/vars/auth/state"),
@@ -365,11 +362,7 @@ pub fn run_until_pause_or_end(
                         }));
                     }
                     Err(e) => {
-                        println!(
-                            "[engine] state {} error: {}",
-                            state_name,
-                            e
-                        );
+                        println!("[engine] state {} error: {}", state_name, e);
                         return Err(e);
                     }
                 }
@@ -570,7 +563,7 @@ states:
             &dsl,
             &dsl.start_at,
             json!({}),
-            &crate::authflow::actions::DefaultRouter,
+            &crate::actions::DefaultRouter,
             5,
         )
         .unwrap();
@@ -602,7 +595,7 @@ states:
             &dsl,
             &dsl.start_at,
             json!({}),
-            &crate::authflow::actions::DefaultRouter,
+            &crate::actions::DefaultRouter,
             5,
         )
         .unwrap();
@@ -632,11 +625,11 @@ states:
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
                     "secrets.resolve" => {
-                        let provider = crate::authflow::actions::MemorySecretsProvider::from_pairs(vec![(
+                        let provider = crate::actions::MemorySecretsProvider::from_pairs(vec![(
                             "vault://kv/api_key",
                             "XYZ",
                         )]);
-                        crate::authflow::actions::SecretsResolveHandler::new(provider)
+                        crate::actions::SecretsResolveHandler::new(provider)
                             .execute(resource, state_name, ctx)
                     }
                     _ => anyhow::bail!("unknown resource {resource}"),
@@ -673,11 +666,11 @@ states:
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
                     "secrets.resolve" => {
-                        let provider = crate::authflow::actions::MemorySecretsProvider::from_pairs(vec![(
+                        let provider = crate::actions::MemorySecretsProvider::from_pairs(vec![(
                             "vault://kv/json",
                             self.secret.as_str(),
                         )]);
-                        crate::authflow::actions::SecretsResolveHandler::new(provider)
+                        crate::actions::SecretsResolveHandler::new(provider)
                             .execute(resource, state_name, ctx)
                     }
                     _ => anyhow::bail!("unknown resource {resource}"),
@@ -726,11 +719,11 @@ states:
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
                     "secrets.resolve_many" => {
-                        let provider = crate::authflow::actions::MemorySecretsProvider::from_pairs(vec![
+                        let provider = crate::actions::MemorySecretsProvider::from_pairs(vec![
                             ("vault://kv/api_key", self.s1.as_str()),
                             ("vault://kv/json", self.s2.as_str()),
                         ]);
-                        crate::authflow::actions::SecretsResolveManyHandler::new(provider)
+                        crate::actions::SecretsResolveManyHandler::new(provider)
                             .execute(resource, state_name, ctx)
                     }
                     _ => anyhow::bail!("unknown resource {resource}"),
@@ -790,7 +783,7 @@ states:
 
         let dsl: WorkflowDSL = serde_yaml::from_str(&yaml).unwrap();
         let ctx = json!({});
-        use crate::authflow::actions::HttpTaskHandler;
+        use crate::actions::HttpTaskHandler;
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -841,9 +834,9 @@ states:
         impl TaskHandler for Router {
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
-                    "oauth2.client_credentials" => crate::authflow::actions::OAuth2ClientCredentialsHandler
+                    "oauth2.client_credentials" => crate::actions::OAuth2ClientCredentialsHandler
                         .execute(resource, state_name, ctx),
-                    _ => crate::authflow::actions::HttpTaskHandler.execute(resource, state_name, ctx),
+                    _ => crate::actions::HttpTaskHandler.execute(resource, state_name, ctx),
                 }
             }
         }
@@ -917,10 +910,10 @@ states:
         impl TaskHandler for Router {
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
-                    "oauth2.client_credentials" => crate::authflow::actions::OAuth2ClientCredentialsHandler
+                    "oauth2.client_credentials" => crate::actions::OAuth2ClientCredentialsHandler
                         .execute(resource, state_name, ctx),
                     "http.request" => {
-                        crate::authflow::actions::HttpTaskHandler.execute(resource, state_name, ctx)
+                        crate::actions::HttpTaskHandler.execute(resource, state_name, ctx)
                     }
                     _ => anyhow::bail!("unknown resource {resource}"),
                 }
@@ -979,7 +972,7 @@ states:
 
         let dsl: WorkflowDSL = serde_yaml::from_str(&yaml).unwrap();
         let ctx = json!({ "input": { "token": "test_token" } });
-        use crate::authflow::actions::HttpTaskHandler;
+        use crate::actions::HttpTaskHandler;
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1035,10 +1028,10 @@ states:
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
                     "inject.bearer" => {
-                        crate::authflow::actions::InjectBearerHandler.execute(resource, state_name, ctx)
+                        crate::actions::InjectBearerHandler.execute(resource, state_name, ctx)
                     }
                     "http.request" => {
-                        crate::authflow::actions::HttpTaskHandler.execute(resource, state_name, ctx)
+                        crate::actions::HttpTaskHandler.execute(resource, state_name, ctx)
                     }
                     _ => anyhow::bail!("unknown resource {resource}"),
                 }
@@ -1099,10 +1092,10 @@ states:
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
                     "inject.api_key" => {
-                        crate::authflow::actions::InjectApiKeyHandler.execute(resource, state_name, ctx)
+                        crate::actions::InjectApiKeyHandler.execute(resource, state_name, ctx)
                     }
                     "http.request" => {
-                        crate::authflow::actions::HttpTaskHandler.execute(resource, state_name, ctx)
+                        crate::actions::HttpTaskHandler.execute(resource, state_name, ctx)
                     }
                     _ => anyhow::bail!("unknown resource {resource}"),
                 }
@@ -1120,7 +1113,8 @@ states:
 
     #[test]
     fn connection_read_inject_and_refresh_update_flow() {
-        use crate::store::{ConnectionStore, MemoryConnectionStore};
+        use openact_core::store::AuthConnectionStore;
+        use openact_store::memory::MemoryAuthConnectionStore;
         let server = MockServer::start();
         // token refresh endpoint
         let m_token = server.mock(|when, then| {
@@ -1145,37 +1139,36 @@ states:
         // Router with store-backed connection handlers
         #[derive(Clone)]
         struct Router {
-            store: MemoryConnectionStore,
+            store: MemoryAuthConnectionStore,
         }
         impl TaskHandler for Router {
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
-                    "connection.read" => crate::authflow::actions::ConnectionReadHandler {
-                        ctx: crate::authflow::actions::ConnectionContext::new(self.store.clone()),
+                    "connection.read" => crate::actions::ConnectionReadHandler {
+                        ctx: crate::actions::ConnectionContext::new(self.store.clone()),
                     }
                     .execute(resource, state_name, ctx),
-                    "connection.update" => crate::authflow::actions::ConnectionUpdateHandler {
-                        ctx: crate::authflow::actions::ConnectionContext::new(self.store.clone()),
+                    "connection.update" => crate::actions::ConnectionUpdateHandler {
+                        ctx: crate::actions::ConnectionContext::new(self.store.clone()),
                     }
                     .execute(resource, state_name, ctx),
                     "oauth2.refresh_token" => {
-                        crate::authflow::actions::OAuth2RefreshTokenHandler.execute(resource, state_name, ctx)
+                        crate::actions::OAuth2RefreshTokenHandler.execute(resource, state_name, ctx)
                     }
                     "inject.bearer" => {
-                        crate::authflow::actions::InjectBearerHandler.execute(resource, state_name, ctx)
+                        crate::actions::InjectBearerHandler.execute(resource, state_name, ctx)
                     }
                     "http.request" => {
-                        crate::authflow::actions::HttpTaskHandler.execute(resource, state_name, ctx)
+                        crate::actions::HttpTaskHandler.execute(resource, state_name, ctx)
                     }
                     _ => anyhow::bail!("unknown resource {resource}"),
                 }
             }
         }
 
-        let store = MemoryConnectionStore::default();
+        let store = MemoryAuthConnectionStore::default();
         // Seed a typed Connection instead of raw JSON
-        let mut conn1 =
-            crate::models::AuthConnection::new("tenant1", "prov", "user1", "old").unwrap();
+        let mut conn1 = openact_core::AuthConnection::new("tenant1", "prov", "user1", "old");
         conn1.update_refresh_token(Some("rt".to_string()));
         conn1.expires_at = Some(chrono::Utc::now() - chrono::Duration::seconds(1));
         futures::executor::block_on(store.put("c1", &conn1)).unwrap();
@@ -1191,7 +1184,7 @@ states:
     parameters:
       connection_ref: "c1"
     assign:
-      refresh_token: "{{% result.refreshToken %}}"
+      refresh_token: "{{% result.refresh_token %}}"
     next: "Refresh"
   Refresh:
     type: task
@@ -1214,7 +1207,7 @@ states:
       refresh_token: "{{% $new_refresh_token %}}"
       expires: 999999
     assign:
-      updated_access_token: "{{% result.accessToken %}}"
+      updated_access_token: "{{% result.access_token %}}"
     next: "Inject"
   Inject:
     type: task
@@ -1252,7 +1245,7 @@ states:
 
     #[test]
     fn ensure_auto_refresh_before_inject() {
-        use crate::store::MemoryConnectionStore;
+        use openact_store::memory::MemoryAuthConnectionStore;
         let server = MockServer::start();
         let m_token = server.mock(|when, then| {
             when.method(POST).path("/token");
@@ -1268,29 +1261,30 @@ states:
 
         #[derive(Clone)]
         struct Router {
-            store: std::sync::Arc<dyn crate::store::ConnectionStore>,
+            store: std::sync::Arc<dyn openact_core::store::AuthConnectionStore>,
         }
         impl TaskHandler for Router {
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
-                    "ensure.fresh_token" => crate::authflow::actions::EnsureFreshTokenHandler {
+                    "ensure.fresh_token" => crate::actions::EnsureFreshTokenHandler {
                         store: self.store.clone(),
                     }
                     .execute(resource, state_name, ctx),
                     "inject.bearer" => {
-                        crate::authflow::actions::InjectBearerHandler.execute(resource, state_name, ctx)
+                        crate::actions::InjectBearerHandler.execute(resource, state_name, ctx)
                     }
                     "http.request" => {
-                        crate::authflow::actions::HttpTaskHandler.execute(resource, state_name, ctx)
+                        crate::actions::HttpTaskHandler.execute(resource, state_name, ctx)
                     }
                     _ => anyhow::bail!("unknown resource {resource}"),
                 }
             }
         }
 
-        let store = std::sync::Arc::new(MemoryConnectionStore::default()) as std::sync::Arc<dyn crate::store::ConnectionStore>;
+        let store = std::sync::Arc::new(MemoryAuthConnectionStore::default())
+            as std::sync::Arc<dyn openact_core::store::AuthConnectionStore>;
         // expired token
-        let mut conn2 = crate::models::AuthConnection::new("tenant2", "prov", "user2", "old").unwrap();
+        let mut conn2 = openact_core::AuthConnection::new("tenant2", "prov", "user2", "old");
         conn2.update_refresh_token(Some("rt2".to_string()));
         conn2.expires_at = Some(chrono::Utc::now() - chrono::Duration::seconds(1));
         futures::executor::block_on(store.put("c2", &conn2)).unwrap();
@@ -1310,7 +1304,7 @@ states:
       clientSecret: "sec"
       skewSeconds: 60
     assign:
-      ensured_access_token: "{{% result.accessToken %}}"
+      ensured_access_token: "{{% result.access_token %}}"
     next: "Inject"
   Inject:
     type: task
@@ -1414,12 +1408,12 @@ states:
         impl TaskHandler for Router {
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
-                    "oauth2.authorize_redirect" => crate::authflow::actions::OAuth2AuthorizeRedirectHandler
+                    "oauth2.authorize_redirect" => crate::actions::OAuth2AuthorizeRedirectHandler
                         .execute(resource, state_name, ctx),
-                    "oauth2.await_callback" => crate::authflow::actions::OAuth2AwaitCallbackHandler
+                    "oauth2.await_callback" => crate::actions::OAuth2AwaitCallbackHandler
                         .execute(resource, state_name, ctx),
                     "http.request" => {
-                        crate::authflow::actions::HttpTaskHandler.execute(resource, state_name, ctx)
+                        crate::actions::HttpTaskHandler.execute(resource, state_name, ctx)
                     }
                     _ => anyhow::bail!("unknown resource {resource}"),
                 }
@@ -1480,7 +1474,7 @@ states:
         );
 
         let dsl_ok: WorkflowDSL = serde_yaml::from_str(&yaml_ok).unwrap();
-        use crate::authflow::actions::OAuth2RefreshTokenHandler;
+        use crate::actions::OAuth2RefreshTokenHandler;
         let out_ok = run_flow(
             &dsl_ok,
             &dsl_ok.start_at,
@@ -1572,7 +1566,7 @@ states:
         let client = vaultrs::client::VaultClient::new(settings).unwrap();
 
         // Use VaultSecretsProvider via SecretsResolveHandler
-        use crate::authflow::actions::{SecretsResolveHandler, VaultSecretsProvider};
+        use crate::actions::{SecretsResolveHandler, VaultSecretsProvider};
         let handler = SecretsResolveHandler::new(VaultSecretsProvider::new(client));
         let out = handler
             .execute(

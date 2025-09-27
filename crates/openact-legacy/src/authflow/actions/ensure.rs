@@ -2,10 +2,10 @@ use anyhow::{Result, anyhow};
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
 
-use crate::authflow::engine::TaskHandler;
-use std::sync::Arc;
-use crate::store::ConnectionStore;
 use crate::authflow::actions;
+use crate::authflow::engine::TaskHandler;
+use crate::store::ConnectionStore;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct EnsureFreshTokenHandler {
@@ -31,7 +31,9 @@ impl TaskHandler for EnsureFreshTokenHandler {
 
         // decide if needs refresh
         let now = Utc::now();
-        let expiry = conn.expires_at.unwrap_or_else(|| now - Duration::seconds(1)); // treat unknown as expired
+        let expiry = conn
+            .expires_at
+            .unwrap_or_else(|| now - Duration::seconds(1)); // treat unknown as expired
         let needs = expiry <= now + Duration::seconds(skew);
 
         if needs {

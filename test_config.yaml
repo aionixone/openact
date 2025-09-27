@@ -1,0 +1,40 @@
+version: "1.0"
+
+connections:
+  test-api:
+    kind: http
+    base_url: "https://httpbin.org"
+    authorization: "api_key"
+    auth_parameters:
+      api_key_auth_parameters:
+        api_key_name: "Authorization"
+        api_key_value: "Bearer test-token"
+
+actions:
+  httpbin.get:
+    connection: test-api
+    description: "Make a GET request to httpbin.org"
+    config:
+      method: "GET"
+      path: "/get"
+    mcp:
+      enabled: true
+      tool_name: "httpbin.get"
+
+  httpbin.post:
+    connection: test-api
+    description: "Make a POST request to httpbin.org"
+    config:
+      method: "POST"
+      path: "/post"
+    mcp:
+      enabled: true
+
+  httpbin.delete:
+    connection: test-api
+    description: "Make a DELETE request to httpbin.org"
+    config:
+      method: "DELETE"
+      path: "/delete"
+    mcp:
+      enabled: false

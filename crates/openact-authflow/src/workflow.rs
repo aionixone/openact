@@ -1,10 +1,10 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use stepflow_dsl::WorkflowDSL;
 
-use crate::authflow::engine::{RunOutcome, TaskHandler, run_until_pause_or_end};
-use crate::store::{Checkpoint, RunStore};
+use crate::engine::{run_until_pause_or_end, RunOutcome, TaskHandler};
+use openact_core::{store::RunStore, Checkpoint};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StartObtainResult {
@@ -15,7 +15,7 @@ pub struct StartObtainResult {
     pub code_verifier: Option<String>,
 }
 
-pub fn start_obtain(
+pub async fn start_obtain(
     dsl: &WorkflowDSL,
     handler: &dyn TaskHandler,
     run_store: &impl RunStore,
@@ -28,12 +28,14 @@ pub fn start_obtain(
         _ => return Err(anyhow!("obtain did not pause at await_callback")),
     };
     // Store checkpoint
-    run_store.put(Checkpoint {
-        run_id: pending.run_id.clone(),
-        paused_state: pending.next_state.clone(),
-        context: pending.context.clone(),
-        await_meta: pending.await_meta.clone(),
-    });
+    run_store
+        .put(Checkpoint {
+            run_id: pending.run_id.clone(),
+            paused_state: pending.next_state.clone(),
+            context_json: pending.context.clone(),
+            await_meta_json: Some(pending.await_meta.clone()),
+        })
+        .await?;
 
     // Extract authorization parameters from context
     let auth = pending
@@ -69,7 +71,7 @@ pub struct ResumeObtainArgs {
     pub state: String,
 }
 
-pub fn resume_obtain(
+pub async fn resume_obtain(
     dsl: &WorkflowDSL,
     handler: &dyn TaskHandler,
     run_store: &impl RunStore,
@@ -77,9 +79,10 @@ pub fn resume_obtain(
 ) -> Result<Value> {
     let cp = run_store
         .get(&args.run_id)
+        .await?
         .ok_or_else(|| anyhow!("run_id not found"))?;
     // Inject code/state into context.input for Await mapping (external mode can use input)
-    let mut ctx = cp.context.clone();
+    let mut ctx = cp.context_json.clone();
     let input = ctx.get_mut("input").and_then(|v| v.as_object_mut());
     if let Some(obj) = input {
         obj.insert("code".into(), Value::String(args.code.clone()));
@@ -97,7 +100,7 @@ pub fn resume_obtain(
     match outcome {
         RunOutcome::Finished(final_ctx) => {
             // Delete checkpoint after completion
-            run_store.del(&args.run_id);
+            run_store.delete(&args.run_id).await?;
             Ok(final_ctx)
         }
         RunOutcome::Pending(_) => Err(anyhow!("unexpected pending when resuming obtain")),
@@ -107,11 +110,11 @@ pub fn resume_obtain(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::authflow::actions::HttpTaskHandler;
-    use crate::authflow::actions::{OAuth2AuthorizeRedirectHandler, OAuth2AwaitCallbackHandler};
-    use crate::authflow::engine::TaskHandler;
-    use crate::store::MemoryRunStore;
+    use crate::actions::HttpTaskHandler;
+    use crate::actions::{OAuth2AuthorizeRedirectHandler, OAuth2AwaitCallbackHandler};
+    use crate::engine::TaskHandler;
     use httpmock::prelude::*;
+    use openact_store::memory::MemoryRunStore;
 
     struct Router;
     impl TaskHandler for Router {
@@ -190,10 +193,11 @@ states:
 
         let dsl: WorkflowDSL = serde_yaml::from_str(&yaml).unwrap();
         let run_store = MemoryRunStore::default();
-        let start = start_obtain(&dsl, &Router, &run_store, json!({})).unwrap();
+        let start = futures::executor::block_on(start_obtain(&dsl, &Router, &run_store, json!({})))
+            .unwrap();
         assert!(start.authorize_url.contains("response_type=code"));
         // simulate UI callback
-        let final_ctx = resume_obtain(
+        let final_ctx = futures::executor::block_on(resume_obtain(
             &dsl,
             &Router,
             &run_store,
@@ -202,7 +206,7 @@ states:
                 code: "thecode".into(),
                 state: start.state,
             },
-        )
+        ))
         .unwrap();
         m_token.assert();
         assert_eq!(

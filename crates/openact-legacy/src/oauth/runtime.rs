@@ -1,5 +1,5 @@
-use crate::utils::trn::{make_auth_cc_token_trn, parse_connection_trn};
 use crate::store::connection_store::ConnectionStore; // bring trait into scope
+use crate::utils::trn::{make_auth_cc_token_trn, parse_connection_trn};
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -623,9 +623,11 @@ mod tests {
     async fn test_ac_direct_refresh_with_auth_ref() {
         // Reset global state for test isolation
         crate::store::service::reset_global_storage_for_tests().await;
-        
+
         // Setup DB env (use in-memory to avoid readonly FS issues)
-        unsafe { std::env::set_var("OPENACT_DB_URL", "sqlite::memory:"); }
+        unsafe {
+            std::env::set_var("OPENACT_DB_URL", "sqlite::memory:");
+        }
         unsafe {
             std::env::set_var("OPENACT_AUTH_BACKEND", "sqlite");
         }
@@ -682,7 +684,7 @@ mod tests {
 
         // **KEY FIX**: Inject the same storage service instance for OAuth runtime
         crate::store::service::set_global_storage_service_for_tests(service.clone()).await;
-        
+
         // Call runtime direct refresh using auth_ref
         let out = super::refresh_ac_for(&conn.trn, Some(auth_ref))
             .await

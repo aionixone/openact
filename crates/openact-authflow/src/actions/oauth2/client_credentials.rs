@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use oauth2::basic::BasicClient;
 use oauth2::reqwest::http_client;
 use oauth2::{AuthUrl, ClientId, ClientSecret, Scope, TokenResponse, TokenUrl};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::authflow::engine::TaskHandler;
+use crate::engine::TaskHandler;
 
 #[derive(Default)]
 pub struct OAuth2ClientCredentialsHandler;

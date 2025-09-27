@@ -356,14 +356,12 @@ pub struct Metadata {
 impl OpenactDsl {
     /// Parse openact DSL from a YAML string
     pub fn from_yaml(yaml: &str) -> Result<Self> {
-        serde_yaml::from_str(yaml)
-            .map_err(|e| anyhow!("Failed to parse openact DSL: {}", e))
+        serde_yaml::from_str(yaml).map_err(|e| anyhow!("Failed to parse openact DSL: {}", e))
     }
 
     /// Parse openact DSL from a JSON string
     pub fn from_json(json: &str) -> Result<Self> {
-        serde_json::from_str(json)
-            .map_err(|e| anyhow!("Failed to parse openact DSL: {}", e))
+        serde_json::from_str(json).map_err(|e| anyhow!("Failed to parse openact DSL: {}", e))
     }
 
     /// Convert to a YAML string
@@ -400,14 +398,17 @@ impl OpenactDsl {
             if flow_name.is_empty() {
                 return Err(anyhow!("Flow name cannot be empty"));
             }
-            
+
             // Validate flow DSL structure
             if flow_dsl.start_at.is_empty() {
                 return Err(anyhow!("Flow '{}' must have a startAt state", flow_name));
             }
-            
+
             if flow_dsl.states.is_empty() {
-                return Err(anyhow!("Flow '{}' must define at least one state", flow_name));
+                return Err(anyhow!(
+                    "Flow '{}' must define at least one state",
+                    flow_name
+                ));
             }
         }
 
@@ -495,31 +496,35 @@ mod tests {
 
         // Test valid configuration
         provider.name = "valid_provider".to_string();
-        provider.flows.insert("obtain".to_string(), WorkflowDSL {
-            comment: Some("Test flow".to_string()),
-            version: Some("1.0".to_string()),
-            start_at: "Start".to_string(),
-            global_config: None,
-            error_handling: None,
-            states: {
-                let mut states = HashMap::new();
-                states.insert("Start".to_string(), stepflow_dsl::State::Succeed(
-                    stepflow_dsl::SucceedState {
-                        base: stepflow_dsl::BaseState {
-                            comment: None,
-                            retry: None,
-                            catch: None,
-                            next: None,
-                            end: Some(true),
-                        },
-                        assign: None,
-                        output: None,
-                        parameters: None,
-                    }
-                ));
-                states
+        provider.flows.insert(
+            "obtain".to_string(),
+            WorkflowDSL {
+                comment: Some("Test flow".to_string()),
+                version: Some("1.0".to_string()),
+                start_at: "Start".to_string(),
+                global_config: None,
+                error_handling: None,
+                states: {
+                    let mut states = HashMap::new();
+                    states.insert(
+                        "Start".to_string(),
+                        stepflow_dsl::State::Succeed(stepflow_dsl::SucceedState {
+                            base: stepflow_dsl::BaseState {
+                                comment: None,
+                                retry: None,
+                                catch: None,
+                                next: None,
+                                end: Some(true),
+                            },
+                            assign: None,
+                            output: None,
+                            parameters: None,
+                        }),
+                    );
+                    states
+                },
             },
-        });
+        );
 
         let valid_dsl = OpenactDsl {
             version: Version::V1_0,
@@ -540,8 +545,14 @@ mod tests {
             description: Some("GitHub OAuth2 Provider".to_string()),
             config: {
                 let mut config = HashMap::new();
-                config.insert("authorize_url".to_string(), json!("https://github.com/login/oauth/authorize"));
-                config.insert("token_url".to_string(), json!("https://github.com/login/oauth/access_token"));
+                config.insert(
+                    "authorize_url".to_string(),
+                    json!("https://github.com/login/oauth/authorize"),
+                );
+                config.insert(
+                    "token_url".to_string(),
+                    json!("https://github.com/login/oauth/access_token"),
+                );
                 config
             },
             flows: HashMap::new(),
@@ -556,7 +567,10 @@ mod tests {
                 }),
                 rate_limit: None,
                 security: Some(SecurityPolicy {
-                    allowed_redirect_domains: vec!["localhost".to_string(), "example.com".to_string()],
+                    allowed_redirect_domains: vec![
+                        "localhost".to_string(),
+                        "example.com".to_string(),
+                    ],
                     require_pkce: Some(true),
                     require_state: true,
                     redact_paths: vec!["$.client_secret".to_string(), "$.access_token".to_string()],
@@ -598,7 +612,7 @@ mod tests {
         // Test JSON serialization and deserialization
         let json_str = dsl.to_json().unwrap();
         let parsed_dsl = OpenactDsl::from_json(&json_str).unwrap();
-        
+
         assert_eq!(parsed_dsl.provider.name, "github");
         assert_eq!(parsed_dsl.provider.provider_type, "oauth2");
         assert!(parsed_dsl.global.is_some());

@@ -5,9 +5,9 @@
 //! - Automatically handles token refresh, parameter merging, and authentication injection
 
 pub mod auth_injector;
+pub mod client_pool;
 pub mod http_executor;
 pub mod parameter_merger;
-pub mod client_pool;
 
 #[cfg(test)]
 pub mod integration_tests;

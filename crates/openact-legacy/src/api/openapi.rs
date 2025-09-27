@@ -6,7 +6,7 @@
 //! - Tag organization and documentation
 //! - Authentication scheme definitions
 
-use utoipa::{OpenApi, Modify};
+use utoipa::{Modify, OpenApi};
 
 /// Main OpenAPI specification for OpenAct
 #[derive(OpenApi)]
@@ -189,43 +189,48 @@ struct SecurityAddon;
 
 impl Modify for SecurityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        use utoipa::openapi::security::{SecurityScheme, ApiKey, ApiKeyValue, HttpAuthScheme, Http, OAuth2, Flow, ClientCredentials, Scopes};
         use std::collections::BTreeMap;
-        
+        use utoipa::openapi::security::{
+            ApiKey, ApiKeyValue, ClientCredentials, Flow, Http, HttpAuthScheme, OAuth2, Scopes,
+            SecurityScheme,
+        };
+
         let mut security_schemes = BTreeMap::new();
-        
+
         // API Key authentication (header)
         security_schemes.insert(
             "api_key".to_string(),
-            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("X-API-Key")))
+            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("X-API-Key"))),
         );
-        
+
         // Bearer token authentication (JWT/OAuth2)
         security_schemes.insert(
             "bearer_auth".to_string(),
-            SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer))
+            SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
         );
-        
+
         // OAuth2 Client Credentials flow
         let scopes = Scopes::new();
         security_schemes.insert(
             "oauth2_client_credentials".to_string(),
-            SecurityScheme::OAuth2(
-                OAuth2::new([
-                    Flow::ClientCredentials(
-                        ClientCredentials::new("/oauth/token", scopes)
-                    )
-                ])
-            )
+            SecurityScheme::OAuth2(OAuth2::new([Flow::ClientCredentials(
+                ClientCredentials::new("/oauth/token", scopes),
+            )])),
         );
-        
+
         // 最小实现：直接设置安全方案，避免复杂的合并逻辑
-        
+
         // 创建安全方案集合
         let mut schemes = BTreeMap::new();
-        schemes.insert("api_key".to_string(), SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("X-API-Key"))));
-        schemes.insert("bearer_auth".to_string(), SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)));
-        
+        schemes.insert(
+            "api_key".to_string(),
+            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("X-API-Key"))),
+        );
+        schemes.insert(
+            "bearer_auth".to_string(),
+            SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
+        );
+
         // 直接设置到 OpenAPI，让现有的 schemas 保持不变
         if openapi.components.is_none() {
             openapi.components = Some(utoipa::openapi::Components::default());
@@ -240,7 +245,6 @@ impl Modify for SecurityAddon {
         }
     }
 }
-
 
 /// Generate the complete OpenAPI specification as JSON
 pub fn generate_openapi_spec() -> String {
@@ -262,11 +266,11 @@ mod tests {
     #[test]
     fn test_openapi_generation() {
         let spec = get_openapi_spec();
-        
+
         // Basic validation
         assert_eq!(spec.info.title, "OpenAct API");
         assert_eq!(spec.info.version, "0.1.0");
-        
+
         // Check that we have the expected tags
         let tags = spec.tags.unwrap_or_default();
         let tag_names: Vec<&str> = tags.iter().map(|t| t.name.as_str()).collect();
@@ -277,7 +281,7 @@ mod tests {
         assert!(tag_names.contains(&"connect"));
         assert!(tag_names.contains(&"system"));
         assert!(tag_names.contains(&"templates"));
-        
+
         // Check that security schemes are defined
         if let Some(components) = &spec.components {
             let security_schemes = &components.security_schemes;
@@ -291,9 +295,9 @@ mod tests {
         let json = generate_openapi_spec();
         assert!(!json.is_empty());
         assert!(json.contains("OpenAct API"));
-        
+
         // Validate it's proper JSON
-        let _: serde_json::Value = serde_json::from_str(&json)
-            .expect("Generated OpenAPI spec should be valid JSON");
+        let _: serde_json::Value =
+            serde_json::from_str(&json).expect("Generated OpenAPI spec should be valid JSON");
     }
 }

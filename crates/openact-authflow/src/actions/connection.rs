@@ -1,32 +1,33 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
-use crate::authflow::engine::TaskHandler;
-use crate::store::{ConnectionStore, MemoryConnectionStore};
+use crate::engine::TaskHandler;
+use openact_core::store::AuthConnectionStore;
+use openact_store::memory::MemoryAuthConnectionStore;
 
 #[derive(Clone, Default)]
-pub struct ConnectionContext<S: ConnectionStore = MemoryConnectionStore> {
+pub struct ConnectionContext<S: AuthConnectionStore = MemoryAuthConnectionStore> {
     pub store: S,
 }
 
-impl<S: ConnectionStore> ConnectionContext<S> {
+impl<S: AuthConnectionStore> ConnectionContext<S> {
     pub fn new(store: S) -> Self {
         Self { store }
     }
 }
 
 #[derive(Default)]
-pub struct ConnectionReadHandler<S: ConnectionStore = MemoryConnectionStore> {
+pub struct ConnectionReadHandler<S: AuthConnectionStore = MemoryAuthConnectionStore> {
     pub ctx: ConnectionContext<S>,
 }
 
 #[derive(Default)]
-pub struct ConnectionUpdateHandler<S: ConnectionStore = MemoryConnectionStore> {
+pub struct ConnectionUpdateHandler<S: AuthConnectionStore = MemoryAuthConnectionStore> {
     pub ctx: ConnectionContext<S>,
 }
 
-impl<S: ConnectionStore> TaskHandler for ConnectionReadHandler<S> {
+impl<S: AuthConnectionStore> TaskHandler for ConnectionReadHandler<S> {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
         let cref = ctx
             .get("connection_ref")
@@ -37,7 +38,7 @@ impl<S: ConnectionStore> TaskHandler for ConnectionReadHandler<S> {
     }
 }
 
-impl<S: ConnectionStore> TaskHandler for ConnectionUpdateHandler<S> {
+impl<S: AuthConnectionStore> TaskHandler for ConnectionUpdateHandler<S> {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
         let cref = ctx
             .get("connection_ref")

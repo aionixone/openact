@@ -1,5 +1,5 @@
 //! Connection configuration models
-//! 
+//!
 //! This module contains data structures for managing API connection configurations,
 //! including authentication parameters and network settings.
 
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 
-use super::common::{HttpParameter, NetworkConfig, TimeoutConfig, HttpPolicy, RetryPolicy};
+use super::common::{HttpParameter, HttpPolicy, NetworkConfig, RetryPolicy, TimeoutConfig};
 
 /// Authorization type for connections
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

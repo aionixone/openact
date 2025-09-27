@@ -1,0 +1,77 @@
+version: "1.0"
+
+connections:
+  test-api:
+    kind: http
+    # flattened style (will be normalized into config internally)
+    base_url: "https://httpbin.org"
+    authorization: "api_key"
+    auth_parameters:
+      api_key_auth_parameters:
+        api_key_name: "Authorization"
+        api_key_value: "Bearer ${HTTPBIN_TOKEN}"
+    # Optional connection-level defaults (HTTP-only). These will be shallow-merged at runtime.
+    # headers/query/cookies are one-level maps. Action/input overwrite keys; setting a key to null deletes it.
+    headers:
+      User-Agent: "OpenAct-Client/1.0"
+      X-Provider: "httpbin"
+    query:
+      api_version: "2024-11"
+    # cookies:
+    #   session: "abc"
+
+actions:
+  httpbin.get:
+    # kind omitted → inherits http; export will materialize kind: http
+    connection: test-api
+    description: "GET /get"
+    parameters:
+      - name: query
+        type: object
+        required: false
+      - name: headers
+        type: object
+        required: false
+    config:
+      method: "GET"
+      # Path templating: variables can be provided from input.path or parameters by the same name
+      path: "/get"
+      # Shallow-merge examples (HTTP-only):
+      # headers: action overrides/extends connection headers; null deletes a key
+      # headers:
+      #   X-From-Action: "1"
+      #   X-Remove-Me: null
+      # query: action overrides/extends connection query params; null deletes a key
+      # query:
+      #   lang: "en"
+      #   feature_flag: null
+      timeout_seconds: 30
+    mcp:
+      enabled: true
+
+  httpbin.post:
+    connection: test-api
+    description: "POST /post"
+    parameters:
+      - name: body
+        type: object
+        required: true
+    config:
+      method: "POST"
+      path: "/post"
+      headers:
+        Content-Type: "application/json"
+    mcp:
+      enabled: true
+
+  httpbin.delete:
+    kind: http
+    connection: test-api
+    description: "DELETE /delete"
+    config:
+      method: "DELETE"
+      path: "/delete"
+    mcp:
+      enabled: false
+
+

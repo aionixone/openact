@@ -1,0 +1,133 @@
+# Copyright 2024 Google LLC
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+steps:
+  - id: "build-docker"
+    name: "gcr.io/cloud-builders/docker"
+    waitFor: ['-']
+    script: |
+        #!/usr/bin/env bash
+        docker buildx create --name container-builder --driver docker-container --bootstrap --use
+        docker buildx build --platform linux/amd64,linux/arm64 --build-arg COMMIT_SHA=$(git rev-parse --short HEAD) -t ${_DOCKER_URI}:$REF_NAME --push .
+
+  - id: "install-dependencies"
+    name: golang:1
+    waitFor: ['-']
+    env:
+      - 'GOPATH=/gopath'
+    volumes:
+      - name: 'go'
+        path: '/gopath'
+    script: |
+        go get -d ./...
+
+  - id: "build-linux-amd64"
+    name: golang:1
+    waitFor: 
+      - "install-dependencies"
+    env:
+      - 'GOPATH=/gopath'
+    volumes:
+      - name: 'go'
+        path: '/gopath'
+    script: |
+        #!/usr/bin/env bash
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build -ldflags "-X github.com/googleapis/genai-toolbox/cmd.commitSha=$(git rev-parse --short HEAD)" -o toolbox.linux.amd64
+
+  - id: "store-linux-amd64"
+    name: "gcr.io/cloud-builders/gcloud:latest"
+    waitFor:
+      - "build-linux-amd64"
+    script: |
+        #!/usr/bin/env bash
+        gcloud storage cp toolbox.linux.amd64 gs://$_BUCKET_NAME/$REF_NAME/linux/amd64/toolbox
+
+  - id: "build-darwin-arm64"
+    name: golang:1
+    waitFor: 
+      - "install-dependencies"
+    env:
+      - 'GOPATH=/gopath'
+    volumes:
+      - name: 'go'
+        path: '/gopath'
+    script: |
+        #!/usr/bin/env bash
+        CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \
+          go build -ldflags "-X github.com/googleapis/genai-toolbox/cmd.commitSha=$(git rev-parse --short HEAD)" -o toolbox.darwin.arm64
+
+  - id: "store-darwin-arm64"
+    name: "gcr.io/cloud-builders/gcloud:latest"
+    waitFor:
+      - "build-darwin-arm64"
+    script: |
+        #!/usr/bin/env bash
+        gcloud storage cp toolbox.darwin.arm64 gs://$_BUCKET_NAME/$REF_NAME/darwin/arm64/toolbox
+
+  - id: "build-darwin-amd64"
+    name: golang:1
+    waitFor: 
+      - "install-dependencies"
+    env:
+      - 'GOPATH=/gopath'
+    volumes:
+      - name: 'go'
+        path: '/gopath'
+    script: |
+        #!/usr/bin/env bash
+        CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 \
+          go build -ldflags "-X github.com/googleapis/genai-toolbox/cmd.commitSha=$(git rev-parse --short HEAD)" -o toolbox.darwin.amd64
+
+  - id: "store-darwin-amd64"
+    name: "gcr.io/cloud-builders/gcloud:latest"
+    waitFor:
+      - "build-darwin-amd64"
+    script: |
+        #!/usr/bin/env bash
+        gcloud storage cp toolbox.darwin.amd64 gs://$_BUCKET_NAME/$REF_NAME/darwin/amd64/toolbox
+
+  - id: "build-windows-amd64"
+    name: golang:1
+    waitFor: 
+      - "install-dependencies"
+    env:
+      - 'GOPATH=/gopath'
+    volumes:
+      - name: 'go'
+        path: '/gopath'
+    script: |
+        #!/usr/bin/env bash
+        CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+          go build -ldflags "-X github.com/googleapis/genai-toolbox/cmd.commitSha=$(git rev-parse --short HEAD)" -o toolbox.windows.amd64
+
+  - id: "store-windows-amd64"
+    name: "gcr.io/cloud-builders/gcloud:latest"
+    waitFor:
+      - "build-windows-amd64"
+    script: |
+        #!/usr/bin/env bash
+        gcloud storage cp toolbox.windows.amd64 gs://$_BUCKET_NAME/$REF_NAME/windows/amd64/toolbox.exe
+
+options:
+  automapSubstitutions: true
+  dynamicSubstitutions: true
+  logging: CLOUD_LOGGING_ONLY # Necessary for custom service account
+  machineType: 'E2_HIGHCPU_32'
+
+substitutions:
+  _REGION: us-central1
+  _AR_HOSTNAME: ${_REGION}-docker.pkg.dev
+  _AR_REPO_NAME: toolbox-dev
+  _BUCKET_NAME: genai-toolbox-dev
+  _DOCKER_URI: ${_AR_HOSTNAME}/${PROJECT_ID}/${_AR_REPO_NAME}/toolbox

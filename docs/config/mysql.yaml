@@ -1,0 +1,28 @@
+version: "1.0"
+
+connections:
+  my-mysql:
+    kind: mysql
+    host: 127.0.0.1
+    port: 3306
+    database: toolbox_db
+    user: toolbox_user
+    password: "${MYSQL_PASSWORD}"
+
+actions:
+  find-hotels:
+    connection: my-mysql
+    description: "Find hotels by name"
+    parameters:
+      - name: name
+        type: string
+        required: true
+    config:
+      statement: |
+        SELECT *
+        FROM hotels
+        WHERE name LIKE CONCAT('%', ?, '%');
+    mcp:
+      enabled: true
+
+

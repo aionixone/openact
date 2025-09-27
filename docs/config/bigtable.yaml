@@ -1,0 +1,45 @@
+version: "1.0"
+
+connections:
+  my-bigtable-instance:
+    kind: bigtable
+    project_id: "my-project"
+    instance_id: "my-instance"
+    credentials: "${GOOGLE_APPLICATION_CREDENTIALS}"
+
+actions:
+  search_user_by_id_or_name:
+    # kind omitted → inherits bigtable; export will materialize kind: bigtable
+    connection: my-bigtable-instance
+    description: |
+      Use this tool to get information for a specific user.
+      Takes an id number or a name and returns info on the user.
+
+      Example:
+      {
+        "id": 123,
+        "name": "Alice"
+      }
+    parameters:
+      - name: id
+        type: integer
+        description: User ID
+        required: false
+      - name: name
+        type: string
+        description: Name of the user
+        required: false
+    config:
+      statement: |
+        SELECT
+          TO_INT64(cf['id']) AS id,
+          CAST(cf['name'] AS STRING) AS name
+        FROM
+          mytable
+        WHERE
+          TO_INT64(cf['id']) = @id
+          OR CAST(cf['name'] AS STRING) = @name;
+    mcp:
+      enabled: true
+
+

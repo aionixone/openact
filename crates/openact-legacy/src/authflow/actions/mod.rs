@@ -3,8 +3,8 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::authflow::engine::TaskHandler;
-use crate::store::ConnectionStore;
 use crate::models::AuthConnection;
+use crate::store::ConnectionStore;
 
 mod connection;
 mod ensure;
@@ -12,9 +12,9 @@ mod http_request;
 mod inject;
 mod secrets;
 pub mod oauth2 {
+    pub mod authorize;
     pub mod client_credentials;
     pub mod refresh_token;
-    pub mod authorize;
 }
 pub mod compute {
     pub mod hmac;
@@ -23,17 +23,13 @@ pub mod compute {
 }
 
 // Re-export handlers from local subtree
-pub use self::connection::{
-    ConnectionContext, ConnectionReadHandler, ConnectionUpdateHandler,
-};
+pub use self::connection::{ConnectionContext, ConnectionReadHandler, ConnectionUpdateHandler};
 pub use self::ensure::EnsureFreshTokenHandler;
 pub use self::http_request::HttpTaskHandler;
 pub use self::inject::{InjectApiKeyHandler, InjectBearerHandler};
 pub use self::oauth2::{
-    authorize::OAuth2AuthorizeRedirectHandler,
-    client_credentials::OAuth2ClientCredentialsHandler,
-    refresh_token::OAuth2RefreshTokenHandler,
-    authorize::OAuth2AwaitCallbackHandler,
+    authorize::OAuth2AuthorizeRedirectHandler, authorize::OAuth2AwaitCallbackHandler,
+    client_credentials::OAuth2ClientCredentialsHandler, refresh_token::OAuth2RefreshTokenHandler,
 };
 #[cfg(feature = "vault")]
 pub use self::secrets::VaultSecretsProvider;
@@ -67,12 +63,16 @@ impl TaskHandler for DefaultRouter {
             "compute.hmac" => {
                 self::compute::hmac::ComputeHmacHandler.execute(resource, state_name, ctx)
             }
-            "compute.jwt_sign" => self::compute::jwt_sign::ComputeJwtSignHandler
-                .execute(resource, state_name, ctx),
-            "compute.sigv4" => self::compute::sigv4::ComputeSigV4Handler
-                .execute(resource, state_name, ctx),
+            "compute.jwt_sign" => {
+                self::compute::jwt_sign::ComputeJwtSignHandler.execute(resource, state_name, ctx)
+            }
+            "compute.sigv4" => {
+                self::compute::sigv4::ComputeSigV4Handler.execute(resource, state_name, ctx)
+            }
             "connection.read" | "connection.update" => {
-                anyhow::bail!("Connection operations require a connection store. Use a custom router with ConnectionStore support.")
+                anyhow::bail!(
+                    "Connection operations require a connection store. Use a custom router with ConnectionStore support."
+                )
             }
             "ensure.fresh_token" => {
                 anyhow::bail!("stateful action '{resource}' requires a custom router")
@@ -90,7 +90,10 @@ pub struct ActionRouter {
 
 impl ActionRouter {
     pub fn new(connection_store: Arc<dyn ConnectionStore>) -> Self {
-        Self { default_router: DefaultRouter, connection_store }
+        Self {
+            default_router: DefaultRouter,
+            connection_store,
+        }
     }
 }
 
@@ -105,14 +108,25 @@ impl TaskHandler for ActionRouter {
                     async fn get(&self, connection_ref: &str) -> Result<Option<AuthConnection>> {
                         self.0.get(connection_ref).await
                     }
-                    async fn put(&self, connection_ref: &str, connection: &AuthConnection) -> Result<()> {
+                    async fn put(
+                        &self,
+                        connection_ref: &str,
+                        connection: &AuthConnection,
+                    ) -> Result<()> {
                         self.0.put(connection_ref, connection).await
                     }
                     async fn delete(&self, connection_ref: &str) -> Result<bool> {
                         self.0.delete(connection_ref).await
                     }
-                    async fn compare_and_swap(&self, connection_ref: &str, expected: Option<&AuthConnection>, new_connection: Option<&AuthConnection>) -> Result<bool> {
-                        self.0.compare_and_swap(connection_ref, expected, new_connection).await
+                    async fn compare_and_swap(
+                        &self,
+                        connection_ref: &str,
+                        expected: Option<&AuthConnection>,
+                        new_connection: Option<&AuthConnection>,
+                    ) -> Result<bool> {
+                        self.0
+                            .compare_and_swap(connection_ref, expected, new_connection)
+                            .await
                     }
                     async fn list_refs(&self) -> Result<Vec<String>> {
                         self.0.list_refs().await
@@ -124,7 +138,8 @@ impl TaskHandler for ActionRouter {
                         self.0.count().await
                     }
                 }
-                let ctx_wrap = ConnectionContext::new(DynStoreWrapper(self.connection_store.clone()));
+                let ctx_wrap =
+                    ConnectionContext::new(DynStoreWrapper(self.connection_store.clone()));
                 ConnectionReadHandler { ctx: ctx_wrap }.execute(resource, state_name, ctx)
             }
             "connection.update" => {
@@ -135,14 +150,25 @@ impl TaskHandler for ActionRouter {
                     async fn get(&self, connection_ref: &str) -> Result<Option<AuthConnection>> {
                         self.0.get(connection_ref).await
                     }
-                    async fn put(&self, connection_ref: &str, connection: &AuthConnection) -> Result<()> {
+                    async fn put(
+                        &self,
+                        connection_ref: &str,
+                        connection: &AuthConnection,
+                    ) -> Result<()> {
                         self.0.put(connection_ref, connection).await
                     }
                     async fn delete(&self, connection_ref: &str) -> Result<bool> {
                         self.0.delete(connection_ref).await
                     }
-                    async fn compare_and_swap(&self, connection_ref: &str, expected: Option<&AuthConnection>, new_connection: Option<&AuthConnection>) -> Result<bool> {
-                        self.0.compare_and_swap(connection_ref, expected, new_connection).await
+                    async fn compare_and_swap(
+                        &self,
+                        connection_ref: &str,
+                        expected: Option<&AuthConnection>,
+                        new_connection: Option<&AuthConnection>,
+                    ) -> Result<bool> {
+                        self.0
+                            .compare_and_swap(connection_ref, expected, new_connection)
+                            .await
                     }
                     async fn list_refs(&self) -> Result<Vec<String>> {
                         self.0.list_refs().await
@@ -154,15 +180,17 @@ impl TaskHandler for ActionRouter {
                         self.0.count().await
                     }
                 }
-                let ctx_wrap = ConnectionContext::new(DynStoreWrapper(self.connection_store.clone()));
+                let ctx_wrap =
+                    ConnectionContext::new(DynStoreWrapper(self.connection_store.clone()));
                 ConnectionUpdateHandler { ctx: ctx_wrap }.execute(resource, state_name, ctx)
             }
             "ensure.fresh_token" => {
-                let handler = EnsureFreshTokenHandler { store: Arc::new(crate::store::MemoryConnectionStore::new()) };
+                let handler = EnsureFreshTokenHandler {
+                    store: Arc::new(crate::store::MemoryConnectionStore::new()),
+                };
                 handler.execute(resource, state_name, ctx)
             }
             _ => self.default_router.execute(resource, state_name, ctx),
         }
     }
 }
-
