@@ -38,6 +38,18 @@ pub enum CliError {
     #[error("Execution failed: {0}")]
     ExecutionFailed(String),
 
+    #[error("Execution error: {0}")]
+    ExecutionError(String),
+
+    #[error("Runtime error: {0}")]
+    RuntimeError(String),
+
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+
     #[error("Database not initialized. Run 'openact migrate' first.")]
     DatabaseNotInitialized,
 

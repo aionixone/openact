@@ -99,3 +99,52 @@ pub fn ensure_parent_dir(path: &std::path::Path) -> CliResult<()> {
     }
     Ok(())
 }
+
+/// Read input data from either command line argument or file
+pub fn read_input_data(
+    input: Option<String>,
+    input_file: Option<String>,
+) -> CliResult<serde_json::Value> {
+    match (input, input_file) {
+        (Some(input_str), None) => {
+            // Parse input from command line
+            serde_json::from_str(&input_str).map_err(|e| {
+                crate::error::CliError::InvalidArgument(format!("Invalid JSON input: {}", e))
+            })
+        }
+        (None, Some(file_path)) => {
+            // Read input from file
+            validate_file_exists(&file_path)?;
+            let content = std::fs::read_to_string(&file_path)?;
+
+            // Try to parse as JSON first, then YAML
+            if let Ok(json_data) = serde_json::from_str::<serde_json::Value>(&content) {
+                Ok(json_data)
+            } else {
+                // Try YAML
+                serde_yaml::from_str(&content).map_err(|e| {
+                    crate::error::CliError::InvalidArgument(format!(
+                        "Invalid JSON/YAML input file '{}': {}",
+                        file_path, e
+                    ))
+                })
+            }
+        }
+        (None, None) => {
+            // No input provided - return empty object
+            Ok(serde_json::json!({}))
+        }
+        (Some(_), Some(_)) => {
+            // Both provided - this should be prevented by clap
+            unreachable!("Both input and input_file provided, this should be prevented by clap")
+        }
+    }
+}
+
+/// Write output data to a file
+pub fn write_output_data(file_path: &str, content: &str) -> CliResult<()> {
+    let path = std::path::Path::new(file_path);
+    ensure_parent_dir(path)?;
+    std::fs::write(path, content)?;
+    Ok(())
+}

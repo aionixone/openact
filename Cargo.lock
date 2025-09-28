@@ -2445,6 +2445,7 @@ dependencies = [
  "openact-core",
  "openact-mcp",
  "openact-registry",
+ "openact-runtime",
  "openact-server",
  "openact-store",
  "serde",
@@ -2547,6 +2548,24 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "openact-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "openact-config",
+ "openact-connectors",
+ "openact-core",
+ "openact-registry",
+ "openact-store",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

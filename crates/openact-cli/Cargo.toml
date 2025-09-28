@@ -12,6 +12,7 @@ openact-core = { path = "../openact-core" }
 openact-store = { path = "../openact-store" }
 openact-config = { path = "../openact-config" }
 openact-registry = { path = "../openact-registry" }
+openact-runtime = { path = "../openact-runtime" }
 openact-mcp = { path = "../openact-mcp" }
 openact-server = { path = "../openact-server", features = [] }
 clap = { version = "4", features = ["derive", "env"] }

@@ -110,6 +110,56 @@ async fn run() -> CliResult<()> {
             )
             .await
         }
+
+        Commands::ExecuteFile {
+            config_file,
+            action_name,
+            input,
+            input_file,
+            format,
+            output,
+            show_metadata,
+            dry_run,
+            timeout,
+        } => {
+            openact_cli::commands::execute_file::execute(
+                &config_file,
+                &action_name,
+                input,
+                input_file,
+                format,
+                output,
+                show_metadata,
+                dry_run,
+                timeout,
+            )
+            .await
+        }
+
+        Commands::ExecuteInline {
+            config_json,
+            action_name,
+            input,
+            input_file,
+            format,
+            output,
+            show_metadata,
+            dry_run,
+            timeout,
+        } => {
+            openact_cli::commands::execute_inline::execute(
+                &config_json,
+                &action_name,
+                input,
+                input_file,
+                format,
+                output,
+                show_metadata,
+                dry_run,
+                timeout,
+            )
+            .await
+        }
     }
 }
 

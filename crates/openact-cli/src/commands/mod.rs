@@ -1,4 +1,6 @@
 pub mod execute;
+pub mod execute_file;
+pub mod execute_inline;
 pub mod export;
 pub mod import;
 pub mod list;

@@ -1,0 +1,25 @@
+version: "1.0"
+metadata:
+  description: "Example configuration for testing runtime execution"
+
+connections:
+  api:
+    kind: http
+    description: "HTTP bin API connection"
+    base_url: "https://httpbin.org"
+    timeout: 30
+
+actions:
+  get_ip:
+    connection: api
+    description: "Get current IP address"
+    method: GET
+    path: "/ip"
+    mcp_enabled: true
+  
+  post_echo:
+    connection: api
+    description: "Echo back the posted data"
+    method: POST
+    path: "/post"
+    mcp_enabled: true

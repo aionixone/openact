@@ -154,6 +154,92 @@ pub enum Commands {
         #[arg(long, help = "Include execution metadata in output")]
         show_metadata: bool,
     },
+
+    /// Execute action from configuration file
+    ExecuteFile {
+        /// Configuration file path (YAML or JSON)
+        #[arg(help = "Configuration file containing connections and actions")]
+        config_file: String,
+
+        /// Action name to execute (from config file)
+        #[arg(help = "Action name as defined in the config file")]
+        action_name: String,
+
+        /// Input data as JSON string
+        #[arg(short, long, help = "Input data as JSON string")]
+        input: Option<String>,
+
+        /// Input data from file
+        #[arg(
+            long,
+            conflicts_with = "input",
+            help = "Read input data from file (JSON or YAML)"
+        )]
+        input_file: Option<String>,
+
+        /// Output format
+        #[arg(long, value_enum, default_value = "pretty", help = "Output format")]
+        format: OutputFormat,
+
+        /// Save output to file
+        #[arg(long, help = "Save output to file")]
+        output: Option<String>,
+
+        /// Show execution metadata
+        #[arg(long, help = "Include execution metadata in output")]
+        show_metadata: bool,
+
+        /// Dry run - validate configuration and action but don't execute
+        #[arg(long, help = "Validate configuration and action but don't execute")]
+        dry_run: bool,
+
+        /// Timeout in seconds
+        #[arg(long, default_value = "30", help = "Execution timeout in seconds")]
+        timeout: u64,
+    },
+
+    /// Execute action from inline configuration
+    ExecuteInline {
+        /// JSON configuration containing connections and actions
+        #[arg(help = "Inline JSON configuration")]
+        config_json: String,
+
+        /// Action name to execute
+        #[arg(help = "Action name as defined in the inline configuration")]
+        action_name: String,
+
+        /// Input data as JSON string
+        #[arg(short, long, help = "Input data as JSON string")]
+        input: Option<String>,
+
+        /// Input data from file
+        #[arg(
+            long,
+            conflicts_with = "input",
+            help = "Read input data from file (JSON or YAML)"
+        )]
+        input_file: Option<String>,
+
+        /// Output format
+        #[arg(long, value_enum, default_value = "pretty", help = "Output format")]
+        format: OutputFormat,
+
+        /// Save output to file
+        #[arg(long, help = "Save output to file")]
+        output: Option<String>,
+
+        /// Show execution metadata
+        #[arg(long, help = "Include execution metadata in output")]
+        show_metadata: bool,
+
+        /// Dry run - validate configuration and action but don't execute
+        #[arg(long, help = "Validate configuration and action but don't execute")]
+        dry_run: bool,
+
+        /// Timeout in seconds
+        #[arg(long, default_value = "30", help = "Execution timeout in seconds")]
+        timeout: u64,
+    },
 }
 
 #[derive(Subcommand)]
