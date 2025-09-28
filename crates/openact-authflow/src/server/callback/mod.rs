@@ -8,13 +8,13 @@ pub use callback_impl::*;
 
 #[cfg(feature = "callback")]
 mod callback_impl {
-    use anyhow::{Result, anyhow};
+    use anyhow::{anyhow, Result};
     use axum::{
-        Router,
         extract::{Query, State},
         http::StatusCode,
         response::{Html, IntoResponse},
         routing::get,
+        Router,
     };
     use serde::Deserialize;
     use serde_json::Value;
@@ -28,13 +28,13 @@ mod callback_impl {
     use tokio::sync::oneshot;
     use tokio_util::sync::CancellationToken;
 
-    use openact_store;
-    use openact_core::store::RunStore;
     use crate::{
         engine::TaskHandler,
-        workflow::{ResumeObtainArgs, resume_obtain},
+        workflow::{resume_obtain, ResumeObtainArgs},
     };
-    
+    use openact_core::store::RunStore;
+    use openact_store;
+
     // Placeholder for AC result recording
     #[derive(Debug, Clone)]
     pub struct AcResultRecord {
@@ -45,7 +45,7 @@ mod callback_impl {
         pub next_hints: Option<Vec<String>>,
         pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     }
-    
+
     pub fn insert_ac_result(_run_id: &str, _record: AcResultRecord) {
         // TODO: Implement proper AC result storage
     }
@@ -283,7 +283,7 @@ mod callback_impl {
                     // Try to get connection store from environment
                     let database_url = std::env::var("OPENACT_DATABASE_URL")
                         .unwrap_or_else(|_| "sqlite://data/openact.db".to_string());
-                    
+
                     if let Ok(store) = openact_store::SqlStore::new(&database_url).await {
                         if let Ok(Some(mut conn)) = store.get_by_trn(conn_trn).await {
                             conn.auth_ref = Some(a.clone());

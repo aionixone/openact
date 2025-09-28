@@ -10,15 +10,15 @@ use std::time::SystemTime;
 use tokio::sync::broadcast;
 
 #[cfg(feature = "server")]
-use openact_core::store::{RunStore, ConnectionStore, AuthConnectionStore};
-#[cfg(feature = "server")]
-use openact_store::{MemoryConnectionStore, MemoryRunStore};
-#[cfg(feature = "server")]
-use crate::engine::TaskHandler;
+use crate::actions::{ActionRouter, DefaultRouter};
 #[cfg(feature = "server")]
 use crate::dsl::OpenactDsl;
 #[cfg(feature = "server")]
-use crate::actions::{DefaultRouter, ActionRouter};
+use crate::engine::TaskHandler;
+#[cfg(feature = "server")]
+use openact_core::store::{AuthConnectionStore, ConnectionStore, RunStore};
+#[cfg(feature = "server")]
+use openact_store::{MemoryConnectionStore, MemoryRunStore};
 
 #[cfg(all(feature = "server", feature = "openapi"))]
 use utoipa::ToSchema;
@@ -119,7 +119,7 @@ impl ServerState {
         // Use persistent SQLite store for full functionality
         let database_url = std::env::var("OPENACT_DATABASE_URL")
             .unwrap_or_else(|_| "sqlite://data/openact.db".to_string());
-        
+
         let sql_store = match openact_store::SqlStore::new(&database_url).await {
             Ok(store) => Arc::new(store),
             Err(_) => {
@@ -127,19 +127,17 @@ impl ServerState {
                 return Self::new();
             }
         };
-        
+
         let connection_store: Arc<dyn ConnectionStore> = sql_store.clone();
         let auth_store: Arc<dyn AuthConnectionStore> = sql_store.clone();
         let run_store: Arc<dyn RunStore> = sql_store.clone();
-        
+
         Self {
             workflows: Arc::new(RwLock::new(HashMap::new())),
             executions: Arc::new(RwLock::new(HashMap::new())),
             connection_store,
             run_store,
-            task_handler: Arc::new(ActionRouter::new(
-                auth_store,
-            )),
+            task_handler: Arc::new(ActionRouter::new(auth_store)),
             ws_broadcaster: tx,
         }
     }

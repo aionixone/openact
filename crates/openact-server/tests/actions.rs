@@ -53,7 +53,10 @@ async fn execute_by_trn_rejects_cross_tenant_action() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(body_json["success"], serde_json::Value::Bool(false));
-    assert_eq!(body_json["error"]["code"], serde_json::Value::String("NOT_FOUND".into()));
+    assert_eq!(
+        body_json["error"]["code"],
+        serde_json::Value::String("NOT_FOUND".into())
+    );
 }
 
 #[tokio::test]

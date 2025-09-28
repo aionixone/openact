@@ -427,9 +427,7 @@ impl AuthConnection {
         let tenant_str = tenant.into();
         let provider_str = provider.into();
         let user_id_str = user_id.into();
-        let trn = format!(
-            "trn:openact:{tenant_str}:auth/{provider_str}/{user_id_str}"
-        );
+        let trn = format!("trn:openact:{tenant_str}:auth/{provider_str}/{user_id_str}");
         let now = Utc::now();
 
         Self {

@@ -229,8 +229,7 @@ pub async fn get_action_schema(
         .map_err(|e| e.to_http_response(request_id.0.clone()))?;
         records.retain(|r| r.name == name);
         records.retain(|r| {
-            r.trn
-                .parse_action()
+            parse_action_trn(&r.trn)
                 .map(|c| c.tenant == tenant.as_str())
                 .unwrap_or(false)
         });

@@ -1,5 +1,5 @@
 #[cfg(feature = "server")]
-use crate::engine::{RunOutcome, run_until_pause_or_end};
+use crate::engine::{run_until_pause_or_end, RunOutcome};
 #[cfg(feature = "server")]
 use crate::server::state::{ExecutionEvent, ExecutionStatus, ServerState};
 #[cfg(feature = "server")]

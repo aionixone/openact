@@ -1,11 +1,11 @@
 #[cfg(feature = "server")]
+use crate::server::handlers::{executions, health, oauth, workflows, ws};
+#[cfg(feature = "server")]
 use crate::server::state::ServerState;
 #[cfg(feature = "server")]
-use crate::server::handlers::{workflows, executions, health, oauth, ws};
-#[cfg(feature = "server")]
 use axum::{
-    Router,
     routing::{get, post},
+    Router,
 };
 
 #[cfg(feature = "server")]
@@ -26,8 +26,7 @@ pub fn create_router_with_state(state: ServerState) -> Router {
         // Workflow management (authflow namespace only)
         .route(
             "/api/v1/authflow/workflows",
-            get(workflows::list_workflows)
-                .post(workflows::create_workflow),
+            get(workflows::list_workflows).post(workflows::create_workflow),
         )
         .route(
             "/api/v1/authflow/workflows/{id}",
@@ -44,8 +43,7 @@ pub fn create_router_with_state(state: ServerState) -> Router {
         // Execution management (authflow namespace only)
         .route(
             "/api/v1/authflow/executions",
-            get(executions::list_executions)
-                .post(executions::start_execution),
+            get(executions::list_executions).post(executions::start_execution),
         )
         .route(
             "/api/v1/authflow/executions/{id}",
@@ -64,24 +62,12 @@ pub fn create_router_with_state(state: ServerState) -> Router {
             get(executions::get_execution_trace),
         )
         // WebSocket real-time updates (authflow namespace only)
-        .route(
-            "/api/v1/authflow/ws/executions",
-            get(ws::websocket_handler),
-        )
+        .route("/api/v1/authflow/ws/executions", get(ws::websocket_handler))
         // System management (authflow namespace only)
-        .route(
-            "/api/v1/authflow/health",
-            get(health::health_check),
-        )
+        .route("/api/v1/authflow/health", get(health::health_check))
         // OAuth2 callback endpoint (authflow namespace only)
-        .route(
-            "/api/v1/authflow/callback",
-            get(oauth::oauth_callback),
-        )
+        .route("/api/v1/authflow/callback", get(oauth::oauth_callback))
         // Top-level OAuth callback alias for compatibility
-        .route(
-            "/oauth/callback",
-            get(oauth::oauth_callback),
-        )
+        .route("/oauth/callback", get(oauth::oauth_callback))
         .with_state(state)
 }

@@ -1,9 +1,9 @@
 #[cfg(feature = "server")]
+use axum::extract::ws::Message;
+#[cfg(feature = "server")]
 use axum::extract::State;
 #[cfg(feature = "server")]
 use axum::extract::WebSocketUpgrade;
-#[cfg(feature = "server")]
-use axum::extract::ws::Message;
 #[cfg(feature = "server")]
 use axum::response::Response;
 #[cfg(feature = "server")]
