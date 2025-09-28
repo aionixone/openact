@@ -1,0 +1,16 @@
+[package]
+name = "openact-plugins"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+openact-registry = { path = "../openact-registry" }
+openact-connectors = { path = "../openact-connectors", optional = true }
+tracing = "0.1"
+
+[features]
+default = ["http", "postgresql"]
+http = ["dep:openact-connectors", "openact-connectors/http"]
+postgresql = ["dep:openact-connectors", "openact-connectors/postgresql"]
+
+

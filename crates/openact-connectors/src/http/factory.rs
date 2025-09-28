@@ -1,15 +1,16 @@
 //! HTTP connector factory implementation
 
-use crate::{
+use openact_registry::{
     error::{RegistryError, RegistryResult},
     factory::{Action, ActionFactory, AsAny, Connection, ConnectionFactory},
+    ConnectorRegistry, ConnectorRegistrar,
 };
 use async_trait::async_trait;
-use openact_connectors::auth::{AuthConnection, AuthConnectionStore};
-use openact_connectors::http::{HttpAction, HttpConnection, HttpExecutor};
+use crate::auth::{AuthConnection, AuthConnectionStore};
+use crate::http::{HttpAction, HttpConnection, HttpExecutor};
 use openact_core::{types::ConnectorMetadata, ActionRecord, ConnectionRecord, ConnectorKind, Trn};
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 /// HTTP connector factory for creating connections and actions
 #[derive(Debug, Default)]
@@ -19,6 +20,16 @@ impl HttpFactory {
     /// Create a new HTTP factory
     pub fn new() -> Self {
         Self
+    }
+
+    /// Returns a registrar function for the HTTP factory.
+    pub fn registrar() -> ConnectorRegistrar {
+        |registry: &mut ConnectorRegistry| {
+            let factory = Arc::new(HttpFactory::new());
+            registry.register_connection_factory(factory.clone());
+            registry.register_action_factory(factory);
+            tracing::debug!("Registered HTTP connector via registrar");
+        }
     }
 }
 

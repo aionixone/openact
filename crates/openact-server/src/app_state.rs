@@ -1,8 +1,9 @@
 //! Application state shared between MCP and REST API
 
 use openact_registry::ConnectorRegistry;
-use openact_store::SqlStore;
 use std::sync::Arc;
+use openact_plugins as plugins;
+use openact_store::SqlStore;
 
 /// Shared application state
 #[derive(Clone)]
@@ -21,19 +22,9 @@ impl AppState {
         let act_repo = store.as_ref().clone();
         let mut registry = ConnectorRegistry::new(conn_store, act_repo);
 
-        // Register HTTP factory
-        #[cfg(feature = "http")]
-        {
-            use openact_registry::HttpFactory;
-            registry.register_connection_factory(Arc::new(HttpFactory::new()));
-            registry.register_action_factory(Arc::new(HttpFactory::new()));
-        }
-
-        #[cfg(feature = "postgresql")]
-        {
-            use openact_registry::PostgresFactory;
-            registry.register_connection_factory(Arc::new(PostgresFactory::new()));
-            registry.register_action_factory(Arc::new(PostgresFactory::new()));
+        // Register connector factories via plugins aggregator
+        for registrar in plugins::registrars() {
+            registrar(&mut registry);
         }
 
         Ok(Self {

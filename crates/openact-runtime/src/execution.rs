@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use openact_registry::{ConnectorRegistry, ExecutionContext};
-use openact_core::Trn;
+use openact_core::{Trn, sanitize_json_value};
 use crate::error::{RuntimeError, RuntimeResult};
 
 /// Options for action execution
@@ -83,7 +83,7 @@ pub async fn execute_action(
             output: Some(serde_json::json!({
                 "message": "Dry run successful - action would execute",
                 "action_trn": action_trn,
-                "input_received": input
+                "input_received": sanitize_json_value(&input)
             })),
             error: None,
             metadata: ExecutionMetadata {

@@ -9,6 +9,7 @@ openact-mcp = { path = "../openact-mcp" }
 openact-core = { path = "../openact-core" }
 openact-store = { path = "../openact-store" }
 openact-registry = { path = "../openact-registry" }
+openact-plugins = { path = "../openact-plugins" }
 openact-authflow = { path = "../openact-authflow", optional = true, features = ["server"] }
 anyhow = "1.0"
 axum = { version = "0.7", features = ["json"] }
@@ -23,9 +24,7 @@ jsonschema = "0.17"
 sha2 = "0.10"
 
 [features]
-default = ["http"]
-http = ["openact-registry/http"]
-postgresql = ["openact-registry/postgresql"]
+default = []
 authflow = ["dep:openact-authflow"]
 
 [dev-dependencies]

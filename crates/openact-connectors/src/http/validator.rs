@@ -1,5 +1,72 @@
 use crate::error::ConnectorError;
-use serde_json::Value as JsonValue;
+use serde_json::{Value as JsonValue, Map};
+use std::collections::HashSet;
+
+/// Fields allowed in HTTP connection configuration
+pub const HTTP_CONNECTION_FIELDS: &[&str] = &[
+    "base_url",
+    "timeout", 
+    "headers",
+    "authorization",
+    "auth_parameters",
+    "retry_policy",
+    "verify_ssl",
+    "proxy",
+    "user_agent",
+];
+
+/// Fields allowed in HTTP action configuration
+pub const HTTP_ACTION_FIELDS: &[&str] = &[
+    "method",
+    "path", 
+    "headers",
+    "query",
+    "body",
+    "timeout",
+    "expected_status",
+    "response_format",
+    "follow_redirects",
+    "stream_response",
+];
+
+/// Metadata fields that should never be included in config_json
+const METADATA_FIELDS: &[&str] = &[
+    "connection", "connector", "description", "mcp_enabled", "mcp",
+    "mcp_overrides", "name", "trn", "version", "created_at", "updated_at", 
+    "tenant", "kind"
+];
+
+/// Filter HTTP connection config to only include allowed fields
+pub fn filter_http_connection_fields(config: &Map<String, JsonValue>) -> Map<String, JsonValue> {
+    let allowed: HashSet<&str> = HTTP_CONNECTION_FIELDS.iter().copied().collect();
+    config.iter()
+        .filter(|(key, _)| {
+            // Always exclude metadata fields
+            if METADATA_FIELDS.contains(&key.as_str()) {
+                return false;
+            }
+            // Include if in whitelist
+            allowed.contains(key.as_str())
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+/// Filter HTTP action config to only include allowed fields
+pub fn filter_http_action_fields(config: &Map<String, JsonValue>) -> Map<String, JsonValue> {
+    let allowed: HashSet<&str> = HTTP_ACTION_FIELDS.iter().copied().collect();
+    config.iter()
+        .filter(|(key, _)| {
+            // Always exclude metadata fields
+            if METADATA_FIELDS.contains(&key.as_str()) {
+                return false;
+            }
+            // Include if in whitelist
+            allowed.contains(key.as_str())
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
 
 pub fn validate_http_connection(config: &JsonValue) -> Result<(), ConnectorError> {
     let obj = config.as_object().ok_or_else(|| {

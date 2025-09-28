@@ -10,6 +10,7 @@ openact-core = { path = "../openact-core" }
 openact-config = { path = "../openact-config" }
 openact-registry = { path = "../openact-registry", default-features = false }
 openact-store = { path = "../openact-store" }
+openact-plugins = { path = "../openact-plugins" }
 
 # Web server (for HTTP MCP)
 axum = { version = "0.7", features = ["json"] }
@@ -32,9 +33,7 @@ utoipa = { version = "4.0", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
 
 [features]
-default = ["http"]
-http = ["openact-registry/http"]
-postgresql = ["openact-registry/postgresql"]
+default = []
 
 [dev-dependencies]
 tempfile = "3.0"

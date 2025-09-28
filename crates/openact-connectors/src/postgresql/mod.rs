@@ -11,6 +11,9 @@ use url::form_urlencoded::Serializer;
 
 pub mod actions;
 pub mod validator;
+pub mod factory;
+
+pub use factory::PostgresFactory;
 
 /// Connection configuration for PostgreSQL connectors.
 #[derive(Debug, Clone, Serialize, Deserialize)]

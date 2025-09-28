@@ -19,10 +19,5 @@ openact-store = { path = "../openact-store" }
 openact-config = { path = "../openact-config" }
 openact-registry = { path = "../openact-registry" }
 
-# Optional connector dependencies
-openact-connectors = { path = "../openact-connectors", optional = true }
-
 [features]
-default = ["http"]
-http = ["openact-connectors/http", "openact-registry/http"]
-all-connectors = ["http"]
+default = []

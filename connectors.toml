@@ -1,0 +1,8 @@
+# Single source of truth for which connectors to compile in
+# Control strictly by connector kind; names map 1:1 to openact-plugins features
+
+# Example:
+# enabled = ["http", "postgresql"]
+
+enabled = ["http", "postgresql"]
+

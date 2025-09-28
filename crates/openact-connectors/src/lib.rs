@@ -20,13 +20,24 @@ pub use auth::{AuthConnection, AuthConnectionStore, TokenInfo, RefreshOutcome};
 
 // Re-export connector modules when enabled
 #[cfg(feature = "http")]
-pub use http::{HttpConnection, HttpAction, HttpExecutor, HttpExecutionResult};
+pub use http::{HttpConnection, HttpAction, HttpExecutor, HttpExecutionResult, HttpFactory};
 
 #[cfg(feature = "postgresql")]
-pub use postgresql::{PostgresConnection, PostgresExecutor};
+pub use postgresql::{PostgresConnection, PostgresExecutor, PostgresFactory};
 
 #[cfg(feature = "mysql")]
 pub use mysql::{MysqlConnection, MysqlExecutor};
 
 #[cfg(feature = "redis")]
 pub use redis::{RedisConnection, RedisExecutor};
+
+// Convenience registrar functions
+#[cfg(feature = "http")]
+pub fn http_registrar() -> openact_registry::ConnectorRegistrar {
+    HttpFactory::registrar()
+}
+
+#[cfg(feature = "postgresql")]
+pub fn postgresql_registrar() -> openact_registry::ConnectorRegistrar {
+    PostgresFactory::registrar()
+}

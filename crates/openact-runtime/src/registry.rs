@@ -1,15 +1,12 @@
-use std::sync::Arc;
 
-use openact_core::{ActionRecord, ConnectionRecord, store::{ConnectionStore, ActionRepository}};
+use openact_core::{ActionRecord, ConnectionRecord, create_debug_string, store::{ConnectionStore, ActionRepository}};
 use openact_config::ConfigManifest;
-use openact_registry::ConnectorRegistry;
+use openact_registry::{ConnectorRegistry, ConnectorRegistrar};
 use openact_store::{MemoryConnectionStore, MemoryActionRepository};
 
 use crate::error::{RuntimeError, RuntimeResult};
 use crate::helpers::records_from_manifest;
 
-#[cfg(feature = "http")]
-use openact_registry::HttpFactory;
 
 /// Build a ConnectorRegistry from connection and action records
 /// This is the core function that all execution paths should use
@@ -30,23 +27,63 @@ pub async fn registry_from_records(
     
     // Populate action repository  
     for record in action_records {
-        tracing::debug!("Storing action record: trn={}, connector={}, name={}, config_json={}", 
-            record.trn.as_str(), record.connector.as_str(), record.name, record.config_json);
+        // Sanitize config_json for logging (it's already a JsonValue)
+        let sanitized_config = create_debug_string("config_json", &record.config_json);
+        
+        tracing::debug!("Storing action record: trn={}, connector={}, name={}, {}", 
+            record.trn.as_str(), record.connector.as_str(), record.name, sanitized_config);
         action_repository.upsert(&record).await
             .map_err(|e| RuntimeError::registry(format!("Failed to store action: {}", e)))?;
     }
     
     // Build registry with feature flags
-    let mut registry = ConnectorRegistry::new(connection_store, action_repository);
+    let registry = ConnectorRegistry::new(connection_store, action_repository);
     
-    // Register connectors based on feature flags
-    register_connectors(&mut registry, feature_flags)?;
+    // Legacy feature flags are deprecated; use registry_from_records_ext with plugin registrars instead
+    if !feature_flags.is_empty() {
+        tracing::warn!(
+            "Feature flags {:?} ignored - use registry_from_records_ext with plugin registrars", 
+            feature_flags
+        );
+    }
     
     Ok(registry)
 }
 
-/// Build a ConnectorRegistry from a config manifest
+/// A plugin registrar is a function that registers connector factories into the registry.
+/// This allows connectors to self-register without changing runtime or config code.
+pub type PluginRegistrar = ConnectorRegistrar;
+
+/// Build a ConnectorRegistry and register both feature-flag connectors and plugin-registered connectors
+pub async fn registry_from_records_ext(
+    connection_records: Vec<ConnectionRecord>,
+    action_records: Vec<ActionRecord>,
+    feature_flags: &[&str],
+    plugin_registrars: &[PluginRegistrar],
+) -> RuntimeResult<ConnectorRegistry> {
+    // Reuse base implementation
+    let mut registry = registry_from_records(connection_records, action_records, feature_flags).await?;
+
+    // Apply plugin registrars (connectors self-register here)
+    for registrar in plugin_registrars {
+        (registrar)(&mut registry);
+    }
+
+    Ok(registry)
+}
+
+/// Build a ConnectorRegistry from a config manifest using plugin registrars
 /// This handles the file/JSON config path
+pub async fn registry_from_manifest_ext(
+    manifest: ConfigManifest,
+    plugin_registrars: &[PluginRegistrar],
+) -> RuntimeResult<ConnectorRegistry> {
+    let (connection_records, action_records) = records_from_manifest(manifest).await?;
+    registry_from_records_ext(connection_records, action_records, &[], plugin_registrars).await
+}
+
+/// Deprecated: Build a ConnectorRegistry from a config manifest
+/// Use registry_from_manifest_ext with plugin registrars instead
 pub async fn registry_from_manifest(
     manifest: ConfigManifest,
     feature_flags: &[&str],
@@ -55,89 +92,10 @@ pub async fn registry_from_manifest(
     registry_from_records(connection_records, action_records, feature_flags).await
 }
 
-/// Register connectors based on feature flags
-fn register_connectors(
-    registry: &mut ConnectorRegistry,
-    feature_flags: &[&str],
-) -> RuntimeResult<()> {
-    for &feature in feature_flags {
-        match feature {
-            #[cfg(feature = "http")]
-            "http" => {
-                let http_factory = Arc::new(HttpFactory::new());
-                registry.register_connection_factory(http_factory.clone());
-                registry.register_action_factory(http_factory);
-                tracing::debug!("Registered HTTP connector");
-            }
-            _ => {
-                tracing::warn!("Unknown feature flag: {}", feature);
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Helper to get default feature flags based on compilation features
+/// Helper for backwards compatibility - returns empty vec as feature flags are deprecated
+/// Use registry_from_records_ext with plugin registrars instead
 pub fn default_feature_flags() -> Vec<&'static str> {
-    let mut flags = Vec::new();
-    
-    #[cfg(feature = "http")]
-    flags.push("http");
-    
-    flags
+    tracing::warn!("default_feature_flags() is deprecated - use openact_plugins::registrars() instead");
+    Vec::new()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use openact_core::{ConnectionRecord, ActionRecord, Trn, ConnectorKind};
-    use serde_json::json;
-
-    #[tokio::test]
-    async fn test_registry_from_empty_records() {
-        let registry = registry_from_records(vec![], vec![], &[]).await.unwrap();
-        assert!(registry.registered_connectors().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_registry_with_http_feature() {
-        let connection_records = vec![
-            ConnectionRecord {
-                trn: Trn::new("test:conn:http1"),
-                connector: ConnectorKind::new("http"),
-                name: "api".to_string(),
-                config_json: json!({"base_url": "https://api.example.com"}),
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-                version: 1,
-            }
-        ];
-        
-        let action_records = vec![
-            ActionRecord {
-                trn: Trn::new("test:action:get-user"),
-                connector: ConnectorKind::new("http"),
-                name: "get_user".to_string(),
-                connection_trn: Trn::new("test:conn:http1"),
-                config_json: json!({"method": "GET", "path": "/users/{id}"}),
-                mcp_enabled: true,
-                mcp_overrides: None,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-                version: 1,
-            }
-        ];
-
-        #[cfg(feature = "http")]
-        {
-            let registry = registry_from_records(
-                connection_records, 
-                action_records, 
-                &["http"]
-            ).await.unwrap();
-            
-            let connectors = registry.registered_connectors();
-            assert!(connectors.iter().any(|k| k.as_str() == "http"));
-        }
-    }
-}

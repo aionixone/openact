@@ -1,7 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/*"
+    "crates/*",
+    "xtask"
 ]
 default-members = [
     "crates/openact-cli"

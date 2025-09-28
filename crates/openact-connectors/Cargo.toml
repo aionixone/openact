@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 openact-core = { path = "../openact-core" }
+openact-registry = { path = "../openact-registry" }
 anyhow = "1"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -13,6 +14,7 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
 rand = "0.8"
 tokio = { version = "1", features = ["time"] }
+tracing = "0.1"
 
 # HTTP connector dependencies
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "multipart"], optional = true }

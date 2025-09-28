@@ -14,7 +14,8 @@ openact-config = { path = "../openact-config" }
 openact-registry = { path = "../openact-registry" }
 openact-runtime = { path = "../openact-runtime" }
 openact-mcp = { path = "../openact-mcp" }
-openact-server = { path = "../openact-server", features = [] }
+openact-server = { path = "../openact-server" }
+openact-plugins = { path = "../openact-plugins" }
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs"] }
 anyhow = "1"
@@ -31,9 +32,8 @@ tempfile = "3"
 chrono = { version = "0.4", features = ["serde"] }
 
 [features]
-default = ["http"]
+default = []
 
-# Individual connector features (passed through to registry)
-http = ["openact-registry/http"]
-postgresql = ["openact-registry/postgresql", "openact-server/postgresql"]
+# Pass-through feature for server authflow only
 authflow = ["openact-server/authflow"]
+

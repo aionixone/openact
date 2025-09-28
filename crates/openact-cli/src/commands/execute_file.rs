@@ -5,7 +5,7 @@ use crate::error::{CliError, CliResult};
 use crate::utils::{read_input_data, write_output_data, ColoredOutput};
 use openact_config::{ConfigLoader, ConfigManager};
 use openact_runtime::{
-    registry_from_records, execute_action, ExecutionOptions, default_feature_flags, records_from_manifest
+    registry_from_records_ext, execute_action, ExecutionOptions, records_from_manifest
 };
 use std::path::Path;
 use std::time::Duration;
@@ -61,12 +61,16 @@ pub async fn execute(
 
     info!("Found action: {}", action_trn.as_str());
 
-    // Build registry from records
-    let feature_flags = default_feature_flags();
-    let registry = registry_from_records(connection_records, action_records, &feature_flags).await
-        .map_err(|e| CliError::RuntimeError(format!("Failed to build registry: {}", e)))?;
+    // Build registry from records using plugin registrars
+    let registry = registry_from_records_ext(
+        connection_records, 
+        action_records, 
+        &[], 
+        &openact_plugins::registrars()
+    ).await
+    .map_err(|e| CliError::RuntimeError(format!("Failed to build registry: {}", e)))?;
 
-    info!("Registry built with {} features", feature_flags.len());
+    info!("Registry built with {} connector plugins", openact_plugins::registrars().len());
 
     // Parse input data
     let input_data = read_input_data(input, input_file)?;

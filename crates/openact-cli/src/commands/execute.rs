@@ -6,16 +6,12 @@ use crate::{
     utils::{format_duration, parse_trn, validate_file_exists, ColoredOutput},
 };
 use openact_registry::{ConnectorRegistry, ExecutionContext, ExecutionResult};
+use openact_plugins as plugins;
 use openact_store::sql_store::SqlStore;
 use serde_json::{json, Value as JsonValue};
 use std::path::Path;
 use tracing::{debug, info};
 
-#[cfg(feature = "http")]
-use openact_registry::HttpFactory;
-#[cfg(feature = "postgresql")]
-use openact_registry::PostgresFactory;
-use std::sync::Arc;
 
 pub struct ExecuteCommand;
 
@@ -40,19 +36,9 @@ impl ExecuteCommand {
         // Create and configure registry
         let mut registry = ConnectorRegistry::new(store.clone(), store.clone());
 
-        // Register HTTP factory if available
-        #[cfg(feature = "http")]
-        {
-            let http_factory = Arc::new(HttpFactory::new());
-            registry.register_connection_factory(http_factory.clone());
-            registry.register_action_factory(http_factory);
-        }
-
-        #[cfg(feature = "postgresql")]
-        {
-            let pg_factory = Arc::new(PostgresFactory::new());
-            registry.register_connection_factory(pg_factory.clone());
-            registry.register_action_factory(pg_factory);
+        // Register connector factories via plugins
+        for registrar in plugins::registrars() {
+            registrar(&mut registry);
         }
 
         // Parse input data

@@ -253,12 +253,10 @@ impl ConfigLoader {
                     })?;
                 connection_kind_by_name.insert(conn_name.clone(), kind.to_string());
 
-                // Build connection config by excluding known outer keys (kind, description)
+                // Build connection config by excluding only outer keys; keep all others (connector-agnostic)
                 let mut config_map = serde_json::Map::new();
                 for (k, v) in conn_obj {
-                    if k == "kind" || k == "description" {
-                        continue;
-                    }
+                    if k == "kind" || k == "description" { continue; }
                     config_map.insert(k.clone(), v.clone());
                 }
 
@@ -314,10 +312,9 @@ impl ConfigLoader {
                     m.insert("statement".to_string(), stmt.clone());
                     JsonValue::Object(m)
                 } else {
-                    // For flat format, collect all non-metadata fields into config_json
+                    // Connector-agnostic: include all non-metadata fields into config_json
                     let mut config_map = serde_json::Map::new();
                     for (key, value) in act_obj {
-                        // Skip metadata fields that shouldn't go into config_json
                         if !matches!(key.as_str(), "connection" | "description" | "mcp_enabled" | "mcp") {
                             config_map.insert(key.clone(), value.clone());
                         }

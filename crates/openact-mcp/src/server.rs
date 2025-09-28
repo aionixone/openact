@@ -22,11 +22,8 @@ use crate::{
 };
 use openact_core::store::{ActionRepository, ConnectionStore};
 use openact_core::{ConnectorKind, Trn};
-#[cfg(feature = "http")]
-use openact_registry::HttpFactory;
-#[cfg(feature = "postgresql")]
-use openact_registry::PostgresFactory;
 use openact_registry::{ConnectorRegistry, ExecutionContext};
+use openact_plugins as plugins;
 
 /// MCP Server
 pub struct McpServer {
@@ -44,16 +41,8 @@ impl McpServer {
         let act_repo = store_arc.as_ref().clone();
         let mut registry = ConnectorRegistry::new(conn_store, act_repo);
 
-        #[cfg(feature = "http")]
-        {
-            registry.register_connection_factory(Arc::new(HttpFactory::new()));
-            registry.register_action_factory(Arc::new(HttpFactory::new()));
-        }
-
-        #[cfg(feature = "postgresql")]
-        {
-            registry.register_connection_factory(Arc::new(PostgresFactory::new()));
-            registry.register_action_factory(Arc::new(PostgresFactory::new()));
+        for registrar in plugins::registrars() {
+            registrar(&mut registry);
         }
 
         Self {

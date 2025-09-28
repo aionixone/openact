@@ -1,9 +1,9 @@
 use crate::{ConnectorError, ConnectorResult};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Runtime representation of a PostgreSQL action.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostgresAction {
     pub statement: String,
     pub parameters: Vec<ActionParameter>,
@@ -60,7 +60,7 @@ struct RawActionParameter {
 }
 
 /// Parameter specification for binding input values.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionParameter {
     pub name: String,
     pub param_type: Option<String>,
