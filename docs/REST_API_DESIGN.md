@@ -106,6 +106,8 @@
   - headers/query/cookies: shallow-merge, precedence `connection < action < input`, `null` deletes key
   - body/auth/timeout: whole-object replacement
   - GET/HEAD ignores body (warning recorded in `metadata.warnings`)
+  - `options.dry_run = true` performs validation only and echoes `{ "dry_run": true, "input": ... }` in the response; a warning (`dry_run=true`) is added to `metadata.warnings`
+  - `options.timeout_ms` is clamped to the governance timeout; requests exceeding the effective deadline return `TIMEOUT`
 - Response (200):
 ```json
 {
@@ -130,7 +132,7 @@
 ```json
 { "action_trn": "trn:openact:default:action/http/httpbin.get@v1", "input": {}, "options": { } }
 ```
-- Response: 同上
+- Response: 同上（支持 `dry_run` 与 `timeout_ms` 行为，与路径执行一致）
 
 ---
 

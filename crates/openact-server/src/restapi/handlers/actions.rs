@@ -81,8 +81,7 @@ pub async fn get_actions(
 
     // Tenant-scope filtering
     records.retain(|r| {
-        r.trn
-            .parse_action()
+        parse_action_trn(&r.trn)
             .map(|c| c.tenant == tenant.as_str())
             .unwrap_or(false)
     });
@@ -176,6 +175,12 @@ pub async fn get_action_schema(
     // Governance allow/deny check
     let tool_name = normalize_action_to_tool_name(&action);
     if !governance.is_tool_allowed(&tool_name) {
+        tracing::warn!(
+            request_id = %req_id,
+            tenant = %tenant.as_str(),
+            tool = %tool_name,
+            "governance denied action schema"
+        );
         let err = ServerError::Forbidden(format!("Action not allowed: {}", tool_name));
         return Err(err.to_http_response(req_id));
     }
@@ -183,11 +188,24 @@ pub async fn get_action_schema(
     // Resolve action to TRN
     let action_trn = if action.starts_with("trn:openact:") {
         let action_trn = Trn::new(action.clone());
-        let components = action_trn
-            .parse_action()
-            .ok_or_else(|| ServerError::InvalidInput("Invalid action TRN".to_string()))
+        let parsed = parse_action_trn(&action_trn)
+            .ok_or_else(|| {
+                tracing::warn!(
+                    request_id = %request_id.0,
+                    tenant = %tenant.as_str(),
+                    action = %action_trn.as_str(),
+                    "invalid action TRN supplied"
+                );
+                ServerError::InvalidInput("Invalid action TRN".to_string())
+            })
             .map_err(|e| e.to_http_response(request_id.0.clone()))?;
-        if components.tenant != tenant.as_str() {
+        if parsed.tenant != tenant.as_str() {
+            tracing::warn!(
+                request_id = %request_id.0,
+                expected_tenant = %tenant.as_str(),
+                action = %action_trn.as_str(),
+                "tenant mismatch for action schema lookup"
+            );
             let err = ServerError::NotFound("Action not found".to_string());
             return Err(err.to_http_response(request_id.0.clone()));
         }
@@ -348,6 +366,12 @@ pub async fn execute_action(
     // Governance: allow/deny
     let tool_name = normalize_action_to_tool_name(&action);
     if !governance.is_tool_allowed(&tool_name) {
+        tracing::warn!(
+            request_id = %req_id,
+            tenant = %tenant.as_str(),
+            tool = %tool_name,
+            "governance denied action execute"
+        );
         let err = ServerError::Forbidden(format!("Action not allowed: {}", tool_name));
         return Err(err.to_http_response(req_id.clone()));
     }
@@ -364,11 +388,24 @@ pub async fn execute_action(
     // Resolve action to TRN if not given in TRN form
     let action_trn = if action.starts_with("trn:openact:") {
         let action_trn = Trn::new(action.clone());
-        let components = action_trn
-            .parse_action()
-            .ok_or_else(|| ServerError::InvalidInput("Invalid action TRN".to_string()))
+        let parsed = parse_action_trn(&action_trn)
+            .ok_or_else(|| {
+                tracing::warn!(
+                    request_id = %req_id,
+                    tenant = %tenant.as_str(),
+                    action = %action_trn.as_str(),
+                    "invalid action TRN supplied"
+                );
+                ServerError::InvalidInput("Invalid action TRN".to_string())
+            })
             .map_err(|e| e.to_http_response(req_id.clone()))?;
-        if components.tenant != tenant.as_str() {
+        if parsed.tenant != tenant.as_str() {
+            tracing::warn!(
+                request_id = %req_id,
+                expected_tenant = %tenant.as_str(),
+                action = %action_trn.as_str(),
+                "tenant mismatch for action execution"
+            );
             let err = ServerError::NotFound("Action not found".to_string());
             return Err(err.to_http_response(req_id.clone()));
         }
@@ -397,8 +434,7 @@ pub async fn execute_action(
             .into_iter()
             .filter(|r| r.name == name)
             .filter(|r| {
-                r.trn
-                    .parse_action()
+                parse_action_trn(&r.trn)
                     .map(|c| c.tenant == tenant.as_str())
                     .unwrap_or(false)
             })
@@ -548,6 +584,12 @@ pub async fn execute_by_trn(
         .unwrap_or_else(|| "unknown.unknown".to_string());
 
     if !governance.is_tool_allowed(&tool_name) {
+        tracing::warn!(
+            request_id = %req_id,
+            tenant = %tenant.as_str(),
+            tool = %tool_name,
+            "governance denied execute_by_trn"
+        );
         let err = ServerError::Forbidden(format!("Action not allowed: {}", tool_name));
         return Err(err.to_http_response(req_id.clone()));
     }
@@ -568,11 +610,24 @@ pub async fn execute_by_trn(
         .ok_or_else(|| ServerError::InvalidInput("Missing field: action_trn".to_string()))
         .map_err(|e| e.to_http_response(req_id.clone()))?;
     let action_trn = Trn::new(trn_str.to_string());
-    let components = action_trn
-        .parse_action()
-        .ok_or_else(|| ServerError::InvalidInput("Invalid action TRN".to_string()))
+    let parsed = parse_action_trn(&action_trn)
+        .ok_or_else(|| {
+            tracing::warn!(
+                request_id = %req_id,
+                tenant = %tenant.as_str(),
+                action = %action_trn.as_str(),
+                "invalid action TRN supplied"
+            );
+            ServerError::InvalidInput("Invalid action TRN".to_string())
+        })
         .map_err(|e| e.to_http_response(req_id.clone()))?;
-    if components.tenant != tenant.as_str() {
+    if parsed.tenant != tenant.as_str() {
+        tracing::warn!(
+            request_id = %req_id,
+            expected_tenant = %tenant.as_str(),
+            action = %action_trn.as_str(),
+            "tenant mismatch for execute_by_trn"
+        );
         let err = ServerError::NotFound("Action not found".to_string());
         return Err(err.to_http_response(req_id.clone()));
     }
@@ -710,8 +765,45 @@ fn normalize_action_to_tool_name(action: &str) -> String {
 /// Convert TRN to tool name "connector.action"
 fn trn_to_tool_name(trn_str: &str) -> String {
     let trn = Trn::new(trn_str.to_string());
-    if let Some(comp) = trn.parse_action() {
+    if let Some(comp) = parse_action_trn(&trn) {
         return format!("{}.{}", comp.connector, comp.name);
     }
     "unknown.unknown".to_string()
+}
+
+struct ParsedActionTrn<'a> {
+    tenant: &'a str,
+    connector: &'a str,
+    name: &'a str,
+    _version: i64,
+}
+
+fn parse_action_trn(trn: &Trn) -> Option<ParsedActionTrn<'_>> {
+    let mut parts = trn.as_str().splitn(4, ':');
+    if parts.next()? != "trn" {
+        return None;
+    }
+    if parts.next()? != "openact" {
+        return None;
+    }
+    let tenant = parts.next()?;
+    let resource_part = parts.next()?;
+    let (resource, version_part) = resource_part.split_once('@')?;
+    let version = version_part.strip_prefix('v')?.parse().ok()?;
+    if !resource.starts_with("action/") {
+        return None;
+    }
+    let remainder = &resource["action/".len()..];
+    let mut segments = remainder.split('/');
+    let connector = segments.next()?;
+    let name = segments.next()?;
+    if segments.next().is_some() {
+        return None;
+    }
+    Some(ParsedActionTrn {
+        tenant,
+        connector,
+        name,
+        _version: version,
+    })
 }
