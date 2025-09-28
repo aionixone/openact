@@ -3072,6 +3072,7 @@ dependencies = [
  "anyhow",
  "axum 0.7.9",
  "jsonschema",
+ "openact-authflow",
  "openact-core",
  "openact-mcp",
  "openact-registry",

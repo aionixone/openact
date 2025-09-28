@@ -9,6 +9,7 @@ openact-mcp = { path = "../openact-mcp" }
 openact-core = { path = "../openact-core" }
 openact-store = { path = "../openact-store" }
 openact-registry = { path = "../openact-registry" }
+openact-authflow = { path = "../openact-authflow", optional = true, features = ["server"] }
 anyhow = "1.0"
 axum = { version = "0.7", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -24,5 +25,6 @@ sha2 = "0.10"
 [features]
 default = ["http"]
 http = ["openact-registry/http"]
+authflow = ["dep:openact-authflow"]
 
 

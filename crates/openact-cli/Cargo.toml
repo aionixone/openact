@@ -13,7 +13,7 @@ openact-store = { path = "../openact-store" }
 openact-config = { path = "../openact-config" }
 openact-registry = { path = "../openact-registry" }
 openact-mcp = { path = "../openact-mcp" }
-openact-server = { path = "../openact-server" }
+openact-server = { path = "../openact-server", features = [] }
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs"] }
 anyhow = "1"
@@ -34,3 +34,4 @@ default = ["http"]
 
 # Individual connector features (passed through to registry)
 http = ["openact-registry/http"]
+authflow = ["openact-server/authflow"]

@@ -10,7 +10,7 @@ use tower::ServiceBuilder;
 
 /// Create REST API router
 pub fn create_router(app_state: AppState, governance: GovernanceConfig) -> Router {
-    Router::new()
+    let base = Router::new()
         .route("/api/v1/kinds", get(super::handlers::kinds::get_kinds))
         .route(
             "/api/v1/actions",
@@ -34,5 +34,27 @@ pub fn create_router(app_state: AppState, governance: GovernanceConfig) -> Route
                 .layer(TenantLayer)
                 .layer(RequestIdLayer),
         )
-        .with_state((app_state, governance))
+        .with_state((app_state.clone(), governance.clone()));
+
+    // Optionally mount authflow router when feature enabled AND runtime flag set
+    #[cfg(feature = "authflow")]
+    let base = {
+        let enable_authflow = std::env::var("OPENACT_ENABLE_AUTHFLOW")
+            .map(|v| v.to_lowercase() == "true" || v == "1")
+            .unwrap_or(true); // Default to enabled when feature is compiled in
+            
+        if enable_authflow {
+            // Build authflow router from the embedded server module (has its own state)
+            let authflow_router = openact_authflow::server::router::create_router();
+            
+            // Mount authflow router directly - axum 0.7 should handle different state types
+            // The authflow routes are already absolute paths, so mount at root
+            base.fallback_service(authflow_router)
+        } else {
+            tracing::info!("AuthFlow feature compiled but disabled by OPENACT_ENABLE_AUTHFLOW");
+            base
+        }
+    };
+
+    base
 }
