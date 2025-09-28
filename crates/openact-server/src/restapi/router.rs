@@ -42,11 +42,11 @@ pub fn create_router(app_state: AppState, governance: GovernanceConfig) -> Route
         let enable_authflow = std::env::var("OPENACT_ENABLE_AUTHFLOW")
             .map(|v| v.to_lowercase() == "true" || v == "1")
             .unwrap_or(true); // Default to enabled when feature is compiled in
-            
+
         if enable_authflow {
             // Build authflow router from the embedded server module (has its own state)
             let authflow_router = openact_authflow::server::router::create_router();
-            
+
             // Mount authflow router directly - axum 0.7 should handle different state types
             // The authflow routes are already absolute paths, so mount at root
             base.fallback_service(authflow_router)
