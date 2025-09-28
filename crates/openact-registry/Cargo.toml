@@ -24,3 +24,4 @@ default = []
 
 # Individual connector features
 http = ["dep:openact-connectors", "openact-connectors/http"]
+postgresql = ["dep:openact-connectors", "openact-connectors/postgresql"]

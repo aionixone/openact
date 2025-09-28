@@ -29,6 +29,13 @@ impl AppState {
             registry.register_action_factory(Arc::new(HttpFactory::new()));
         }
 
+        #[cfg(feature = "postgresql")]
+        {
+            use openact_registry::PostgresFactory;
+            registry.register_connection_factory(Arc::new(PostgresFactory::new()));
+            registry.register_action_factory(Arc::new(PostgresFactory::new()));
+        }
+
         Ok(Self {
             store,
             registry: Arc::new(registry),

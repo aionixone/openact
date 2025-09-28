@@ -14,6 +14,4 @@ pub use manager::{
     ImportOptions, ImportResult, SyncStrategy,
 };
 pub use schema::{ActionConfig, ConfigManifest, ConnectionConfig, ConnectorConfig};
-pub use schema_validator::{
-    ConnectorValidator, HttpValidator, SchemaValidationError, SchemaValidator,
-};
+pub use schema_validator::{ConnectorValidator, SchemaValidationError, SchemaValidator};

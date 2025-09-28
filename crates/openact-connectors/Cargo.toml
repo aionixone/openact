@@ -37,7 +37,7 @@ default = []
 
 # Individual connector features
 http = ["dep:reqwest", "dep:url", "dep:oauth2", "dep:urlencoding", "dep:base64"]
-postgresql = ["dep:sqlx"]
+postgresql = ["dep:sqlx", "dep:url", "dep:urlencoding"]
 mysql = ["dep:sqlx"]
 redis = ["dep:redis"]
 

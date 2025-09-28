@@ -34,4 +34,5 @@ default = ["http"]
 
 # Individual connector features (passed through to registry)
 http = ["openact-registry/http"]
+postgresql = ["openact-registry/postgresql", "openact-server/postgresql"]
 authflow = ["openact-server/authflow"]

@@ -25,6 +25,7 @@ sha2 = "0.10"
 [features]
 default = ["http"]
 http = ["openact-registry/http"]
+postgresql = ["openact-registry/postgresql"]
 authflow = ["dep:openact-authflow"]
 
 [dev-dependencies]

@@ -39,6 +39,7 @@ impl Default for EnvResolver {
                 "APP_".to_string(),
                 "HTTP_".to_string(),
                 "DB_".to_string(),
+                "PG_".to_string(),
                 "LOG_".to_string(),
             ],
             max_depth: 10,

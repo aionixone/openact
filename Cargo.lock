@@ -2517,7 +2517,6 @@ dependencies = [
  "anyhow",
  "axum",
  "openact-config",
- "openact-connectors",
  "openact-core",
  "openact-registry",
  "openact-store",

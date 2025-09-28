@@ -8,8 +8,7 @@ description = "MCP (Model Context Protocol) server for OpenAct"
 # OpenAct core components
 openact-core = { path = "../openact-core" }
 openact-config = { path = "../openact-config" }
-openact-registry = { path = "../openact-registry", features = ["http"] }
-openact-connectors = { path = "../openact-connectors", features = ["http"] }
+openact-registry = { path = "../openact-registry", default-features = false }
 openact-store = { path = "../openact-store" }
 
 # Web server (for HTTP MCP)
@@ -33,7 +32,9 @@ utoipa = { version = "4.0", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
 
 [features]
-default = []
+default = ["http"]
+http = ["openact-registry/http"]
+postgresql = ["openact-registry/postgresql"]
 
 [dev-dependencies]
 tempfile = "3.0"

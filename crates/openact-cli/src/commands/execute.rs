@@ -13,6 +13,8 @@ use tracing::{debug, info};
 
 #[cfg(feature = "http")]
 use openact_registry::HttpFactory;
+#[cfg(feature = "postgresql")]
+use openact_registry::PostgresFactory;
 use std::sync::Arc;
 
 pub struct ExecuteCommand;
@@ -44,6 +46,13 @@ impl ExecuteCommand {
             let http_factory = Arc::new(HttpFactory::new());
             registry.register_connection_factory(http_factory.clone());
             registry.register_action_factory(http_factory);
+        }
+
+        #[cfg(feature = "postgresql")]
+        {
+            let pg_factory = Arc::new(PostgresFactory::new());
+            registry.register_connection_factory(pg_factory.clone());
+            registry.register_action_factory(pg_factory);
         }
 
         // Parse input data

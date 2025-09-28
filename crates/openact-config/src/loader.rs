@@ -307,7 +307,7 @@ impl ConfigLoader {
                     )))?;
 
                 // Build action.config (prefer 'config' object; support 'statement' sugar)
-                let config_json = if let Some(cfg) = act_obj.get("config") {
+                let mut config_json = if let Some(cfg) = act_obj.get("config") {
                     cfg.clone()
                 } else if let Some(stmt) = act_obj.get("statement") {
                     let mut m = serde_json::Map::new();
@@ -316,6 +316,12 @@ impl ConfigLoader {
                 } else {
                     JsonValue::Object(serde_json::Map::new())
                 };
+
+                if let Some(parameters) = act_obj.get("parameters") {
+                    if let JsonValue::Object(ref mut map) = config_json {
+                        map.insert("parameters".to_string(), parameters.clone());
+                    }
+                }
 
                 // Build metadata: mcp_overrides and parameters if present
                 let mut metadata_map: HashMap<String, JsonValue> = HashMap::new();

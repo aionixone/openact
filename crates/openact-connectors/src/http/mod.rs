@@ -9,6 +9,7 @@ pub mod retry_manager;
 pub mod policy_manager;
 pub mod mcp_converter;
 pub mod body_builder;
+pub mod validator;
 
 #[cfg(test)]
 pub mod mcp_integration_demo;
