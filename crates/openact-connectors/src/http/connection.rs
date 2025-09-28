@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 /// Authorization type for HTTP connections
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AuthorizationType {
+    #[serde(rename = "none")]
+    None,
     #[serde(rename = "api_key")]
     ApiKey,
     #[serde(rename = "basic")]
@@ -221,7 +223,10 @@ pub struct HttpConnection {
     
     /// Authorization configuration
     pub authorization: AuthorizationType,
-    pub auth_parameters: AuthParameters,
+    
+    /// Authentication parameters (optional for None authorization type)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_parameters: Option<AuthParameters>,
     
     /// Default HTTP parameters
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -251,14 +256,20 @@ pub struct HttpConnection {
 impl HttpConnection {
     /// Create a new HTTP connection with defaults
     pub fn new(base_url: String, authorization: AuthorizationType) -> Self {
-        Self {
-            base_url,
-            authorization,
-            auth_parameters: AuthParameters {
+        let auth_params = if matches!(authorization, AuthorizationType::None) {
+            None
+        } else {
+            Some(AuthParameters {
                 api_key_auth_parameters: None,
                 basic_auth_parameters: None,
                 oauth_parameters: None,
-            },
+            })
+        };
+        
+        Self {
+            base_url,
+            authorization,
+            auth_parameters: auth_params,
             invocation_http_parameters: None,
             network_config: None,
             timeout_config: None,
@@ -271,6 +282,6 @@ impl HttpConnection {
 
 impl Default for HttpConnection {
     fn default() -> Self {
-        Self::new("http://localhost".to_string(), AuthorizationType::ApiKey)
+        Self::new("http://localhost".to_string(), AuthorizationType::None)
     }
 }

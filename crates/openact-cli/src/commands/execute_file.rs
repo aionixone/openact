@@ -5,7 +5,7 @@ use crate::error::{CliError, CliResult};
 use crate::utils::{read_input_data, write_output_data, ColoredOutput};
 use openact_config::{ConfigLoader, ConfigManager};
 use openact_runtime::{
-    registry_from_manifest, execute_action, ExecutionOptions, default_feature_flags
+    registry_from_records, execute_action, ExecutionOptions, default_feature_flags, records_from_manifest
 };
 use std::path::Path;
 use std::time::Duration;
@@ -44,36 +44,29 @@ pub async fn execute(
 
     info!("Configuration loaded successfully");
 
-    // Build registry from manifest
+    // Convert manifest to records to get the correct TRNs
+    let (connection_records, action_records) = records_from_manifest(manifest.clone()).await
+        .map_err(|e| CliError::RuntimeError(format!("Failed to convert manifest: {}", e)))?;
+
+    // Find the action in the action records and get its TRN
+    let action_trn = action_records.iter()
+        .find(|record| record.name == action_name)
+        .ok_or_else(|| {
+            CliError::ActionNotFound(format!(
+                "Action '{}' not found in configuration file",
+                action_name
+            ))
+        })?
+        .trn.clone();
+
+    info!("Found action: {}", action_trn.as_str());
+
+    // Build registry from records
     let feature_flags = default_feature_flags();
-    let registry = registry_from_manifest(manifest.clone(), &feature_flags).await
+    let registry = registry_from_records(connection_records, action_records, &feature_flags).await
         .map_err(|e| CliError::RuntimeError(format!("Failed to build registry: {}", e)))?;
 
     info!("Registry built with {} features", feature_flags.len());
-
-    // Find the action in the manifest
-    let mut action_trn = None;
-    for (connector_name, connector_config) in &manifest.connectors {
-        for (name, _action_config) in &connector_config.actions {
-            if name == action_name {
-                // Build action TRN using the same format as ConfigLoader
-                action_trn = Some(format!("trn:openact:cli:action/{}/{}", connector_name, name));
-                break;
-            }
-        }
-        if action_trn.is_some() {
-            break;
-        }
-    }
-
-    let action_trn = action_trn.ok_or_else(|| {
-        CliError::ActionNotFound(format!(
-            "Action '{}' not found in configuration file",
-            action_name
-        ))
-    })?;
-
-    info!("Found action: {}", action_trn);
 
     // Parse input data
     let input_data = read_input_data(input, input_file)?;
@@ -94,7 +87,7 @@ pub async fn execute(
 
     let result = execute_action(
         &registry,
-        &action_trn,
+        action_trn.as_str(),
         input_data,
         execution_options,
     ).await

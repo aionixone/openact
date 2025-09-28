@@ -1,6 +1,6 @@
 use super::actions::HttpAction;
 use super::client_cache::ClientCache;
-use super::connection::HttpConnection;
+use super::connection::{HttpConnection, AuthParameters};
 use super::oauth::OAuth2TokenManager;
 use super::timeout_manager::TimeoutManager;
 use super::retry_manager::{RetryManager, RetryDecision};
@@ -123,7 +123,11 @@ impl<S: AuthConnectionStore> HttpExecutor<S> {
             timeout,
             retry_policy,
             auth: connection.authorization.clone(),
-            auth_parameters: connection.auth_parameters.clone(),
+            auth_parameters: connection.auth_parameters.clone().unwrap_or_else(|| AuthParameters {
+                api_key_auth_parameters: None,
+                basic_auth_parameters: None,
+                oauth_parameters: None,
+            }),
             auth_ref: connection.auth_ref.clone(),
         })
     }
@@ -163,7 +167,7 @@ impl<S: AuthConnectionStore> HttpExecutor<S> {
             .apply_authentication(
                 request_builder,
                 &config.auth,
-                &config.auth_parameters,
+                &Some(config.auth_parameters.clone()),
                 config.auth_ref.as_deref(),
             )
             .await?;
@@ -213,95 +217,104 @@ impl<S: AuthConnectionStore> HttpExecutor<S> {
         &self,
         mut builder: reqwest::RequestBuilder,
         auth_type: &super::connection::AuthorizationType,
-        auth_params: &super::connection::AuthParameters,
+        auth_params: &Option<super::connection::AuthParameters>,
         auth_ref: Option<&str>,
     ) -> ConnectorResult<reqwest::RequestBuilder> {
         use super::connection::AuthorizationType;
 
         match auth_type {
+            AuthorizationType::None => {
+                // No authentication required - return builder as-is
+            }
             AuthorizationType::ApiKey => {
-                if let Some(api_key_params) = &auth_params.api_key_auth_parameters {
-                    // Support both header and query parameter API keys
-                    if api_key_params
-                        .api_key_name
-                        .to_lowercase()
-                        .contains("authorization")
-                    {
-                        // If the key name suggests it's an Authorization header
-                        builder = builder.header(
-                            "Authorization",
-                            format!("Bearer {}", api_key_params.api_key_value),
-                        );
-                    } else if api_key_params.api_key_name.to_lowercase().starts_with("x-")
-                        || api_key_params.api_key_name.to_lowercase().contains("key")
-                    {
-                        // Custom header (X-API-Key, etc.)
-                        builder = builder
-                            .header(&api_key_params.api_key_name, &api_key_params.api_key_value);
-                    } else {
-                        // Query parameter
-                        builder = builder.query(&[(
-                            api_key_params.api_key_name.as_str(),
-                            api_key_params.api_key_value.as_str(),
-                        )]);
+                if let Some(auth_params) = auth_params {
+                    if let Some(api_key_params) = &auth_params.api_key_auth_parameters {
+                        // Support both header and query parameter API keys
+                        if api_key_params
+                            .api_key_name
+                            .to_lowercase()
+                            .contains("authorization")
+                        {
+                            // If the key name suggests it's an Authorization header
+                            builder = builder.header(
+                                "Authorization",
+                                format!("Bearer {}", api_key_params.api_key_value),
+                            );
+                        } else if api_key_params.api_key_name.to_lowercase().starts_with("x-")
+                            || api_key_params.api_key_name.to_lowercase().contains("key")
+                        {
+                            // Custom header (X-API-Key, etc.)
+                            builder = builder
+                                .header(&api_key_params.api_key_name, &api_key_params.api_key_value);
+                        } else {
+                            // Query parameter
+                            builder = builder.query(&[(
+                                api_key_params.api_key_name.as_str(),
+                                api_key_params.api_key_value.as_str(),
+                            )]);
+                        }
                     }
                 }
             }
             AuthorizationType::Basic => {
-                if let Some(basic_params) = &auth_params.basic_auth_parameters {
-                    builder =
-                        builder.basic_auth(&basic_params.username, Some(&basic_params.password));
+                if let Some(auth_params) = auth_params {
+                    if let Some(basic_params) = &auth_params.basic_auth_parameters {
+                        builder =
+                            builder.basic_auth(&basic_params.username, Some(&basic_params.password));
+                    }
                 }
             }
             AuthorizationType::OAuth2ClientCredentials
             | AuthorizationType::OAuth2AuthorizationCode => {
                 // For OAuth2, we need to get the actual access token
-                if let Some(oauth_params) = &auth_params.oauth_parameters {
-                    if let Some(auth_ref) = auth_ref {
-                        // Use OAuth2TokenManager to get access token from auth_connections
-                        if let Some(auth_store) = &self.auth_store {
-                            let token_info = self
-                                .get_oauth_token(auth_store, auth_ref, oauth_params, auth_type)
-                                .await?;
-                            builder = builder.bearer_auth(&token_info.access_token);
-                        } else {
-                            return Err(ConnectorError::InvalidConfig(
-                                "OAuth2 authentication requires auth store to be configured"
-                                    .to_string(),
-                            ));
-                        }
-                    } else {
-                        // Fallback for client credentials flow without auth_ref
-                        if matches!(auth_type, AuthorizationType::OAuth2ClientCredentials) {
-                            // For client credentials, we can fetch token directly without auth_ref
+                if let Some(auth_params) = auth_params {
+                    if let Some(oauth_params) = &auth_params.oauth_parameters {
+                        if let Some(auth_ref) = auth_ref {
+                            // Use OAuth2TokenManager to get access token from auth_connections
                             if let Some(auth_store) = &self.auth_store {
                                 let token_info = self
-                                    .client_credentials_flow(auth_store, oauth_params)
+                                    .get_oauth_token(auth_store, auth_ref, oauth_params, auth_type)
                                     .await?;
                                 builder = builder.bearer_auth(&token_info.access_token);
                             } else {
-                                // If no auth store, try to use OAuth parameters directly as bearer token
-                                if oauth_params.client_secret.starts_with("ghp_")
-                                    || oauth_params.client_secret.starts_with("gho_")
-                                {
-                                    // GitHub personal access token pattern
-                                    builder = builder.bearer_auth(&oauth_params.client_secret);
-                                } else {
-                                    return Err(ConnectorError::InvalidConfig(
-                                        "OAuth2 client credentials requires either auth store or a valid access token in client_secret field".to_string()
-                                    ));
-                                }
+                                return Err(ConnectorError::InvalidConfig(
+                                    "OAuth2 authentication requires auth store to be configured"
+                                        .to_string(),
+                                ));
                             }
                         } else {
-                            return Err(ConnectorError::InvalidConfig(
-                                "OAuth2 authorization code flow requires auth_ref".to_string(),
-                            ));
+                            // Fallback for client credentials flow without auth_ref
+                            if matches!(auth_type, AuthorizationType::OAuth2ClientCredentials) {
+                                // For client credentials, we can fetch token directly without auth_ref
+                                if let Some(auth_store) = &self.auth_store {
+                                    let token_info = self
+                                        .client_credentials_flow(auth_store, oauth_params)
+                                        .await?;
+                                    builder = builder.bearer_auth(&token_info.access_token);
+                                } else {
+                                    // If no auth store, try to use OAuth parameters directly as bearer token
+                                    if oauth_params.client_secret.starts_with("ghp_")
+                                        || oauth_params.client_secret.starts_with("gho_")
+                                    {
+                                        // GitHub personal access token pattern
+                                        builder = builder.bearer_auth(&oauth_params.client_secret);
+                                    } else {
+                                        return Err(ConnectorError::InvalidConfig(
+                                            "OAuth2 client credentials requires either auth store or a valid access token in client_secret field".to_string()
+                                        ));
+                                    }
+                                }
+                            } else {
+                                return Err(ConnectorError::InvalidConfig(
+                                    "OAuth2 authorization code flow requires auth_ref".to_string(),
+                                ));
+                            }
                         }
+                    } else {
+                        return Err(ConnectorError::InvalidConfig(
+                            "OAuth2 authentication requires OAuth parameters".to_string(),
+                        ));
                     }
-                } else {
-                    return Err(ConnectorError::InvalidConfig(
-                        "OAuth2 authentication requires OAuth parameters".to_string(),
-                    ));
                 }
             }
         }

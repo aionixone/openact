@@ -98,6 +98,7 @@ pub async fn execute_action(
 
     // Execute the action
     let execution_context = ExecutionContext::new();
+    tracing::debug!("About to execute action with TRN: {}", action_trn_obj.as_str());
     let execution_future = async {
         registry.execute(&action_trn_obj, input, Some(execution_context)).await
             .map_err(|e| RuntimeError::execution(e.to_string()))

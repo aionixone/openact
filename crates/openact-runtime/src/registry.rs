@@ -30,6 +30,8 @@ pub async fn registry_from_records(
     
     // Populate action repository  
     for record in action_records {
+        tracing::debug!("Storing action record: trn={}, connector={}, name={}, config_json={}", 
+            record.trn.as_str(), record.connector.as_str(), record.name, record.config_json);
         action_repository.upsert(&record).await
             .map_err(|e| RuntimeError::registry(format!("Failed to store action: {}", e)))?;
     }

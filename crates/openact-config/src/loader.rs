@@ -314,7 +314,15 @@ impl ConfigLoader {
                     m.insert("statement".to_string(), stmt.clone());
                     JsonValue::Object(m)
                 } else {
-                    JsonValue::Object(serde_json::Map::new())
+                    // For flat format, collect all non-metadata fields into config_json
+                    let mut config_map = serde_json::Map::new();
+                    for (key, value) in act_obj {
+                        // Skip metadata fields that shouldn't go into config_json
+                        if !matches!(key.as_str(), "connection" | "description" | "mcp_enabled" | "mcp") {
+                            config_map.insert(key.clone(), value.clone());
+                        }
+                    }
+                    JsonValue::Object(config_map)
                 };
 
                 if let Some(parameters) = act_obj.get("parameters") {

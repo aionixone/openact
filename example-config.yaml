@@ -8,6 +8,7 @@ connections:
     description: "HTTP bin API connection"
     base_url: "https://httpbin.org"
     timeout: 30
+    authorization: none
 
 actions:
   get_ip:
