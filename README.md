@@ -1,475 +1,747 @@
 # OpenAct
 
-A simple, powerful, and unified API client solution based on AWS Step Functions HTTP Task design principles.
+A powerful, unified API execution platform built with modern Rust architecture featuring **responsibility separation**, **shared execution core**, and **AuthFlow workflow-based authentication**. Designed for seamless API integration with support for multiple entry points (CLI, REST, MCP) while maintaining consistent execution behavior.
 
-## Quick Start
+## 🏗️ Architecture Highlights
 
-### 1. Environment Setup
+- **🔧 Responsibility Separation**: Clear separation between configuration, runtime, and connectors
+- **⚡ Shared Execution Core**: Unified execution path for all entry points (CLI, REST, MCP)
+- **🔐 AuthFlow Workflow Authentication**: Sophisticated workflow-based authentication engine
+  - OAuth2 authorization code flow with callback handling
+  - Token refresh and management automation
+  - Complex multi-step authentication workflows
+  - Secure credential storage and injection
+- **🔌 Plugin Architecture**: Dynamic connector loading and management
+- **🎯 Build Optimization**: Selective compilation with centralized connector control
+- **🚀 Performance Focused**: Zero-dependency runtime core with optimized build times
+- **📦 Modular Design**: Isolated crates for easy testing and maintenance
+
+## 🚀 Quick Start
+
+### 1. Prerequisites
 
 ```bash
+# Rust 1.70+ required
+rustup update
+
 # Clone the repository
 git clone <repo-url>
 cd openact
-
-# Copy environment configuration
-cp .env.example .env
-
-# Create data directory
-mkdir -p data
 ```
 
-### 2. Start the Server
+### 2. Build System
+
+OpenAct uses a modern **xtask-based build system** with **selective connector compilation**:
 
 ```bash
-# Start HTTP API server
-RUST_LOG=info OPENACT_DB_URL=sqlite:./data/openact.db?mode=rwc \
-cargo run --features server --bin openact
+# Build CLI with default connectors
+cargo run -p xtask -- build -p openact-cli
 
-# Start server with OpenAPI documentation
-RUST_LOG=info OPENACT_DB_URL=sqlite:./data/openact.db?mode=rwc \
-cargo run --features server,openapi --bin openact
+# Build server with all connectors
+cargo run -p xtask -- build -p openact-server
+
+# Build with specific connectors only (faster builds)
+echo '[connectors]
+http = true
+postgresql = false' > connectors.toml
+
+cargo run -p xtask -- build -p openact-cli
 ```
 
-The server will start at `http://127.0.0.1:8080`.
+### 3. New CLI Commands
 
-### 📚 API Documentation
+OpenAct now provides two powerful execution modes:
 
-With the `openapi` feature enabled, you can access interactive API documentation:
-
-- **Swagger UI**: `http://127.0.0.1:8080/docs`
-- **OpenAPI JSON**: `http://127.0.0.1:8080/api-docs/openapi.json`
-
-The API documentation includes complete endpoint descriptions, request/response examples, and authentication information.
-
-### 3. Basic Usage
-
-#### Create Connection Configuration
-
+#### File-based Configuration
 ```bash
-# API Key authentication example
-cat > github_connection.json << 'EOF'
-{
-  "trn": "trn:openact:demo:connection/github@v1",
-  "name": "GitHub API",
-  "version": 1,
-  "authorization_type": "api_key",
-  "auth_parameters": {
-    "api_key_auth_parameters": {
-      "api_key_name": "Authorization",
-      "api_key_value": "Bearer ghp_your_token_here"
+# Execute using configuration file
+./target/debug/openact execute-file \
+  --config examples/postgres.yaml \
+  --action list_tables \
+  --format json \
+  --output results.json
+
+# Dry run (validate without executing)
+./target/debug/openact execute-file \
+  --config config.yaml \
+  --action my_action \
+  --dry-run
+```
+
+#### Inline Configuration
+```bash
+# Execute with inline JSON configuration
+./target/debug/openact execute-inline \
+  --config-json '{
+    "connections": {
+      "api": {
+        "kind": "http",
+        "base_url": "https://api.github.com",
+        "authorization": "bearer_token",
+        "token": "${GITHUB_TOKEN}"
+      }
+    },
+    "actions": {
+      "get_user": {
+        "connection": "api",
+        "kind": "http",
+        "method": "GET",
+        "path": "/user"
+      }
     }
-  },
-  "created_at": "2025-01-23T12:00:00Z",
-  "updated_at": "2025-01-23T12:00:00Z"
-}
-EOF
+  }' \
+  --action get_user \
+  --format yaml
+```
 
-# Create connection
-curl -X POST http://127.0.0.1:8080/api/v1/connections \
+### 4. Server Mode (REST API)
+
+```bash
+# Start server with all features (including AuthFlow)
+cargo run -p xtask -- build -p openact-server
+./target/debug/openact-server --port 8080
+
+# Or legacy method
+RUST_LOG=info cargo run --features server,openapi --bin openact
+```
+
+### 5. AuthFlow Authentication Setup
+
+For OAuth2 providers like GitHub, use the built-in AuthFlow templates:
+
+```bash
+# Start OAuth2 flow for GitHub
+curl -X POST http://localhost:8080/auth/oauth2/start \
   -H "Content-Type: application/json" \
-  -d @github_connection.json
+  -d '{
+    "provider": "github",
+    "client_id": "your-github-client-id",
+    "scopes": ["user", "repo"]
+  }'
+
+# AuthFlow will:
+# 1. Generate PKCE challenge
+# 2. Redirect to GitHub authorization
+# 3. Handle callback with code exchange
+# 4. Fetch user information
+# 5. Persist encrypted credentials
+# 6. Provide ready-to-use authenticated connection
 ```
 
-#### Create Task Configuration
+## 🔌 Connector Support
 
-```bash
-# Create a task to fetch user information
-cat > github_user_task.json << 'EOF'
-{
-  "trn": "trn:openact:demo:task/github-user@v1",
-  "name": "Get GitHub User",
-  "version": 1,
-  "connection_trn": "trn:openact:demo:connection/github@v1",
-  "api_endpoint": "https://api.github.com/user",
-  "method": "GET",
-  "headers": {
-    "User-Agent": ["openact/1.0"],
-    "Accept": ["application/vnd.github.v3+json"]
-  },
-  "created_at": "2025-01-23T12:00:00Z",
-  "updated_at": "2025-01-23T12:00:00Z"
-}
-EOF
-
-# Create task
-curl -X POST http://127.0.0.1:8080/api/v1/tasks \
-  -H "Content-Type: application/json" \
-  -d @github_user_task.json
-```
-
-#### Execute Task
-
-```bash
-# Execute using HTTP API
-curl -X POST "http://127.0.0.1:8080/api/v1/tasks/trn%3Aopenact%3Ademo%3Atask%2Fgithub-user%40v1/execute" \
-  -H "Content-Type: application/json" \
-  -d '{}'
-
-# Or use CLI
-cargo run --bin openact-cli -- execute "trn:openact:demo:task/github-user@v1"
-
-# Or use CLI in server mode (proxy to HTTP API)
-cargo run --bin openact-cli -- --server http://127.0.0.1:8080 execute "trn:openact:demo:task/github-user@v1"
-```
-
-## Authentication Types Support
-
-### 1. API Key Authentication
-
-```json
-{
-  "authorization_type": "api_key",
-  "auth_parameters": {
-    "api_key_auth_parameters": {
-      "api_key_name": "X-API-Key",
-      "api_key_value": "your-api-key"
-    }
-  }
-}
-```
-
-### 2. Basic Authentication
-
-```json
-{
-  "authorization_type": "basic",
-  "auth_parameters": {
-    "basic_auth_parameters": {
-      "username": "your-username",
-      "password": "your-password"
-    }
-  }
-}
-```
-
-### 3. OAuth2 Client Credentials
-
-```json
-{
-  "authorization_type": "oauth2_client_credentials",
-  "auth_parameters": {
-    "oauth_parameters": {
-      "client_id": "your-client-id",
-      "client_secret": "your-client-secret",
-      "token_url": "https://api.example.com/oauth/token",
-      "scope": "read write"
-    }
-  }
-}
-```
-
-### 4. OAuth2 Authorization Code (Complex Flow)
-
-For OAuth2 flows that require user authorization, supports complete authorization code flow.
-
-## CLI Usage
-
-### Connection Management
-
-```bash
-# List all connections
-openact-cli connection list
-
-# Create connection
-openact-cli connection upsert connection.json
-
-# Get connection details
-openact-cli connection get "trn:openact:demo:connection/github@v1"
-
-# Delete connection
-openact-cli connection delete "trn:openact:demo:connection/github@v1"
-```
-
-### Task Management
-
-```bash
-# List all tasks
-openact-cli task list
-
-# Create task
-openact-cli task upsert task.json
-
-# Get task details
-openact-cli task get "trn:openact:demo:task/github-user@v1"
-
-# Execute task
-openact-cli execute "trn:openact:demo:task/github-user@v1"
-```
-
-### System Management
-
-```bash
-# View system status
-openact-cli system stats
-
-# Clean up expired data
-openact-cli system cleanup
-```
-
-## Advanced Features
-
-### 🔄 Real-time Event Subscription (WebSocket)
-
-OpenAct supports real-time subscription to AuthFlow execution events via WebSocket:
-
-```javascript
-// Connect to WebSocket
-const ws = new WebSocket('ws://127.0.0.1:8080/ws');
-
-ws.onopen = () => {
-    console.log('Connected to OpenAct events');
-};
-
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    console.log('Event received:', data);
+### HTTP Connector
+```yaml
+connections:
+  github:
+    kind: http
+    base_url: https://api.github.com
+    authorization: bearer_token
+    token: "${GITHUB_TOKEN}"
     
-    // Handle different event types
-    switch (data.type) {
-        case 'execution_state_change':
-            console.log(`Execution ${data.execution_id} changed from ${data.from_state} to ${data.to_state}`);
-            break;
-        case 'workflow_completed':
-            console.log(`Workflow ${data.workflow_id} completed`);
-            break;
+actions:
+  get_repos:
+    connection: github
+    kind: http
+    method: GET
+    path: /user/repos
+    headers:
+      Accept: application/vnd.github.v3+json
+```
+
+### PostgreSQL Connector
+```yaml
+connections:
+  database:
+    kind: postgres
+    host: localhost
+    port: 5432
+    database: mydb
+    user: "${DB_USER}"
+    password: "${DB_PASSWORD}"
+    
+actions:
+  list_tables:
+    connection: database
+    kind: postgres
+    statement: |
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public'
+```
+
+### Adding New Connectors
+
+The plugin architecture makes adding connectors straightforward:
+
+1. **Implement the connector** in `crates/openact-connectors/src/`
+2. **Register the factory** in `crates/openact-plugins/src/lib.rs`
+3. **Enable in build** via `connectors.toml`
+4. **Build and test** with the new connector
+
+## 🧪 Testing & Validation
+
+### Quick Smoke Test
+```bash
+# 1-minute validation of core functionality
+make test-quick
+```
+
+### Comprehensive Testing
+```bash
+# Full test suite with reporting
+make test-all
+
+# Essential tests only
+make test-all-quick
+
+# Specific test categories
+make test-architecture  # Architecture validation
+make test-connectors    # Connector functionality
+make test-performance   # Build and execution performance
+make test-integration   # End-to-end workflows
+```
+
+### Available Test Commands
+| Command | Duration | Purpose |
+|---------|----------|---------|
+| `make test-quick` | ~1 min | Basic smoke test |
+| `make test-architecture` | ~3-5 min | Architecture validation |
+| `make test-connectors` | ~2-3 min | Connector isolation & functionality |
+| `make test-performance` | ~5-10 min | Performance benchmarks |
+| `make test-integration` | ~3-5 min | End-to-end scenarios |
+| `make test-all` | ~15-20 min | Complete validation with reporting |
+
+## 📊 Performance Benefits
+
+The new architecture provides significant performance improvements:
+
+- **🔥 Faster Builds**: Selective connector compilation reduces build times
+- **📦 Smaller Binaries**: Only include required connectors in final binaries
+- **⚡ Runtime Efficiency**: Zero-dependency execution core
+- **🔄 Incremental Compilation**: Improved build caching and parallelization
+- **🧩 Modular Testing**: Independent testing of components
+
+## 🎛️ Configuration Examples
+
+### Basic HTTP API Call
+```yaml
+version: "1.0"
+
+connections:
+  httpbin:
+    kind: http
+    base_url: https://httpbin.org
+    authorization: none
+
+actions:
+  get_ip:
+    connection: httpbin
+    kind: http
+    method: GET
+    path: /ip
+    description: "Get current IP address"
+```
+
+### Database Query
+```yaml
+version: "1.0"
+
+connections:
+  postgres_db:
+    kind: postgres
+    host: localhost
+    port: 5432
+    database: "${DATABASE_NAME}"
+    user: "${DATABASE_USER}"
+    password: "${DATABASE_PASSWORD}"
+
+actions:
+  user_count:
+    connection: postgres_db
+    kind: postgres
+    statement: "SELECT COUNT(*) as user_count FROM users"
+    description: "Count total users"
+```
+
+### Multi-Connector Workflow
+```yaml
+version: "1.0"
+
+connections:
+  api_service:
+    kind: http
+    base_url: https://api.example.com
+    authorization: api_key
+    api_key: "${API_KEY}"
+    
+  analytics_db:
+    kind: postgres
+    host: analytics.example.com
+    port: 5432
+    database: analytics
+    user: "${ANALYTICS_USER}"
+    password: "${ANALYTICS_PASSWORD}"
+
+actions:
+  fetch_metrics:
+    connection: api_service
+    kind: http
+    method: GET
+    path: /metrics/daily
+    
+  store_metrics:
+    connection: analytics_db
+    kind: postgres
+    statement: |
+      INSERT INTO daily_metrics (date, value) 
+      VALUES (CURRENT_DATE, $1)
+```
+
+## 🔐 Authentication Support
+
+OpenAct features a powerful **AuthFlow workflow-based authentication system** that handles complex authentication scenarios automatically.
+
+### AuthFlow Workflow Engine
+
+The AuthFlow system provides sophisticated authentication workflows:
+
+```yaml
+connections:
+  github_oauth:
+    kind: http
+    base_url: https://api.github.com
+    authorization: oauth2_authorization_code
+    authflow:
+      client_id: "${GITHUB_CLIENT_ID}"
+      client_secret: "${GITHUB_CLIENT_SECRET}"
+      authorization_url: https://github.com/login/oauth/authorize
+      token_url: https://github.com/login/oauth/access_token
+      callback_url: http://localhost:8080/auth/callback
+      scopes: ["user", "repo"]
+      # AuthFlow handles the complete OAuth2 flow automatically
+```
+
+### AuthFlow Features
+
+- **🎯 State Machine Workflows**: AWS Step Functions-inspired state machine for complex auth flows
+- **🔄 Automatic Token Refresh**: Handles token expiration and refresh cycles automatically
+- **🌐 OAuth2 Authorization Code Flow**: Complete PKCE-enabled OAuth2 implementation with callback handling
+- **🔒 Secure Storage**: Encrypted credential storage with master key encryption
+- **📝 Template Engine**: Powerful Jinja2-style templating for dynamic workflow configuration
+- **🔧 Multi-step Workflows**: Support for complex authentication sequences with state transitions
+- **⚡ Real-time Events**: WebSocket notifications for authentication state changes
+- **🛡️ PKCE Support**: Proof Key for Code Exchange for enhanced OAuth2 security
+
+### Supported Authentication Methods
+
+#### Simple Authentication
+- **None**: `authorization: none`
+- **API Key**: `authorization: api_key` + `api_key: "your-key"`
+- **Bearer Token**: `authorization: bearer_token` + `token: "your-token"`
+- **Basic Auth**: `authorization: basic` + `username`/`password`
+
+#### OAuth2 Flows (via AuthFlow)
+- **Authorization Code**: Full OAuth2 flow with callback handling
+- **Client Credentials**: Machine-to-machine authentication
+- **Token Refresh**: Automatic token management
+
+#### Advanced AuthFlow Examples
+
+**GitHub OAuth2 Workflow** (Complete State Machine):
+
+AuthFlow uses sophisticated state machine workflows for complex authentication scenarios. Here's the complete GitHub OAuth2 flow:
+
+```json
+{
+  "version": "1.0",
+  "provider": {
+    "name": "github",
+    "providerType": "oauth2",
+    "flows": {
+      "OAuth": {
+        "startAt": "Config",
+        "states": {
+          "Config": {
+            "type": "pass",
+            "assign": {
+              "config": {
+                "authorizeUrl": "https://github.com/login/oauth/authorize",
+                "tokenUrl": "https://github.com/login/oauth/access_token",
+                "redirectUri": "http://localhost:8080/oauth/callback",
+                "defaultScope": "user:email"
+              },
+              "creds": {
+                "client_id": "{% vars.secrets.github_client_id %}",
+                "client_secret": "{% vars.secrets.github_client_secret %}"
+              }
+            },
+            "next": "StartAuth"
+          },
+          "StartAuth": {
+            "type": "task",
+            "resource": "oauth2.authorize_redirect",
+            "parameters": {
+              "authorizeUrl": "{% $config.authorizeUrl %}",
+              "clientId": "{% $creds.client_id %}",
+              "redirectUri": "{% $config.redirectUri %}",
+              "scope": "{% $config.defaultScope %}",
+              "usePKCE": true
+            },
+            "assign": {
+              "auth_state": "{% result.state %}",
+              "code_verifier": "{% result.code_verifier %}"
+            },
+            "next": "AwaitCallback"
+          },
+          "AwaitCallback": {
+            "type": "task",
+            "resource": "oauth2.await_callback",
+            "assign": {
+              "callback_code": "{% result.code %}"
+            },
+            "next": "ExchangeToken"
+          },
+          "ExchangeToken": {
+            "type": "task",
+            "resource": "http.request",
+            "parameters": {
+              "method": "POST",
+              "url": "{% $config.tokenUrl %}",
+              "headers": {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json"
+              },
+              "body": {
+                "grant_type": "authorization_code",
+                "client_id": "{% $creds.client_id %}",
+                "client_secret": "{% $creds.client_secret %}",
+                "redirect_uri": "{% $config.redirectUri %}",
+                "code": "{% $callback_code %}",
+                "code_verifier": "{% $code_verifier %}"
+              }
+            },
+            "assign": {
+              "access_token": "{% result.body.access_token %}",
+              "refresh_token": "{% result.body.refresh_token %}",
+              "token_type": "{% result.body.token_type %}"
+            },
+            "next": "GetUser"
+          },
+          "GetUser": {
+            "type": "task",
+            "resource": "http.request",
+            "parameters": {
+              "method": "GET",
+              "url": "https://api.github.com/user",
+              "headers": {
+                "Authorization": "{% 'Bearer ' & $access_token %}",
+                "Accept": "application/vnd.github+json"
+              }
+            },
+            "assign": {
+              "user_login": "{% result.body.login %}"
+            },
+            "next": "PersistConnection"
+          },
+          "PersistConnection": {
+            "type": "task",
+            "resource": "connection.update",
+            "parameters": {
+              "provider": "github",
+              "user_id": "{% $user_login %}",
+              "access_token": "{% $access_token %}",
+              "refresh_token": "{% $refresh_token %}",
+              "token_type": "{% $token_type %}"
+            },
+            "end": true
+          }
+        }
+      }
     }
-};
-
-ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
-};
-```
-
-**Event Type Examples**:
-- `execution_state_change`: Execution state changes
-- `workflow_completed`: Workflow completion
-- `error_occurred`: Error occurrence
-
-### HTTP Policy Configuration
-
-HTTP policies can be configured at connection or task level:
-
-```json
-{
-  "http_policy": {
-    "denied_headers": ["host", "content-length"],
-    "reserved_headers": ["authorization"],
-    "multi_value_append_headers": ["accept", "cookie"],
-    "drop_forbidden_headers": true,
-    "normalize_header_names": true,
-    "max_header_value_length": 8192,
-    "max_total_headers": 64,
-    "allowed_content_types": ["application/json", "text/plain"]
   }
 }
 ```
 
-### Network Configuration
+**Simplified YAML Configuration for Users**:
+```yaml
+connections:
+  github:
+    kind: http
+    base_url: https://api.github.com
+    authorization: oauth2_authflow
+    authflow:
+      provider: github
+      client_id: "${GITHUB_CLIENT_ID}"
+      client_secret: "${GITHUB_CLIENT_SECRET}"
+      scopes: ["user", "repo"]
+      # AuthFlow handles the complete workflow automatically
 
-```json
-{
-  "network_config": {
-    "proxy_url": "http://proxy.example.com:8080",
-    "tls": {
-      "verify_peer": true,
-      "ca_pem": null,
-      "client_cert_pem": null,
-      "client_key_pem": null,
-      "server_name": null
-    }
-  }
-}
+actions:
+  get_user_repos:
+    connection: github
+    kind: http
+    method: GET
+    path: /user/repos
+    # AuthFlow automatically injects valid OAuth2 token
 ```
 
-### Timeout Configuration
-
-```json
-{
-  "timeout_config": {
-    "connect_ms": 10000,
-    "read_ms": 30000,
-    "total_ms": 60000
-  }
-}
+**API Key with Custom Headers**:
+```yaml
+connections:
+  custom_api:
+    kind: http
+    base_url: https://api.example.com
+    authorization: api_key
+    authflow:
+      api_key: "${API_SECRET}"
+      header_name: "X-Custom-Auth"
+      prefix: "CustomAuth "
 ```
 
-## TRN (Tenant Resource Name) Format
+### AuthFlow REST API
 
-OpenAct uses TRN to uniquely identify resources:
-
-```
-trn:openact:{tenant}:{resource_type}/{resource_id}
-```
-
-Examples:
-- `trn:openact:demo:connection/github@v1`
-- `trn:openact:demo:task/github-user@v1`
-- `trn:openact:prod:connection/slack-webhook@v2`
-
-## Development and Debugging
-
-### Local Development
+The AuthFlow system provides REST endpoints for authentication management:
 
 ```bash
-# Run tests
+# Start OAuth2 flow
+curl -X POST http://localhost:8080/auth/oauth2/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "github",
+    "client_id": "your-client-id",
+    "scopes": ["user", "repo"]
+  }'
+
+# Check authentication status
+curl http://localhost:8080/auth/status/github
+
+# Refresh tokens
+curl -X POST http://localhost:8080/auth/refresh/github
+```
+
+### Database Authentication
+- **Username/Password**: Standard database credentials
+- **Connection String**: Full connection string support
+- **Environment Variables**: Secure credential injection with AuthFlow encryption
+
+## 🏢 Architecture Deep Dive
+
+### Core Components
+
+1. **`openact-runtime`**: Connector-agnostic execution engine
+   - File and inline configuration parsing
+   - Action execution orchestration
+   - Environment variable injection
+   - Data sanitization
+
+2. **`openact-authflow`**: Workflow-based authentication engine
+   - OAuth2 authorization code flow implementation
+   - Automatic token refresh and management
+   - Secure credential storage with encryption
+   - Multi-step authentication workflows
+   - Real-time authentication event streaming
+
+3. **`openact-plugins`**: Dynamic plugin registration system
+   - Connector factory management
+   - Runtime registry building
+   - Type-safe plugin interfaces
+
+4. **`openact-connectors`**: Isolated connector implementations
+   - HTTP client with full feature support
+   - PostgreSQL driver with connection pooling
+   - AuthFlow integration for automatic authentication
+   - Extensible architecture for new connectors
+
+5. **`openact-config`**: Configuration management
+   - YAML/JSON parsing and validation
+   - Schema validation and type safety
+   - Environment variable resolution
+   - AuthFlow configuration support
+
+6. **`openact-store`**: Persistent storage layer
+   - Encrypted credential storage
+   - Authentication state management
+   - Connection and task configuration
+   - SQLite backend with optional encryption
+
+7. **`xtask`**: Optimized build system
+   - Selective connector compilation
+   - Feature flag management
+   - Build optimization
+
+### Execution Flow
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Entry Point   │───▶│  Runtime Core    │───▶│    AuthFlow     │───▶│   Connectors    │
+│  (CLI/REST)     │    │                  │    │                 │    │                 │
+├─────────────────┤    ├──────────────────┤    ├─────────────────┤    ├─────────────────┤
+│ • execute-file  │    │ • Config parsing │    │ • OAuth2 flows  │    │ • HTTP client   │
+│ • execute-inline│    │ • Action execution│    │ • Token refresh │    │ • PostgreSQL    │
+│ • REST endpoint │    │ • Data sanitization│   │ • Secure storage│    │ • Auth injection│
+│ • WebSocket     │    │ • Event streaming│    │ • Multi-step auth│   │ • [extensible]  │
+└─────────────────┘    └──────────────────┘    └─────────────────┘    └─────────────────┘
+                                 │                        │
+                                 ▼                        ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │  Plugin System   │    │ Encrypted Store │
+                       │                  │    │                 │
+                       ├──────────────────┤    ├─────────────────┤
+                       │ • Dynamic loading│    │ • Credentials   │
+                       │ • Factory pattern│    │ • Auth state    │
+                       │ • Type safety    │    │ • Configuration │
+                       └──────────────────┘    └─────────────────┘
+```
+
+## 🛠️ Development Guide
+
+### Building from Source
+```bash
+# Quick development build
+cargo run -p xtask -- build -p openact-cli
+
+# Optimized release build
+cargo run -p xtask -- build -p openact-cli --release
+
+# Build with specific connectors
+echo '[connectors]
+http = true
+postgresql = true' > connectors.toml
+cargo run -p xtask -- build -p openact-cli
+```
+
+### Running Tests
+```bash
+# Unit tests
 cargo test
 
-# Run specific test
-cargo test test_trn_validation
+# Integration tests with real databases/APIs
+cargo test --features integration-tests
 
-# Run server (development mode)
-RUST_LOG=debug cargo run --features server --bin openact
+# Architecture validation
+./scripts/test_architecture.sh
+
+# Performance benchmarks
+./scripts/test_performance.sh
 ```
 
-### Environment Variables
+### Adding New Connectors
 
-Refer to the `.env.example` file for all configurable environment variables.
+1. **Create connector module**:
+   ```bash
+   mkdir -p crates/openact-connectors/src/my_connector
+   ```
 
-## Architecture Design
+2. **Implement factory pattern**:
+   ```rust
+   // crates/openact-connectors/src/my_connector/factory.rs
+   use openact_core::connection::{Connection, ConnectorFactory};
+   
+   pub struct MyConnectorFactory;
+   
+   impl ConnectorFactory for MyConnectorFactory {
+       fn create_connection(&self, config: &serde_json::Value) -> Result<Box<dyn Connection>, Box<dyn std::error::Error>> {
+           // Implementation
+       }
+   }
+   ```
 
-- **Connection Layer**: Manages authentication information and network configuration
-- **Task Layer**: Defines specific API call logic  
-- **Execution Layer**: Handles HTTP requests, authentication injection, retries, etc.
-- **Storage Layer**: SQLite database stores configuration and state
+3. **Register in plugin system**:
+   ```rust
+   // crates/openact-plugins/src/lib.rs
+   #[cfg(feature = "my_connector")]
+   registrars.push(Box::new(openact_connectors::my_connector::MyConnectorRegistrar));
+   ```
 
-## Operations Guide
+4. **Update build configuration**:
+   ```toml
+   # connectors.toml
+   [connectors]
+   my_connector = true
+   ```
 
-### System Monitoring
+## 📚 API Documentation
 
-#### Health Check Endpoints
+When built with server support, OpenAct provides comprehensive API documentation:
 
-```bash
-# Basic health check (no authentication required)
-curl http://localhost:8080/api/v1/system/health
+- **Interactive Swagger UI**: `http://localhost:8080/docs`
+- **OpenAPI Specification**: `http://localhost:8080/api-docs/openapi.json`
 
-# Detailed health information  
-curl http://localhost:8080/health
-```
+## 🐳 Deployment
 
-#### System Statistics
-
-```bash
-# Get detailed system statistics
-curl -H "X-API-Key: your-api-key" \
-     http://localhost:8080/api/v1/system/stats
-```
-
-Information returned includes:
-- Database connections, tasks, authentication connections count
-- Cache hit rate statistics
-- HTTP client pool status
-- Memory usage
-
-#### Prometheus Metrics (requires metrics feature)
-
-```bash
-# Start server with metrics
-cargo run --features server,openapi,metrics --bin openact
-
-# Get Prometheus format metrics
-curl -H "X-API-Key: your-api-key" \
-     http://localhost:8080/api/v1/system/metrics
-```
-
-### Troubleshooting
-
-#### Common Issues Diagnosis
-
-**1. Database Connection Issues**
-```bash
-# Check database file permissions
-ls -la data/openact.db
-
-# Check database integrity
-sqlite3 data/openact.db "PRAGMA integrity_check;"
-```
-
-**2. Authentication Issues**
-```bash
-# Verify connection status
-curl -H "X-API-Key: your-api-key" \
-     "http://localhost:8080/api/v1/connections/{trn}/status"
-
-# Test connection
-curl -X POST -H "X-API-Key: your-api-key" \
-     "http://localhost:8080/api/v1/connections/{trn}/test"
-```
-
-**3. Performance Issues**
-```bash
-# View client pool status
-curl -H "X-API-Key: your-api-key" \
-     http://localhost:8080/api/v1/system/stats | jq '.client_pool'
-
-# System cleanup (clear expired authentications)
-curl -X POST -H "X-API-Key: your-api-key" \
-     http://localhost:8080/api/v1/system/cleanup
-```
-
-#### Logging Configuration
-
-```bash
-# Debug level logging
-RUST_LOG=debug cargo run --features server --bin openact
-
-# JSON format logging (recommended for production)
-OPENACT_LOG_JSON=true RUST_LOG=info cargo run --features server --bin openact
-
-# Module-specific logging
-RUST_LOG=openact::executor=debug,openact::auth=trace cargo run --features server --bin openact
-```
-
-#### Environment Variables Reference
-
-| Variable Name | Default Value | Description |
-|---------------|---------------|-------------|
-| `OPENACT_DB_URL` | `sqlite:./data/openact.db?mode=rwc` | Database connection URL |
-| `OPENACT_MASTER_KEY` | Required | 64-character hexadecimal master key |
-| `OPENACT_LOG_JSON` | `false` | Enable JSON format logging |
-| `OPENACT_METRICS_ENABLED` | `false` | Enable Prometheus metrics |
-| `OPENACT_METRICS_ADDR` | `127.0.0.1:9090` | Metrics service listen address |
-| `RUST_LOG` | `info` | Logging level |
-
-### OpenAPI Documentation Usage
-
-With OpenAPI feature enabled, you can access:
-
-- **Swagger UI**: http://localhost:8080/docs
-- **OpenAPI JSON**: http://localhost:8080/api-docs/openapi.json
-
-Documentation includes:
-- Complete documentation for 27 API endpoints
-- Detailed request/response examples
-- Error handling guidelines and resolution hints
-- Authentication configuration instructions
-
-### Docker Deployment (Recommended)
-
+### Docker
 ```dockerfile
 FROM rust:1.75 as builder
 WORKDIR /app
 COPY . .
-RUN cargo build --release --features server,openapi,metrics
+RUN cargo run -p xtask -- build -p openact-server --release
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/openact /usr/local/bin/
+COPY --from=builder /app/target/release/openact-server /usr/local/bin/
 EXPOSE 8080
-CMD ["openact"]
+CMD ["openact-server"]
 ```
 
+### Environment Variables
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENACT_DB_URL` | `sqlite:./data/openact.db` | Database connection |
+| `OPENACT_LOG_LEVEL` | `info` | Logging level |
+| `OPENACT_PORT` | `8080` | Server port |
+
+## 🔍 Troubleshooting
+
+### Common Issues
+
+**Build Issues**:
 ```bash
-# Build image
-docker build -t openact .
-
-# Run container
-docker run -p 8080:8080 \
-  -e OPENACT_MASTER_KEY=your-64-char-key \
-  -e OPENACT_LOG_JSON=true \
-  -v ./data:/app/data \
-  openact
+# Clean and rebuild
+cargo clean
+cargo run -p xtask -- build -p openact-cli
 ```
 
-## License
+**Performance Issues**:
+```bash
+# Profile build times
+./scripts/test_performance.sh
+
+# Check binary sizes
+ls -lh target/debug/openact*
+```
+
+**Connector Issues**:
+```bash
+# Test specific connector
+cargo test -p openact-connectors --features http
+
+# Validate configuration
+./target/debug/openact execute-file --config config.yaml --action test --dry-run
+```
+
+### Getting Help
+
+1. **Run diagnostics**: `make test-quick`
+2. **Check logs**: `RUST_LOG=debug ./target/debug/openact ...`
+3. **Validate config**: Use `--dry-run` flag
+4. **Review test reports**: Generated by `make test-all`
+
+## 🤝 Contributing
+
+We welcome contributions! The modular architecture makes it easy to:
+
+- Add new connectors
+- Improve performance
+- Enhance testing
+- Update documentation
+
+See our architecture tests in `scripts/` for validation guidelines.
+
+## 📄 License
 
 MIT License
+
+---
+
+**OpenAct** - *Simple, powerful, unified API execution platform*
