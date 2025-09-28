@@ -773,6 +773,43 @@ impl AuthConnectionStore for SqlStore {
                 // Insert only if row does not exist
                 let extra_json =
                     serde_json::to_string(&new_conn.extra).map_err(StoreError::Serialization)?;
+                #[cfg(feature = "encryption")]
+                let (
+                    access_token_encrypted,
+                    access_token_nonce,
+                    refresh_token_encrypted,
+                    refresh_token_nonce,
+                ) = {
+                    if let Some(c) = Crypto::from_env() {
+                        let (ct, nonce) = c.encrypt(new_conn.access_token.as_bytes());
+                        let (rt_ct_opt, rt_nonce) = if let Some(rt) = &new_conn.refresh_token {
+                            let (rt_ct, rt_n) = c.encrypt(rt.as_bytes());
+                            (Some(rt_ct), rt_n)
+                        } else {
+                            (None, String::new())
+                        };
+                        (ct, nonce, rt_ct_opt, rt_nonce)
+                    } else {
+                        (
+                            new_conn.access_token.clone(),
+                            String::new(),
+                            new_conn.refresh_token.clone(),
+                            String::new(),
+                        )
+                    }
+                };
+                #[cfg(not(feature = "encryption"))]
+                let (
+                    access_token_encrypted,
+                    access_token_nonce,
+                    refresh_token_encrypted,
+                    refresh_token_nonce,
+                ) = (
+                    new_conn.access_token.clone(),
+                    String::new(),
+                    new_conn.refresh_token.clone(),
+                    String::new(),
+                );
 
                 let result = sqlx::query(
                     r#"
@@ -780,15 +817,17 @@ impl AuthConnectionStore for SqlStore {
                     (trn, tenant, provider, user_id, access_token_encrypted, access_token_nonce,
                      refresh_token_encrypted, refresh_token_nonce, expires_at, token_type, scope,
                      extra_data_encrypted, extra_data_nonce, created_at, updated_at, version)
-                    VALUES (?, ?, ?, ?, ?, '', ?, '', ?, ?, ?, ?, '', ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
                 "#,
                 )
                 .bind(&new_conn.trn)
                 .bind(&new_conn.tenant)
                 .bind(&new_conn.provider)
                 .bind(&new_conn.user_id)
-                .bind(&new_conn.access_token)
-                .bind(&new_conn.refresh_token)
+                .bind(&access_token_encrypted)
+                .bind(&access_token_nonce)
+                .bind(&refresh_token_encrypted)
+                .bind(&refresh_token_nonce)
                 .bind(&new_conn.expires_at)
                 .bind(&new_conn.token_type)
                 .bind(&new_conn.scope)
@@ -820,5 +859,51 @@ impl AuthConnectionStore for SqlStore {
             .map_err(StoreError::Database)?;
 
         Ok(row.get::<i64, _>("count") as u64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use serde_json::json;
+
+    #[cfg(not(feature = "encryption"))]
+    #[tokio::test]
+    async fn compare_and_swap_insert_stores_plain_tokens_when_encryption_disabled() {
+        let store = SqlStore::new("sqlite::memory:")
+            .await
+            .expect("create store");
+
+        let mut auth = AuthConnection::new("tenant", "provider", "user", "access-token");
+        auth.refresh_token = Some("refresh-token".to_string());
+        auth.scope = Some("scope".to_string());
+        auth.extra = json!({"metadata": 1});
+        auth.expires_at = Some(Utc::now());
+        let trn = auth.trn.clone();
+
+        let inserted = store
+            .compare_and_swap(&trn, None, Some(&auth))
+            .await
+            .expect("compare_and_swap succeeds");
+        assert!(inserted);
+
+        let row = sqlx::query(
+            "SELECT access_token_encrypted, access_token_nonce, refresh_token_encrypted, refresh_token_nonce FROM auth_connections WHERE trn = ?",
+        )
+        .bind(&trn)
+        .fetch_one(&store.pool)
+        .await
+        .expect("row present");
+
+        let at: String = row.get("access_token_encrypted");
+        let at_nonce: String = row.get("access_token_nonce");
+        let rt: Option<String> = row.try_get("refresh_token_encrypted").ok();
+        let rt_nonce: String = row.get("refresh_token_nonce");
+
+        assert_eq!(at, "access-token");
+        assert!(rt.as_deref().is_some_and(|v| v == "refresh-token"));
+        assert!(at_nonce.is_empty());
+        assert!(rt_nonce.is_empty());
     }
 }

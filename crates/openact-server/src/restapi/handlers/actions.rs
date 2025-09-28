@@ -19,6 +19,8 @@ use openact_core::ConnectorKind;
 use openact_mcp::GovernanceConfig;
 use openact_registry::{ExecutionContext, RegistryError};
 use serde_json::{json, Value};
+use std::convert::TryFrom;
+use std::time::Duration;
 use tokio::time::timeout;
 
 /// GET /api/v1/actions
@@ -180,7 +182,16 @@ pub async fn get_action_schema(
 
     // Resolve action to TRN
     let action_trn = if action.starts_with("trn:openact:") {
-        Trn::new(action.clone())
+        let action_trn = Trn::new(action.clone());
+        let components = action_trn
+            .parse_action()
+            .ok_or_else(|| ServerError::InvalidInput("Invalid action TRN".to_string()))
+            .map_err(|e| e.to_http_response(request_id.0.clone()))?;
+        if components.tenant != tenant.as_str() {
+            let err = ServerError::NotFound("Action not found".to_string());
+            return Err(err.to_http_response(request_id.0.clone()));
+        }
+        action_trn
     } else {
         let tool = tool_name;
         let mut parts = tool.splitn(2, '.');
@@ -352,7 +363,16 @@ pub async fn execute_action(
 
     // Resolve action to TRN if not given in TRN form
     let action_trn = if action.starts_with("trn:openact:") {
-        Trn::new(action.clone())
+        let action_trn = Trn::new(action.clone());
+        let components = action_trn
+            .parse_action()
+            .ok_or_else(|| ServerError::InvalidInput("Invalid action TRN".to_string()))
+            .map_err(|e| e.to_http_response(req_id.clone()))?;
+        if components.tenant != tenant.as_str() {
+            let err = ServerError::NotFound("Action not found".to_string());
+            return Err(err.to_http_response(req_id.clone()));
+        }
+        action_trn
     } else {
         // Expect formats like "connector.action" or "connector/action"
         let tool = tool_name; // already normalized to connector.action
@@ -401,14 +421,39 @@ pub async fn execute_action(
     let registry = app_state.registry.clone();
     let input = req.input.clone();
     let do_validate = query.get("validate").map(|v| v == "true").unwrap_or(false);
+    let options = req.options.as_ref();
+    let dry_run = options.and_then(|o| o.dry_run).unwrap_or(false);
+    let effective_timeout = options
+        .and_then(|o| o.timeout_ms)
+        .map(Duration::from_millis)
+        .map(|requested| {
+            if requested < governance.timeout {
+                requested
+            } else {
+                governance.timeout
+            }
+        })
+        .unwrap_or(governance.timeout);
+    let mut warnings: Option<Vec<String>> = None;
+    if dry_run {
+        warnings = Some(vec!["dry_run=true".to_string()]);
+    }
 
     // Optional runtime validation against stored input_schema
-    if do_validate {
-        if let Some(action_record) = ActionRepository::get(app_state.store.as_ref(), &action_trn)
+    let action_record_for_validation = if do_validate || dry_run {
+        let record = ActionRepository::get(app_state.store.as_ref(), &action_trn)
             .await
             .map_err(|e| ServerError::Internal(e.to_string()))
             .map_err(|e| e.to_http_response(req_id.clone()))?
-        {
+            .ok_or_else(|| ServerError::NotFound(format!("Action not found: {}", action_trn)))
+            .map_err(|e| e.to_http_response(req_id.clone()))?;
+        Some(record)
+    } else {
+        None
+    };
+
+    if do_validate {
+        if let Some(action_record) = action_record_for_validation.as_ref() {
             if let Some(schema) = action_record.config_json.get("input_schema") {
                 if let Ok(compiled) = jsonschema::JSONSchema::compile(schema) {
                     if let Err(errors) = compiled.validate(&input) {
@@ -423,6 +468,32 @@ pub async fn execute_action(
             }
         }
     }
+
+    if dry_run {
+        let version_meta = action_record_for_validation
+            .as_ref()
+            .and_then(|record| u32::try_from(record.version).ok());
+        let response = ResponseEnvelope {
+            success: true,
+            data: ExecuteResponse {
+                result: json!({
+                    "dry_run": true,
+                    "input": input,
+                }),
+            },
+            metadata: ResponseMeta {
+                request_id: req_id,
+                execution_time_ms: None,
+                action_trn: Some(action_trn.as_str().to_string()),
+                version: version_meta,
+                warnings,
+            },
+        };
+
+        return Ok(Json(response));
+    }
+
+    drop(action_record_for_validation);
     let fut = async move {
         let ctx = openact_registry::ExecutionContext::new();
         let exec = registry
@@ -434,7 +505,7 @@ pub async fn execute_action(
         })
     };
 
-    let exec_response = match timeout(governance.timeout, fut).await {
+    let exec_response = match timeout(effective_timeout, fut).await {
         Ok(res) => res.map_err(|e| e.to_http_response(req_id.clone()))?,
         Err(_) => {
             let err = ServerError::Timeout;
@@ -461,6 +532,7 @@ pub async fn execute_action(
 pub async fn execute_by_trn(
     State((app_state, governance)): State<(AppState, GovernanceConfig)>,
     Extension(request_id): Extension<RequestId>,
+    Extension(tenant): Extension<Tenant>,
     Query(query): Query<std::collections::HashMap<String, String>>, // validate flag
     Json(req): Json<Value>, // { action_trn, input, options }
 ) -> Result<
@@ -496,33 +568,85 @@ pub async fn execute_by_trn(
         .ok_or_else(|| ServerError::InvalidInput("Missing field: action_trn".to_string()))
         .map_err(|e| e.to_http_response(req_id.clone()))?;
     let action_trn = Trn::new(trn_str.to_string());
+    let components = action_trn
+        .parse_action()
+        .ok_or_else(|| ServerError::InvalidInput("Invalid action TRN".to_string()))
+        .map_err(|e| e.to_http_response(req_id.clone()))?;
+    if components.tenant != tenant.as_str() {
+        let err = ServerError::NotFound("Action not found".to_string());
+        return Err(err.to_http_response(req_id.clone()));
+    }
     let input = req.get("input").cloned().unwrap_or(Value::Null);
     let do_validate = query.get("validate").map(|v| v == "true").unwrap_or(false);
+    let options_value = req.get("options");
+    let dry_run = options_value
+        .and_then(|opts| opts.get("dry_run"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let effective_timeout = options_value
+        .and_then(|opts| opts.get("timeout_ms"))
+        .and_then(|v| v.as_u64())
+        .map(Duration::from_millis)
+        .map(|requested| {
+            if requested < governance.timeout {
+                requested
+            } else {
+                governance.timeout
+            }
+        })
+        .unwrap_or(governance.timeout);
+    let mut warnings: Option<Vec<String>> = None;
+    if dry_run {
+        warnings = Some(vec!["dry_run=true".to_string()]);
+    }
 
     let registry = app_state.registry.clone();
-    let store = app_state.store.clone();
-    let fut = async move {
-        // Optional runtime validation against stored input_schema
+    if dry_run || do_validate {
+        let action_record = ActionRepository::get(app_state.store.as_ref(), &action_trn)
+            .await
+            .map_err(|e| ServerError::Internal(e.to_string()))
+            .map_err(|e| e.to_http_response(req_id.clone()))?
+            .ok_or_else(|| ServerError::NotFound(format!("Action not found: {}", action_trn)))
+            .map_err(|e| e.to_http_response(req_id.clone()))?;
+
         if do_validate {
-            if let Some(action_record) =
-                openact_core::store::ActionRepository::get(store.as_ref(), &action_trn)
-                    .await
-                    .map_err(|e| ServerError::Internal(e.to_string()))?
-            {
-                if let Some(schema) = action_record.config_json.get("input_schema") {
-                    if let Ok(compiled) = jsonschema::JSONSchema::compile(schema) {
-                        if let Err(errors) = compiled.validate(&input) {
-                            let first = errors.into_iter().next();
-                            let msg = first
-                                .map(|e| e.to_string())
-                                .unwrap_or_else(|| "Input does not match schema".to_string());
-                            return Err(ServerError::InvalidInput(msg));
-                        }
+            if let Some(schema) = action_record.config_json.get("input_schema") {
+                if let Ok(compiled) = jsonschema::JSONSchema::compile(schema) {
+                    if let Err(errors) = compiled.validate(&input) {
+                        let first = errors.into_iter().next();
+                        let msg = first
+                            .map(|e| e.to_string())
+                            .unwrap_or_else(|| "Input does not match schema".to_string());
+                        let err = ServerError::InvalidInput(msg);
+                        return Err(err.to_http_response(req_id.clone()));
                     }
                 }
             }
         }
 
+        if dry_run {
+            let response = ResponseEnvelope {
+                success: true,
+                data: ExecuteResponse {
+                    result: json!({
+                        "dry_run": true,
+                        "input": input,
+                    }),
+                },
+                metadata: ResponseMeta {
+                    request_id: req_id,
+                    execution_time_ms: None,
+                    action_trn: Some(action_trn.as_str().to_string()),
+                    version: Some(u32::try_from(action_record.version).unwrap_or_default()),
+                    warnings,
+                },
+            };
+
+            return Ok(Json(response));
+        }
+    }
+
+    let fut = async move {
         let ctx = ExecutionContext::new();
         let exec = registry
             .execute(&action_trn, input, Some(ctx))
@@ -533,7 +657,7 @@ pub async fn execute_by_trn(
         })
     };
 
-    let exec_response = match timeout(governance.timeout, fut).await {
+    let exec_response = match timeout(effective_timeout, fut).await {
         Ok(res) => res.map_err(|e| e.to_http_response(req_id.clone()))?,
         Err(_) => {
             let err = ServerError::Timeout;
