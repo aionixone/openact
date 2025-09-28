@@ -4,7 +4,7 @@ members = [
     "crates/*"
 ]
 default-members = [
-    "crates/openact-legacy"
+    "crates/openact-cli"
 ]
 
 
