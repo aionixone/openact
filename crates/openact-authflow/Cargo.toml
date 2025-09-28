@@ -28,10 +28,18 @@ urlencoding = "2.1"
 hmac = "0.12"
 stepflow_dsl = { package = "stepflow-dsl", path = "../../../stepflow-dsl" }
 openact-core = { path = "../openact-core" }
-openact-store = { path = "../openact-store" }
+openact-store = { path = "../openact-store", features = ["sqlite"] }
+
+# Server dependencies
+axum = { version = "0.7", optional = true, features = ["ws"] }
+tokio-tungstenite = { version = "0.21", optional = true }
+tower = { version = "0.4", optional = true }
+utoipa = { version = "4.2", optional = true, features = ["axum_extras"] }
 
 [features]
-server = []
+server = ["dep:axum", "dep:tokio-tungstenite", "dep:tower"]
+callback = ["server"]
+openapi = ["server", "dep:utoipa"]
 vault = []
 store-encryption = ["openact-store/encryption"]
 

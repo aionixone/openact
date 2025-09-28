@@ -15,10 +15,16 @@
 .env
 .env.*
 
-# Databases
-openact/data/*.db
-openact/data/*.sqlite
-openact/data/*.sqlite3
+# Databases (local artifacts; do not commit)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*-wal
+*-shm
+data/*.db
+data/*.sqlite
+data/*.sqlite3
 
 # Node / JS (if any)
 node_modules/
