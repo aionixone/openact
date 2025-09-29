@@ -126,7 +126,7 @@ Summary:
   Actions updated:     0
 ```
 
-- reuse-if-unchanged（相同配置二次导入时复用 latest 并跳过）
+- reuse-if-unchanged (reuse latest when config is identical; no update)
 ```
 $ cargo run -q -p openact-cli -- import examples/http.yaml --versioning reuse-if-unchanged
 ✓ Import completed
@@ -137,7 +137,7 @@ Summary:
   Actions updated:     0
 ```
 
-- force-rollback（指向最新已存在版本，不生成新版本）
+- force-rollback (point to latest existing version; do not create new)
 ```
 $ cargo run -q -p openact-cli -- import examples/http.yaml --versioning force-rollback
 ✓ Import completed
@@ -260,6 +260,43 @@ make test-connectors    # Connector functionality
   - REST: `POST /api/v1/actions/http.get-ip/execute?version=latest` or `?version=1`.
   - MCP: include `"version": "latest"` or an integer in `tools/call` arguments.
   - Alternatively, pass the fully-qualified `action_trn` with `@vN`.
+
+### MCP tools/call Examples
+
+- Name-based with latest
+```
+curl -s -H 'Content-Type: application/json' \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":"1",
+    "method":"tools/call",
+    "params":{
+      "name":"http.get-ip",
+      "arguments":{
+        "tenant":"default",
+        "version":"latest",
+        "input":{}
+      }
+    }
+  }' http://127.0.0.1:3001/mcp | jq .
+```
+
+- TRN-based (no version argument required)
+```
+curl -s -H 'Content-Type: application/json' \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":"2",
+    "method":"tools/call",
+    "params":{
+      "name":"openact.execute",
+      "arguments":{
+        "action_trn":"trn:openact:default:action/http/get-ip@v1",
+        "input":{}
+      }
+    }
+  }' http://127.0.0.1:3001/mcp | jq .
+```
 make test-performance   # Build and execution performance
 make test-integration   # End-to-end workflows
 ```
