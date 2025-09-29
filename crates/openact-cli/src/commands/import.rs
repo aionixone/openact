@@ -5,7 +5,8 @@ use crate::{
     error::CliResult,
     utils::{validate_file_exists, ColoredOutput},
 };
-use openact_config::{ConfigManager, ImportOptions, ImportResult, VersioningStrategy};
+use openact_config::{ConfigManager, ImportOptions, ImportResult};
+use openact_config::manager::VersioningStrategy;
 use openact_store::sql_store::SqlStore;
 use tracing::info;
 
