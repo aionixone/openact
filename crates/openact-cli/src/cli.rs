@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand};
 use serde_json::Value as JsonValue;
+use clap::ValueEnum;
 
 #[derive(Parser)]
 #[command(
@@ -88,6 +89,15 @@ pub enum Commands {
         /// Dry run - don't actually import
         #[arg(long, help = "Show what would be imported without making changes")]
         dry_run: bool,
+
+        /// Versioning strategy for TRN generation
+        #[arg(
+            long,
+            value_enum,
+            default_value = "always-bump",
+            help = "Versioning: always-bump | reuse-if-unchanged | force-rollback"
+        )]
+        versioning: VersioningArg,
     },
 
     /// Export configuration to file
@@ -255,6 +265,16 @@ pub enum ListResource {
         #[arg(long, value_enum, default_value = "table", help = "Output format")]
         format: OutputFormat,
     },
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum VersioningArg {
+    #[value(name = "always-bump")]
+    AlwaysBump,
+    #[value(name = "reuse-if-unchanged")]
+    ReuseIfUnchanged,
+    #[value(name = "force-rollback")]
+    ForceRollbackToLatest,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]

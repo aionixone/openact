@@ -1,7 +1,7 @@
 //! Configuration import command
 
 use crate::{
-    cli::ConflictResolution,
+    cli::{ConflictResolution, VersioningArg},
     error::CliResult,
     utils::{validate_file_exists, ColoredOutput},
 };
@@ -18,6 +18,7 @@ impl ImportCommand {
         file: &str,
         conflict_resolution: ConflictResolution,
         dry_run: bool,
+        versioning: VersioningArg,
     ) -> CliResult<()> {
         // Validate input file exists
         validate_file_exists(file)?;
@@ -42,7 +43,11 @@ impl ImportCommand {
             force: matches!(conflict_resolution, ConflictResolution::Overwrite),
             validate: true,
             namespace: None,
-            versioning: VersioningStrategy::AlwaysBump,
+            versioning: match versioning {
+                VersioningArg::AlwaysBump => VersioningStrategy::AlwaysBump,
+                VersioningArg::ReuseIfUnchanged => VersioningStrategy::ReuseIfUnchanged,
+                VersioningArg::ForceRollbackToLatest => VersioningStrategy::ForceRollbackToLatest,
+            },
         };
 
         if dry_run {

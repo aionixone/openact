@@ -71,8 +71,8 @@ async fn run() -> CliResult<()> {
 
         Commands::Migrate { force } => MigrateCommand::run(&cli.db_path, force).await,
 
-        Commands::Import { file, conflict_resolution, dry_run } => {
-            ImportCommand::run(&cli.db_path, &file, conflict_resolution, dry_run).await
+        Commands::Import { file, conflict_resolution, dry_run, versioning } => {
+            ImportCommand::run(&cli.db_path, &file, conflict_resolution, dry_run, versioning).await
         }
 
         Commands::Export { file, connectors, include_sensitive, pretty } => {
