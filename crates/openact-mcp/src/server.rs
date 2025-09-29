@@ -528,7 +528,18 @@ impl McpServer {
                 .get("tenant")
                 .and_then(|v| v.as_str())
                 .unwrap_or("default");
-            let version_opt = arguments.get("version").and_then(|v| v.as_i64());
+            // Accept version as number or string "latest". When "latest", treat as None to pick highest.
+            let version_opt = match arguments.get("version") {
+                Some(v) if v.is_i64() => v.as_i64(),
+                Some(v) if v.is_u64() => v.as_u64().and_then(|n| i64::try_from(n).ok()),
+                Some(v) if v.is_string() => {
+                    match v.as_str().unwrap_or("") {
+                        "latest" | "" => None,
+                        s => s.parse::<i64>().ok(),
+                    }
+                }
+                _ => None,
+            };
 
             info!(
                 "Resolving action: {}.{} (tenant={} version={:?})",

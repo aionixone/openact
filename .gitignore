@@ -35,3 +35,6 @@ coverage/
 # Swap / temp
 *.swp
 *.swo
+
+# Vendored references – keep locally, don’t track in git
+rf/
