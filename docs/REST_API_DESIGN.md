@@ -130,12 +130,38 @@
 }
 ```
 
+Examples (curl)
+
+- Execute by name with explicit version
+```
+curl -s -X POST \
+  "http://127.0.0.1:3000/api/v1/actions/http.get-ip/execute?version=1" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":{}}' | jq .
+```
+
+- Execute by name with latest
+```
+curl -s -X POST \
+  "http://127.0.0.1:3000/api/v1/actions/http.get-ip/execute?version=latest" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":{}}' | jq .
+```
+
 #### 4b) POST /api/v1/execute (by TRN)
 - Body:
 ```json
 { "action_trn": "trn:openact:default:action/http/httpbin.get@v1", "input": {}, "options": { } }
 ```
 - Response: 同上（支持 `dry_run` 与 `timeout_ms` 行为，与路径执行一致）
+
+Examples (curl)
+```
+curl -s -X POST \
+  "http://127.0.0.1:3000/api/v1/execute" \
+  -H 'Content-Type: application/json' \
+  -d '{"action_trn":"trn:openact:default:action/http/httpbin.get@v1","input":{}}' | jq .
+```
 
 ---
 

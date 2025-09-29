@@ -113,6 +113,41 @@ Notes
 - Importer writes fully-qualified TRNs with explicit version suffix: `...@vN`.
 - Actions reference the planned versioned connection TRNs within the same import batch for consistency.
 
+Sample outputs
+
+- always-bump
+```
+$ cargo run -q -p openact-cli -- import examples/http.yaml --versioning always-bump
+✓ Import completed
+Summary:
+  Connections created: 1
+  Connections updated: 0
+  Actions created:     2
+  Actions updated:     0
+```
+
+- reuse-if-unchanged（相同配置二次导入时复用 latest 并跳过）
+```
+$ cargo run -q -p openact-cli -- import examples/http.yaml --versioning reuse-if-unchanged
+✓ Import completed
+Summary:
+  Connections created: 0
+  Connections updated: 0
+  Actions created:     0
+  Actions updated:     0
+```
+
+- force-rollback（指向最新已存在版本，不生成新版本）
+```
+$ cargo run -q -p openact-cli -- import examples/http.yaml --versioning force-rollback
+✓ Import completed
+Summary:
+  Connections created: 0
+  Connections updated: 0
+  Actions created:     0
+  Actions updated:     0
+```
+
 ### 4. Server Mode (REST API)
 
 ```bash
