@@ -1,9 +1,9 @@
 //! Application state shared between MCP and REST API
 
-use openact_registry::ConnectorRegistry;
-use std::sync::Arc;
 use openact_plugins as plugins;
+use openact_registry::ConnectorRegistry;
 use openact_store::SqlStore;
+use std::sync::Arc;
 
 /// Shared application state
 #[derive(Clone)]
@@ -27,9 +27,6 @@ impl AppState {
             registrar(&mut registry);
         }
 
-        Ok(Self {
-            store,
-            registry: Arc::new(registry),
-        })
+        Ok(Self { store, registry: Arc::new(registry) })
     }
 }

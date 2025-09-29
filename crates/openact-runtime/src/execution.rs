@@ -1,10 +1,10 @@
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::time::Duration;
 
-use openact_registry::{ConnectorRegistry, ExecutionContext};
-use openact_core::{Trn, sanitize_json_value};
 use crate::error::{RuntimeError, RuntimeResult};
+use openact_core::{sanitize_json_value, Trn};
+use openact_registry::{ConnectorRegistry, ExecutionContext};
 
 /// Options for action execution
 #[derive(Debug, Clone)]
@@ -65,7 +65,7 @@ pub async fn execute_action(
 ) -> RuntimeResult<ExecutionResult> {
     let start_time = std::time::Instant::now();
     let timestamp = chrono::Utc::now();
-    
+
     tracing::info!(
         action_trn = %action_trn,
         dry_run = options.dry_run,
@@ -74,7 +74,7 @@ pub async fn execute_action(
 
     // Convert action_trn to Trn type
     let action_trn_obj = Trn::new(action_trn);
-    
+
     // For dry run, skip existence check and return success
     if options.dry_run {
         tracing::info!(action_trn = %action_trn, "Dry run - validation only");
@@ -95,12 +95,13 @@ pub async fn execute_action(
         });
     }
 
-
     // Execute the action
     let execution_context = ExecutionContext::new();
     tracing::debug!("About to execute action with TRN: {}", action_trn_obj.as_str());
     let execution_future = async {
-        registry.execute(&action_trn_obj, input, Some(execution_context)).await
+        registry
+            .execute(&action_trn_obj, input, Some(execution_context))
+            .await
             .map_err(|e| RuntimeError::execution(e.to_string()))
     };
 
@@ -135,7 +136,7 @@ pub async fn execute_action(
                 duration_ms = duration_ms,
                 "Action execution completed successfully"
             );
-            
+
             Ok(ExecutionResult {
                 success: true,
                 output: Some(output.output),
@@ -155,7 +156,7 @@ pub async fn execute_action(
                 error = %e,
                 "Action execution failed"
             );
-            
+
             Ok(ExecutionResult {
                 success: false,
                 output: None,

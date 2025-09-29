@@ -47,16 +47,11 @@ async fn execute_by_trn_rejects_cross_tenant_action() {
         .unwrap();
 
     let status = response.status();
-    let body_bytes = body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
+    let body_bytes = body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert_eq!(status, StatusCode::NOT_FOUND);
     let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(body_json["success"], serde_json::Value::Bool(false));
-    assert_eq!(
-        body_json["error"]["code"],
-        serde_json::Value::String("NOT_FOUND".into())
-    );
+    assert_eq!(body_json["error"]["code"], serde_json::Value::String("NOT_FOUND".into()));
 }
 
 #[tokio::test]
@@ -85,9 +80,7 @@ async fn execute_action_dry_run_skips_execution_and_returns_metadata() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body_bytes = body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
+    let body_bytes = body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
 
     assert_eq!(body_json["success"], serde_json::Value::Bool(true));
@@ -146,10 +139,8 @@ impl TestContext {
         let executions = Arc::new(AtomicUsize::new(0));
 
         let tenant = "tenant-a".to_string();
-        let connection_trn = Trn::new(format!(
-            "trn:openact:{}:connection/{}/conn@v1",
-            tenant, TEST_CONNECTOR
-        ));
+        let connection_trn =
+            Trn::new(format!("trn:openact:{}:connection/{}/conn@v1", tenant, TEST_CONNECTOR));
         let action_trn = Trn::new(format!(
             "trn:openact:{}:action/{}/{}@v1",
             tenant, TEST_CONNECTOR, TEST_ACTION_NAME
@@ -191,26 +182,19 @@ impl TestContext {
         .await
         .unwrap();
 
-        let actions = ActionRepository::list_by_connector(store.as_ref(), &connector)
-            .await
-            .unwrap();
+        let actions =
+            ActionRepository::list_by_connector(store.as_ref(), &connector).await.unwrap();
         assert_eq!(actions.len(), 1, "expected action to be persisted");
 
         let conn_store = store.as_ref().clone();
         let act_store = store.as_ref().clone();
         let mut registry = openact_registry::ConnectorRegistry::new(conn_store, act_store);
 
-        let factory = Arc::new(TestFactory {
-            executions: executions.clone(),
-            delay: action_delay,
-        });
+        let factory = Arc::new(TestFactory { executions: executions.clone(), delay: action_delay });
         registry.register_connection_factory(factory.clone());
         registry.register_action_factory(factory);
 
-        let app_state = AppState {
-            store,
-            registry: Arc::new(registry),
-        };
+        let app_state = AppState { store, registry: Arc::new(registry) };
         let governance = openact_mcp::GovernanceConfig::new(vec![], vec![], 4, 1);
 
         let router = create_router(app_state, governance);

@@ -23,11 +23,7 @@ pub enum RunOutcome {
 }
 
 fn write_state_result(context: &mut Value, state_name: &str, result: Value) {
-    let states = context
-        .as_object_mut()
-        .unwrap()
-        .entry("states")
-        .or_insert(json!({}));
+    let states = context.as_object_mut().unwrap().entry("states").or_insert(json!({}));
     if !states.is_object() {
         *states = json!({});
     }
@@ -55,15 +51,8 @@ pub fn run_flow(
         let cmd = step_once(dsl, &current, &context)
             .map_err(|e| anyhow!("plan step failed at {current}: {e}"))?;
         match cmd {
-            Command::ExecuteTask {
-                state_name,
-                resource,
-                next_state,
-            } => {
-                println!(
-                    "[engine] executing state={} resource={}",
-                    state_name, resource
-                );
+            Command::ExecuteTask { state_name, resource, next_state } => {
+                println!("[engine] executing state={} resource={}", state_name, resource);
                 // Use stepflow-dsl TaskState fields: parameters / assign / output
                 let mapper = MappingFacade::new();
                 // Construct mapping context from current engine context
@@ -204,11 +193,7 @@ pub fn run_flow(
                     return Err(anyhow!("task state {state_name} has no next and not end"));
                 }
             }
-            Command::Pass {
-                state_name,
-                output,
-                next_state,
-            } => {
+            Command::Pass { state_name, output, next_state } => {
                 // Evaluate assign for Pass state (Config-first pattern)
                 let mapper = MappingFacade::new();
                 let input_root = context.get("input").cloned().unwrap_or_else(|| json!({}));
@@ -266,18 +251,10 @@ pub fn run_flow(
                     return Err(anyhow!("pass state {state_name} has no next and not end"));
                 }
             }
-            Command::Choice {
-                state_name: _,
-                next_state,
-            } => {
+            Command::Choice { state_name: _, next_state } => {
                 current = next_state;
             }
-            Command::Wait {
-                state_name: _,
-                seconds: _,
-                wait_until: _,
-                next_state,
-            } => {
+            Command::Wait { state_name: _, seconds: _, wait_until: _, next_state } => {
                 // Skip actual sleeping in engine core; upper layer can handle timing
                 if let Some(next) = next_state {
                     current = next;
@@ -289,16 +266,8 @@ pub fn run_flow(
                 write_state_result(&mut context, &state_name, output);
                 return Ok(context);
             }
-            Command::Fail {
-                state_name,
-                error,
-                cause,
-            } => {
-                return Err(anyhow!(
-                    "flow failed at {state_name}: {:?} - {:?}",
-                    error,
-                    cause
-                ));
+            Command::Fail { state_name, error, cause } => {
+                return Err(anyhow!("flow failed at {state_name}: {:?} - {:?}", error, cause));
             }
             Command::Map { state_name, .. } | Command::Parallel { state_name, .. } => {
                 return Err(anyhow!(
@@ -325,11 +294,7 @@ pub fn run_until_pause_or_end(
         let cmd = step_once(dsl, &current, &context)
             .map_err(|e| anyhow!("plan step failed at {current}: {e}"))?;
         match cmd {
-            Command::ExecuteTask {
-                state_name,
-                resource: _,
-                next_state,
-            } => {
+            Command::ExecuteTask { state_name, resource: _, next_state } => {
                 // Attempt to execute the task, pause if PAUSE_FOR_CALLBACK error is encountered
 
                 match run_flow(dsl, &state_name, context.clone(), handler, 1) {
@@ -487,9 +452,7 @@ states:
 "#;
         let dsl: WorkflowDSL = serde_yaml::from_str(yaml).unwrap();
         let ctx = json!({});
-        let err = run_flow(&dsl, &dsl.start_at, ctx, &NoopTask, 5)
-            .err()
-            .unwrap();
+        let err = run_flow(&dsl, &dsl.start_at, ctx, &NoopTask, 5).err().unwrap();
         assert!(format!("{}", err).contains("flow failed at F"));
     }
 
@@ -559,19 +522,10 @@ states:
     end: true
 "#;
         let dsl: WorkflowDSL = serde_yaml::from_str(&yaml.replace("{KEY}", key)).unwrap();
-        let out = run_flow(
-            &dsl,
-            &dsl.start_at,
-            json!({}),
-            &crate::actions::DefaultRouter,
-            5,
-        )
-        .unwrap();
+        let out =
+            run_flow(&dsl, &dsl.start_at, json!({}), &crate::actions::DefaultRouter, 5).unwrap();
         let got = out["states"]["H"]["result"]["signature"].as_str().unwrap();
-        assert_eq!(
-            got,
-            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
-        );
+        assert_eq!(got, "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
     }
 
     #[test]
@@ -591,14 +545,8 @@ states:
     end: true
 "#;
         let dsl: WorkflowDSL = serde_yaml::from_str(yaml).unwrap();
-        let out = run_flow(
-            &dsl,
-            &dsl.start_at,
-            json!({}),
-            &crate::actions::DefaultRouter,
-            5,
-        )
-        .unwrap();
+        let out =
+            run_flow(&dsl, &dsl.start_at, json!({}), &crate::actions::DefaultRouter, 5).unwrap();
         let tok = out["states"]["J"]["result"]["token"].as_str().unwrap();
         assert!(tok.split('.').count() == 3);
     }
@@ -678,16 +626,8 @@ states:
             }
         }
 
-        let out = run_flow(
-            &dsl,
-            &dsl.start_at,
-            json!({}),
-            &Router {
-                secret: json_secret,
-            },
-            5,
-        )
-        .unwrap();
+        let out =
+            run_flow(&dsl, &dsl.start_at, json!({}), &Router { secret: json_secret }, 5).unwrap();
         assert_eq!(out["states"]["S"]["result"], json!(123));
     }
 
@@ -735,10 +675,7 @@ states:
             &dsl,
             &dsl.start_at,
             json!({}),
-            &Router {
-                s1: "XYZ".into(),
-                s2: json_secret,
-            },
+            &Router { s1: "XYZ".into(), s2: json_secret },
             5,
         )
         .unwrap();
@@ -750,10 +687,7 @@ states:
     fn http_request_get_and_map() {
         let server = MockServer::start();
         let m = server.mock(|when, then| {
-            when.method(GET)
-                .path("/hello")
-                .query_param("q", "1")
-                .header("X-Api-Key", "k");
+            when.method(GET).path("/hello").query_param("q", "1").header("X-Api-Key", "k");
             then.status(200)
                 .header("Content-Type", "application/json")
                 .json_body(json!({"ok": true, "value": 7}));
@@ -784,10 +718,7 @@ states:
         let dsl: WorkflowDSL = serde_yaml::from_str(&yaml).unwrap();
         let ctx = json!({});
         use crate::actions::HttpTaskHandler;
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let _guard = rt.enter();
         let out = run_flow(&dsl, &dsl.start_at, ctx, &HttpTaskHandler, 10).unwrap();
         m.assert();
@@ -799,13 +730,11 @@ states:
         let server = MockServer::start();
         let m = server.mock(|when, then| {
             when.method(POST).path("/token");
-            then.status(200)
-                .header("Content-Type", "application/json")
-                .json_body(json!({
-                    "access_token": "abc123",
-                    "token_type": "bearer",
-                    "expires_in": 3600
-                }));
+            then.status(200).header("Content-Type", "application/json").json_body(json!({
+                "access_token": "abc123",
+                "token_type": "bearer",
+                "expires_in": 3600
+            }));
         });
 
         let yaml = format!(
@@ -853,19 +782,15 @@ states:
         // token endpoint
         let m_token = server.mock(|when, then| {
             when.method(POST).path("/oauth/token");
-            then.status(200)
-                .header("Content-Type", "application/json")
-                .json_body(json!({
-                    "access_token": "abc123",
-                    "token_type": "bearer",
-                    "expires_in": 3600
-                }));
+            then.status(200).header("Content-Type", "application/json").json_body(json!({
+                "access_token": "abc123",
+                "token_type": "bearer",
+                "expires_in": 3600
+            }));
         });
         // api endpoint requiring bearer
         let m_api = server.mock(|when, then| {
-            when.method(GET)
-                .path("/v1/me")
-                .header("authorization", "Bearer abc123");
+            when.method(GET).path("/v1/me").header("authorization", "Bearer abc123");
             then.status(200)
                 .header("Content-Type", "application/json")
                 .json_body(json!({"id": "u1", "name": "Alice"}));
@@ -921,10 +846,7 @@ states:
         }
 
         let ctx = json!({});
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let _guard = rt.enter();
         let out = run_flow(&dsl, &dsl.start_at, ctx, &Router, 20).unwrap();
         m_token.assert();
@@ -940,13 +862,11 @@ states:
                 .path("/v1/pages/pg_123")
                 .header("authorization", "Bearer test_token")
                 .header("notion-version", "2022-06-28");
-            then.status(200)
-                .header("Content-Type", "application/json")
-                .json_body(json!({
-                    "object": "page",
-                    "id": "pg_123",
-                    "archived": false
-                }));
+            then.status(200).header("Content-Type", "application/json").json_body(json!({
+                "object": "page",
+                "id": "pg_123",
+                "archived": false
+            }));
         });
 
         let base = server.base_url();
@@ -973,10 +893,7 @@ states:
         let dsl: WorkflowDSL = serde_yaml::from_str(&yaml).unwrap();
         let ctx = json!({ "input": { "token": "test_token" } });
         use crate::actions::HttpTaskHandler;
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let _guard = rt.enter();
         let out = run_flow(&dsl, &dsl.start_at, ctx, &HttpTaskHandler, 10).unwrap();
         m.assert();
@@ -987,9 +904,7 @@ states:
     fn inject_bearer_and_call_api() {
         let server = MockServer::start();
         let m = server.mock(|when, then| {
-            when.method(GET)
-                .path("/whoami")
-                .header("authorization", "Bearer tok");
+            when.method(GET).path("/whoami").header("authorization", "Bearer tok");
             then.status(200)
                 .header("Content-Type", "application/json")
                 .json_body(json!({"ok": true}));
@@ -1037,10 +952,7 @@ states:
                 }
             }
         }
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let _guard = rt.enter();
         let out = run_flow(&dsl, &dsl.start_at, json!({}), &Router, 10).unwrap();
         m.assert();
@@ -1101,10 +1013,7 @@ states:
                 }
             }
         }
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let _guard = rt.enter();
         let out = run_flow(&dsl, &dsl.start_at, json!({}), &Router, 10).unwrap();
         m.assert();
@@ -1119,20 +1028,16 @@ states:
         // token refresh endpoint
         let m_token = server.mock(|when, then| {
             when.method(POST).path("/token");
-            then.status(200)
-                .header("Content-Type", "application/json")
-                .json_body(json!({
-                    "access_token": "new_tok",
-                    "token_type": "bearer",
-                    "expires_in": 3600,
-                    "refresh_token": "new_rt"
-                }));
+            then.status(200).header("Content-Type", "application/json").json_body(json!({
+                "access_token": "new_tok",
+                "token_type": "bearer",
+                "expires_in": 3600,
+                "refresh_token": "new_rt"
+            }));
         });
         // API requiring bearer
         let m_api = server.mock(|when, then| {
-            when.method(GET)
-                .path("/secure")
-                .header("authorization", "Bearer new_tok");
+            when.method(GET).path("/secure").header("authorization", "Bearer new_tok");
             then.status(200).json_body(json!({"ok": true}));
         });
 
@@ -1234,9 +1139,7 @@ states:
         );
 
         let dsl: WorkflowDSL = serde_yaml::from_str(&yaml).unwrap();
-        let router = Router {
-            store: store.clone(),
-        };
+        let router = Router { store: store.clone() };
         let out = run_flow(&dsl, &dsl.start_at, json!({}), &router, 50).unwrap();
         m_token.assert();
         m_api.assert();
@@ -1253,9 +1156,7 @@ states:
                 .json_body(json!({"access_token": "new_auto", "token_type": "bearer", "expires_in": 3600, "refresh_token": "nrt"}));
         });
         let m_api = server.mock(|when, then| {
-            when.method(GET)
-                .path("/secure")
-                .header("authorization", "Bearer new_auto");
+            when.method(GET).path("/secure").header("authorization", "Bearer new_auto");
             then.status(200).json_body(json!({"ok": true}));
         });
 
@@ -1266,10 +1167,10 @@ states:
         impl TaskHandler for Router {
             fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value> {
                 match resource {
-                    "ensure.fresh_token" => crate::actions::EnsureFreshTokenHandler {
-                        store: self.store.clone(),
+                    "ensure.fresh_token" => {
+                        crate::actions::EnsureFreshTokenHandler { store: self.store.clone() }
+                            .execute(resource, state_name, ctx)
                     }
-                    .execute(resource, state_name, ctx),
                     "inject.bearer" => {
                         crate::actions::InjectBearerHandler.execute(resource, state_name, ctx)
                     }
@@ -1331,9 +1232,7 @@ states:
         );
 
         let dsl: WorkflowDSL = serde_yaml::from_str(&yaml).unwrap();
-        let router = Router {
-            store: store.clone(),
-        };
+        let router = Router { store: store.clone() };
         let out = run_flow(&dsl, &dsl.start_at, json!({}), &router, 50).unwrap();
         m_token.assert();
         m_api.assert();
@@ -1430,23 +1329,19 @@ states:
         // success
         let m_ok = server.mock(|when, then| {
             when.method(POST).path("/token");
-            then.status(200)
-                .header("Content-Type", "application/json")
-                .json_body(json!({
-                    "access_token": "new_abc",
-                    "token_type": "bearer",
-                    "expires_in": 1800,
-                    "refresh_token": "new_refresh"
-                }));
+            then.status(200).header("Content-Type", "application/json").json_body(json!({
+                "access_token": "new_abc",
+                "token_type": "bearer",
+                "expires_in": 1800,
+                "refresh_token": "new_refresh"
+            }));
         });
         // invalid_grant
         let m_err = server.mock(|when, then| {
             when.method(POST).path("/bad");
-            then.status(400)
-                .header("Content-Type", "application/json")
-                .json_body(json!({
-                    "error": "invalid_grant"
-                }));
+            then.status(400).header("Content-Type", "application/json").json_body(json!({
+                "error": "invalid_grant"
+            }));
         });
 
         // success flow
@@ -1475,18 +1370,9 @@ states:
 
         let dsl_ok: WorkflowDSL = serde_yaml::from_str(&yaml_ok).unwrap();
         use crate::actions::OAuth2RefreshTokenHandler;
-        let out_ok = run_flow(
-            &dsl_ok,
-            &dsl_ok.start_at,
-            json!({}),
-            &OAuth2RefreshTokenHandler,
-            10,
-        )
-        .unwrap();
-        println!(
-            "OAuth2 refresh output: {}",
-            serde_json::to_string_pretty(&out_ok).unwrap()
-        );
+        let out_ok =
+            run_flow(&dsl_ok, &dsl_ok.start_at, json!({}), &OAuth2RefreshTokenHandler, 10).unwrap();
+        println!("OAuth2 refresh output: {}", serde_json::to_string_pretty(&out_ok).unwrap());
         m_ok.assert();
         assert_eq!(out_ok["states"]["R"]["result"]["at"], json!("new_abc"));
         assert_eq!(out_ok["states"]["R"]["result"]["rt"], json!("new_refresh"));
@@ -1512,15 +1398,9 @@ states:
         );
 
         let dsl_err: WorkflowDSL = serde_yaml::from_str(&yaml_err).unwrap();
-        let err = run_flow(
-            &dsl_err,
-            &dsl_err.start_at,
-            json!({}),
-            &OAuth2RefreshTokenHandler,
-            10,
-        )
-        .err()
-        .unwrap();
+        let err = run_flow(&dsl_err, &dsl_err.start_at, json!({}), &OAuth2RefreshTokenHandler, 10)
+            .err()
+            .unwrap();
         m_err.assert();
         assert!(format!("{}", err).contains("oauth2 refresh_token request failed"));
     }
@@ -1533,28 +1413,26 @@ states:
         let server = MockServer::start();
         let m = server.mock(|when, then| {
             when.method(GET).path("/v1/kv/data/myapp/config");
-            then.status(200)
-                .header("Content-Type", "application/json")
-                .json_body(json!({
-                    "request_id": "req-1",
-                    "lease_id": "",
-                    "renewable": false,
-                    "lease_duration": 0,
+            then.status(200).header("Content-Type", "application/json").json_body(json!({
+                "request_id": "req-1",
+                "lease_id": "",
+                "renewable": false,
+                "lease_duration": 0,
+                "data": {
                     "data": {
-                        "data": {
-                            "db": { "password": "s3cr3t" }
-                        },
-                        "metadata": {
-                            "created_time": "2020-01-01T00:00:00Z",
-                            "deletion_time": "",
-                            "destroyed": false,
-                            "version": 1
-                        }
+                        "db": { "password": "s3cr3t" }
                     },
-                    "wrap_info": null,
-                    "warnings": null,
-                    "auth": null
-                }));
+                    "metadata": {
+                        "created_time": "2020-01-01T00:00:00Z",
+                        "deletion_time": "",
+                        "destroyed": false,
+                        "version": 1
+                    }
+                },
+                "wrap_info": null,
+                "warnings": null,
+                "auth": null
+            }));
         });
 
         // Build Vault client pointing to mock server

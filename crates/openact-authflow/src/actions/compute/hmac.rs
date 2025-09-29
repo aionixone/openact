@@ -12,23 +12,12 @@ pub struct ComputeHmacHandler;
 
 impl TaskHandler for ComputeHmacHandler {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
-        let algo = ctx
-            .get("algorithm")
-            .and_then(|v| v.as_str())
-            .unwrap_or("SHA256")
-            .to_uppercase();
+        let algo = ctx.get("algorithm").and_then(|v| v.as_str()).unwrap_or("SHA256").to_uppercase();
 
-        let encoding = ctx
-            .get("encoding")
-            .and_then(|v| v.as_str())
-            .unwrap_or("hex")
-            .to_lowercase();
+        let encoding = ctx.get("encoding").and_then(|v| v.as_str()).unwrap_or("hex").to_lowercase();
 
         // Resolve key (supports vault:// via secrets.resolve default provider)
-        let key_in = ctx
-            .get("key")
-            .and_then(|v| v.as_str())
-            .context("key required")?;
+        let key_in = ctx.get("key").and_then(|v| v.as_str()).context("key required")?;
         let key_str = if key_in.starts_with("vault://") {
             let out = SecretsResolveHandler::<MemorySecretsProvider>::default().execute(
                 "secrets.resolve",
@@ -48,9 +37,7 @@ impl TaskHandler for ComputeHmacHandler {
         // Message bytes
         let msg_bytes: Vec<u8> =
             if let Some(b64) = ctx.get("messageBase64").and_then(|v| v.as_str()) {
-                STANDARD
-                    .decode(b64)
-                    .map_err(|e| anyhow!("invalid base64 message: {e}"))?
+                STANDARD.decode(b64).map_err(|e| anyhow!("invalid base64 message: {e}"))?
             } else if let Some(m) = ctx.get("message").and_then(|v| v.as_str()) {
                 m.as_bytes().to_vec()
             } else {

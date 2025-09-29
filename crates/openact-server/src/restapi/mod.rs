@@ -18,9 +18,8 @@ pub async fn serve(
 ) -> ServerResult<()> {
     let app = create_router(app_state, governance);
 
-    let addr: SocketAddr = addr
-        .parse()
-        .map_err(|e| ServerError::InvalidInput(format!("Invalid address: {}", e)))?;
+    let addr: SocketAddr =
+        addr.parse().map_err(|e| ServerError::InvalidInput(format!("Invalid address: {}", e)))?;
 
     tracing::info!("Starting REST API server on {}", addr);
 

@@ -33,10 +33,7 @@ use crate::server::state::{ExecutionStatus, ServerState};
 })))]
 pub struct CallbackParams {
     /// Authorization code received from the OAuth2 provider
-    #[cfg_attr(
-        all(feature = "server", feature = "openapi"),
-        schema(example = "auth_code_12345")
-    )]
+    #[cfg_attr(all(feature = "server", feature = "openapi"), schema(example = "auth_code_12345"))]
     code: Option<String>,
     /// State parameter to prevent CSRF attacks (should match the one sent in the authorization request)
     #[cfg_attr(
@@ -116,10 +113,7 @@ pub async fn oauth_callback(
             }
             if let Some(obj) = ctx.get("states").and_then(|v| v.as_object()) {
                 for (_name, st) in obj.iter() {
-                    if st
-                        .get("result")
-                        .and_then(|r| r.get("state"))
-                        .and_then(|v| v.as_str())
+                    if st.get("result").and_then(|r| r.get("state")).and_then(|v| v.as_str())
                         == Some(s)
                     {
                         return true;
@@ -133,10 +127,7 @@ pub async fn oauth_callback(
             .iter()
             .filter(|(_, e)| matches!(e.status, ExecutionStatus::Running | ExecutionStatus::Paused))
             .find(|(_, e)| {
-                e.context
-                    .as_ref()
-                    .map(|c| context_matches_state(c, &state_token))
-                    .unwrap_or(false)
+                e.context.as_ref().map(|c| context_matches_state(c, &state_token)).unwrap_or(false)
             })
         {
             k.clone()
@@ -181,9 +172,6 @@ pub async fn oauth_callback(
         execute_workflow(state_clone, eid).await;
     });
 
-    (
-        StatusCode::OK,
-        Json(json!({ "message": "Callback accepted", "executionId": exec_id })),
-    )
+    (StatusCode::OK, Json(json!({ "message": "Callback accepted", "executionId": exec_id })))
         .into_response()
 }

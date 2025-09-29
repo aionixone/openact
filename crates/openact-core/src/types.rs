@@ -378,11 +378,7 @@ mod mcp_types {
 
     impl ProtocolVersion {
         /// Current MCP protocol version
-        pub const CURRENT: ProtocolVersion = ProtocolVersion {
-            major: 2024,
-            minor: 11,
-            patch: 5,
-        };
+        pub const CURRENT: ProtocolVersion = ProtocolVersion { major: 2024, minor: 11, patch: 5 };
     }
 
     impl Default for ProtocolVersion {

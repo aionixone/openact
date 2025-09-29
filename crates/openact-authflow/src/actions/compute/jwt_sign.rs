@@ -24,10 +24,7 @@ impl TaskHandler for ComputeJwtSignHandler {
         }
 
         // Retrieve the key from the context, ensuring it is present
-        let key_in = ctx
-            .get("key")
-            .and_then(|v| v.as_str())
-            .context("key required")?;
+        let key_in = ctx.get("key").and_then(|v| v.as_str()).context("key required")?;
         // Resolve the key material, either from a vault or directly from the input
         let key_material = if key_in.starts_with("vault://") {
             let out = SecretsResolveHandler::<MemorySecretsProvider>::default().execute(

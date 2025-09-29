@@ -187,11 +187,8 @@ mod callback_impl {
         /// Wait for a callback with a specific state
         pub async fn wait_for_callback(&self, state: &str, run_id: &str) -> Result<CallbackParams> {
             let (sender, receiver) = oneshot::channel();
-            let waiter = CallbackWaiter {
-                sender,
-                created_at: Instant::now(),
-                _run_id: run_id.to_string(),
-            };
+            let waiter =
+                CallbackWaiter { sender, created_at: Instant::now(), _run_id: run_id.to_string() };
 
             // Register the waiter
             {
@@ -230,9 +227,8 @@ mod callback_impl {
             println!("📡 Waiting for callback at: {}", self.callback_url());
 
             // 2. Wait for callback
-            let callback_params = self
-                .wait_for_callback(&start_result.state, &start_result.run_id)
-                .await?;
+            let callback_params =
+                self.wait_for_callback(&start_result.state, &start_result.run_id).await?;
 
             // 3. Check for errors
             if let Some(error) = callback_params.error {
@@ -243,31 +239,21 @@ mod callback_impl {
             }
 
             // 4. Extract authorization code
-            let code = callback_params
-                .code
-                .ok_or_else(|| anyhow!("No authorization code received"))?;
+            let code =
+                callback_params.code.ok_or_else(|| anyhow!("No authorization code received"))?;
 
-            let state = callback_params
-                .state
-                .ok_or_else(|| anyhow!("No state received"))?;
+            let state = callback_params.state.ok_or_else(|| anyhow!("No state received"))?;
 
             // 5. Resume the authentication process
             let run_id = start_result.run_id.clone();
-            let resume_args = ResumeObtainArgs {
-                run_id: run_id.clone(),
-                code,
-                state,
-            };
+            let resume_args = ResumeObtainArgs { run_id: run_id.clone(), code, state };
 
             let final_result = resume_obtain(dsl, handler, run_store, resume_args).await?;
             println!("✅ OAuth2 authentication completed!");
 
             // Record minimal result for polling (auth_trn if present)
             let auth_trn = final_result.as_str().map(|s| s.to_string()).or_else(|| {
-                final_result
-                    .get("auth_trn")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
+                final_result.get("auth_trn").and_then(|v| v.as_str()).map(|s| s.to_string())
             });
 
             // Optional: auto-bind to a connection if provided via callback query

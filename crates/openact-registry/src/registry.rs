@@ -26,18 +26,12 @@ pub struct ExecutionContext {
 impl ExecutionContext {
     /// Create a new execution context with generated ID
     pub fn new() -> Self {
-        Self {
-            execution_id: uuid::Uuid::new_v4().to_string(),
-            metadata: HashMap::new(),
-        }
+        Self { execution_id: uuid::Uuid::new_v4().to_string(), metadata: HashMap::new() }
     }
 
     /// Create context with custom execution ID
     pub fn with_id(execution_id: String) -> Self {
-        Self {
-            execution_id,
-            metadata: HashMap::new(),
-        }
+        Self { execution_id, metadata: HashMap::new() }
     }
 
     /// Add metadata to the context
@@ -67,11 +61,7 @@ pub struct ExecutionResult {
 impl ExecutionResult {
     /// Create a simple success result
     pub fn success(output: JsonValue, context: ExecutionContext) -> Self {
-        Self {
-            output,
-            metadata: HashMap::new(),
-            context,
-        }
+        Self { output, metadata: HashMap::new(), context }
     }
 
     /// Add metadata to the result
@@ -139,16 +129,12 @@ impl ConnectorRegistry {
 
         for factory in self.connection_factories.values() {
             let meta = factory.metadata();
-            meta_map
-                .entry(meta.kind.as_str().to_string())
-                .or_insert(meta);
+            meta_map.entry(meta.kind.as_str().to_string()).or_insert(meta);
         }
 
         for factory in self.action_factories.values() {
             let meta = factory.metadata();
-            meta_map
-                .entry(meta.kind.as_str().to_string())
-                .or_insert(meta);
+            meta_map.entry(meta.kind.as_str().to_string()).or_insert(meta);
         }
 
         meta_map.into_values().collect()
@@ -182,9 +168,7 @@ impl ConnectorRegistry {
             .ok_or_else(|| RegistryError::ActionNotFound(action_trn.clone()))?;
 
         // Get connection (from cache or create new)
-        let connection = self
-            .get_or_create_connection(&action_record.connection_trn)
-            .await?;
+        let connection = self.get_or_create_connection(&action_record.connection_trn).await?;
 
         // Create action instance
         let action = self.create_action(&action_record, connection).await?;
@@ -205,10 +189,8 @@ impl ConnectorRegistry {
             "duration_ms".to_string(),
             JsonValue::Number(serde_json::Number::from(duration.as_millis() as u64)),
         );
-        result = result.with_metadata(
-            "action_trn".to_string(),
-            JsonValue::String(action_trn.to_string()),
-        );
+        result = result
+            .with_metadata("action_trn".to_string(), JsonValue::String(action_trn.to_string()));
         result = result.with_metadata(
             "connector".to_string(),
             JsonValue::String(action_record.connector.to_string()),
@@ -269,12 +251,9 @@ impl ConnectorRegistry {
         action_record: &ActionRecord,
         connection: Arc<dyn Connection>,
     ) -> RegistryResult<Box<dyn Action>> {
-        let factory = self
-            .action_factories
-            .get(&action_record.connector)
-            .ok_or_else(|| {
-                RegistryError::ConnectorNotRegistered(action_record.connector.clone())
-            })?;
+        let factory = self.action_factories.get(&action_record.connector).ok_or_else(|| {
+            RegistryError::ConnectorNotRegistered(action_record.connector.clone())
+        })?;
 
         // Convert Arc<dyn Connection> to Box<dyn Connection>
         // This requires cloning the connection data, but factories expect owned connections
@@ -319,24 +298,22 @@ impl ConnectorRegistry {
         action_record: &ActionRecord,
     ) -> RegistryResult<Box<dyn Action>> {
         // Fetch connection record backing this action
-        let connection_record = self
-            .connection_store
-            .get(&action_record.connection_trn)
-            .await?
-            .ok_or_else(|| RegistryError::ConnectionNotFound(action_record.connection_trn.clone()))?;
+        let connection_record =
+            self.connection_store.get(&action_record.connection_trn).await?.ok_or_else(|| {
+                RegistryError::ConnectionNotFound(action_record.connection_trn.clone())
+            })?;
 
         // Create connection instance via its factory
-        let conn_factory = self
-            .connection_factories
-            .get(&connection_record.connector)
-            .ok_or_else(|| RegistryError::ConnectorNotRegistered(connection_record.connector.clone()))?;
+        let conn_factory =
+            self.connection_factories.get(&connection_record.connector).ok_or_else(|| {
+                RegistryError::ConnectorNotRegistered(connection_record.connector.clone())
+            })?;
         let connection = conn_factory.create_connection(&connection_record).await?;
 
         // Create action instance via its factory
-        let act_factory = self
-            .action_factories
-            .get(&action_record.connector)
-            .ok_or_else(|| RegistryError::ConnectorNotRegistered(action_record.connector.clone()))?;
+        let act_factory = self.action_factories.get(&action_record.connector).ok_or_else(|| {
+            RegistryError::ConnectorNotRegistered(action_record.connector.clone())
+        })?;
 
         act_factory.create_action(action_record, connection).await
     }

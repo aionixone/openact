@@ -40,20 +40,16 @@ impl GovernanceConfig {
     pub fn is_tool_allowed(&self, tool_name: &str) -> bool {
         // If allow patterns are specified, tool must match at least one
         if !self.allow_patterns.is_empty() {
-            let allowed = self
-                .allow_patterns
-                .iter()
-                .any(|pattern| self.matches_pattern(tool_name, pattern));
+            let allowed =
+                self.allow_patterns.iter().any(|pattern| self.matches_pattern(tool_name, pattern));
             if !allowed {
                 return false;
             }
         }
 
         // Tool must not match any deny pattern
-        let denied = self
-            .deny_patterns
-            .iter()
-            .any(|pattern| self.matches_pattern(tool_name, pattern));
+        let denied =
+            self.deny_patterns.iter().any(|pattern| self.matches_pattern(tool_name, pattern));
 
         !denied
     }
@@ -155,12 +151,8 @@ mod tests {
 
     #[test]
     fn test_allow_and_deny_combined() {
-        let config = GovernanceConfig::new(
-            vec!["http.*".to_string()],
-            vec!["*.delete".to_string()],
-            10,
-            30,
-        );
+        let config =
+            GovernanceConfig::new(vec!["http.*".to_string()], vec!["*.delete".to_string()], 10, 30);
 
         // Allowed and not denied
         assert!(config.is_tool_allowed("http.get"));

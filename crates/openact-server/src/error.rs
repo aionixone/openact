@@ -56,17 +56,13 @@ impl ServerError {
                 (StatusCode::BAD_REQUEST, "INVALID_INPUT", msg.clone())
             }
             ServerError::NotFound(msg) => (StatusCode::NOT_FOUND, "NOT_FOUND", msg.clone()),
-            ServerError::Timeout => (
-                StatusCode::REQUEST_TIMEOUT,
-                "TIMEOUT",
-                "Request timeout".into(),
-            ),
+            ServerError::Timeout => {
+                (StatusCode::REQUEST_TIMEOUT, "TIMEOUT", "Request timeout".into())
+            }
             ServerError::Forbidden(msg) => (StatusCode::FORBIDDEN, "FORBIDDEN", msg.clone()),
-            ServerError::RateLimit => (
-                StatusCode::TOO_MANY_REQUESTS,
-                "RATE_LIMITED",
-                "Rate limit exceeded".into(),
-            ),
+            ServerError::RateLimit => {
+                (StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED", "Rate limit exceeded".into())
+            }
             ServerError::Internal(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL", msg.clone())
             }
@@ -76,11 +72,7 @@ impl ServerError {
 
         let response = ErrorResponse {
             success: false,
-            error: ErrorDetails {
-                code: code.to_string(),
-                message,
-                details: None,
-            },
+            error: ErrorDetails { code: code.to_string(), message, details: None },
             metadata: super::dto::ResponseMeta {
                 request_id,
                 execution_time_ms: None,

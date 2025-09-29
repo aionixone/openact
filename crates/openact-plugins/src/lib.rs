@@ -22,5 +22,3 @@ pub fn registrars() -> Vec<ConnectorRegistrar> {
 
     list
 }
-
-

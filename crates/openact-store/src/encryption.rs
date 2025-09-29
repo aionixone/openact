@@ -27,9 +27,7 @@ impl Crypto {
     pub fn encrypt(&self, plaintext: &[u8]) -> (String, String) {
         let cipher = Aes256Gcm::new(GenericArray::from_slice(&self.key));
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let ciphertext = cipher
-            .encrypt(&nonce, plaintext)
-            .expect("encryption failure");
+        let ciphertext = cipher.encrypt(&nonce, plaintext).expect("encryption failure");
         (
             general_purpose::STANDARD.encode(ciphertext),
             general_purpose::STANDARD.encode(nonce.as_slice()),

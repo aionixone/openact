@@ -15,9 +15,7 @@ pub struct MemoryConnectionStore {
 
 impl MemoryConnectionStore {
     pub fn new() -> Self {
-        Self {
-            data: Arc::new(RwLock::new(HashMap::new())),
-        }
+        Self { data: Arc::new(RwLock::new(HashMap::new())) }
     }
 }
 
@@ -73,9 +71,7 @@ pub struct MemoryActionRepository {
 
 impl MemoryActionRepository {
     pub fn new() -> Self {
-        Self {
-            data: Arc::new(RwLock::new(HashMap::new())),
-        }
+        Self { data: Arc::new(RwLock::new(HashMap::new())) }
     }
 }
 
@@ -115,11 +111,8 @@ impl ActionRepository for MemoryActionRepository {
 
     async fn list_by_connector(&self, connector: &ConnectorKind) -> CoreResult<Vec<ActionRecord>> {
         let data = self.data.read().await;
-        let results = data
-            .values()
-            .filter(|record| record.connector == *connector)
-            .cloned()
-            .collect();
+        let results =
+            data.values().filter(|record| record.connector == *connector).cloned().collect();
         Ok(results)
     }
 }
@@ -138,17 +131,13 @@ pub struct MemoryAuthConnectionStore {
 
 impl MemoryRunStore {
     pub fn new() -> Self {
-        Self {
-            data: Arc::new(RwLock::new(HashMap::new())),
-        }
+        Self { data: Arc::new(RwLock::new(HashMap::new())) }
     }
 }
 
 impl MemoryAuthConnectionStore {
     pub fn new() -> Self {
-        Self {
-            data: Arc::new(RwLock::new(HashMap::new())),
-        }
+        Self { data: Arc::new(RwLock::new(HashMap::new())) }
     }
 }
 
@@ -328,10 +317,7 @@ mod tests {
         assert_eq!(retrieved.unwrap().name, "get-user");
 
         // Test list by connection
-        let actions = repo
-            .list_by_connection(&record.connection_trn)
-            .await
-            .unwrap();
+        let actions = repo.list_by_connection(&record.connection_trn).await.unwrap();
         assert_eq!(actions.len(), 1);
 
         // Test delete

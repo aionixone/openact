@@ -23,11 +23,7 @@ impl ListCommand {
             ListResource::Connections { connector, format } => {
                 Self::list_connections(&store, connector.as_deref(), format).await
             }
-            ListResource::Actions {
-                connector,
-                connection,
-                format,
-            } => {
+            ListResource::Actions { connector, connection, format } => {
                 Self::list_actions(&store, connector.as_deref(), connection.as_deref(), format)
                     .await
             }
@@ -177,10 +173,7 @@ impl ListCommand {
             return;
         }
 
-        println!(
-            "{}",
-            ColoredOutput::success(&format!("Found {} action(s):", actions.len()))
-        );
+        println!("{}", ColoredOutput::success(&format!("Found {} action(s):", actions.len())));
         println!();
 
         // Table header
@@ -235,23 +228,10 @@ impl ListCommand {
         println!("{}", "-".repeat(40));
 
         for connector in all_connectors {
-            let in_db = if db_connectors.contains(connector) {
-                "✓"
-            } else {
-                "-"
-            };
-            let registered = if registered_connectors.contains(connector) {
-                "✓"
-            } else {
-                "-"
-            };
+            let in_db = if db_connectors.contains(connector) { "✓" } else { "-" };
+            let registered = if registered_connectors.contains(connector) { "✓" } else { "-" };
 
-            println!(
-                "{:<15} {:<12} {:<12}",
-                connector.as_str(),
-                in_db,
-                registered
-            );
+            println!("{:<15} {:<12} {:<12}", connector.as_str(), in_db, registered);
         }
     }
 

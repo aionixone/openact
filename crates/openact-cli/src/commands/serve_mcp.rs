@@ -17,25 +17,15 @@ pub struct ServeMcpArgs {
     pub http: Option<String>,
 
     /// Allow specific tools (patterns supported, e.g., "http.*", "http.get")
-    #[arg(
-        long,
-        help = "Allow specific tools (patterns supported, e.g., 'http.*', 'http.get')"
-    )]
+    #[arg(long, help = "Allow specific tools (patterns supported, e.g., 'http.*', 'http.get')")]
     pub allow: Vec<String>,
 
     /// Deny specific tools (patterns supported, e.g., "http.*", "http.post")
-    #[arg(
-        long,
-        help = "Deny specific tools (patterns supported, e.g., 'http.*', 'http.post')"
-    )]
+    #[arg(long, help = "Deny specific tools (patterns supported, e.g., 'http.*', 'http.post')")]
     pub deny: Vec<String>,
 
     /// Maximum concurrent tool executions
-    #[arg(
-        long,
-        default_value = "10",
-        help = "Maximum concurrent tool executions"
-    )]
+    #[arg(long, default_value = "10", help = "Maximum concurrent tool executions")]
     pub max_concurrency: usize,
 
     /// Tool execution timeout in seconds
@@ -64,7 +54,9 @@ pub async fn execute(args: ServeMcpArgs, db_path: &str) -> Result<()> {
     // Resolve governance patterns (preset has priority if provided)
     let (allow, deny) = match args.preset {
         Some(GovernancePreset::AOnly) => (vec!["openact.execute".to_string()], vec![]),
-        Some(GovernancePreset::BOnly) => (vec!["*".to_string()], vec!["openact.execute".to_string()]),
+        Some(GovernancePreset::BOnly) => {
+            (vec!["*".to_string()], vec!["openact.execute".to_string()])
+        }
         Some(GovernancePreset::Mixed) => (vec!["*".to_string()], vec![]),
         None => (args.allow, args.deny),
     };

@@ -9,10 +9,7 @@ mod tests {
     #[tokio::test]
     async fn test_auth_connection_encryption_roundtrip() {
         // Fixed 32-byte zero key (base64) for reproducibility
-        std::env::set_var(
-            "OPENACT_ENC_KEY",
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        );
+        std::env::set_var("OPENACT_ENC_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
 
         // Use file-backed SQLite so we can verify raw DB content via a separate pool
         let dir = tempfile::tempdir().unwrap();
@@ -34,9 +31,7 @@ mod tests {
 
         // Verify ciphertext stored in DB
         let pool = SqlitePool::connect_with(
-            SqliteConnectOptions::new()
-                .filename(PathBuf::from(&db_path))
-                .create_if_missing(true),
+            SqliteConnectOptions::new().filename(PathBuf::from(&db_path)).create_if_missing(true),
         )
         .await
         .unwrap();
@@ -56,13 +51,7 @@ mod tests {
 
         assert_ne!(at_ct, "tok_123", "access token should be encrypted");
         assert!(!at_nonce.is_empty(), "nonce should be set for access token");
-        assert!(
-            rt_ct.is_some(),
-            "refresh token ciphertext should be present"
-        );
-        assert!(
-            !rt_nonce.is_empty(),
-            "nonce should be set for refresh token"
-        );
+        assert!(rt_ct.is_some(), "refresh token ciphertext should be present");
+        assert!(!rt_nonce.is_empty(), "nonce should be set for refresh token");
     }
 }

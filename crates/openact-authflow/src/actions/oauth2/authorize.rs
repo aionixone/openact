@@ -11,11 +11,7 @@ pub struct OAuth2AuthorizeRedirectHandler;
 
 // Generate a random alphanumeric string of length n
 fn rand_string(n: usize) -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(n)
-        .map(char::from)
-        .collect()
+    rand::thread_rng().sample_iter(&Alphanumeric).take(n).map(char::from).collect()
 }
 
 // Generate a PKCE code challenge from a code verifier
@@ -29,18 +25,12 @@ fn pkce(code_verifier: &str) -> String {
 impl TaskHandler for OAuth2AuthorizeRedirectHandler {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
         // Extract necessary fields from the context
-        let authorize = ctx
-            .get("authorizeUrl")
-            .and_then(|v| v.as_str())
-            .context("authorizeUrl required")?;
-        let client_id = ctx
-            .get("clientId")
-            .and_then(|v| v.as_str())
-            .context("clientId required")?;
-        let redirect_uri = ctx
-            .get("redirectUri")
-            .and_then(|v| v.as_str())
-            .context("redirectUri required")?;
+        let authorize =
+            ctx.get("authorizeUrl").and_then(|v| v.as_str()).context("authorizeUrl required")?;
+        let client_id =
+            ctx.get("clientId").and_then(|v| v.as_str()).context("clientId required")?;
+        let redirect_uri =
+            ctx.get("redirectUri").and_then(|v| v.as_str()).context("redirectUri required")?;
         let scope = ctx.get("scope").and_then(|v| v.as_str()).unwrap_or("");
         let use_pkce = ctx.get("usePKCE").and_then(|v| v.as_bool()).unwrap_or(true);
         let state = ctx
@@ -176,20 +166,13 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
         }
 
         let expected = find_expected_state(ctx);
-        println!(
-            "[await_cb] state validation: returned={:?}, expected={:?}",
-            returned, expected
-        );
+        println!("[await_cb] state validation: returned={:?}, expected={:?}", returned, expected);
 
         // Validate the state only if an explicit expected_state is found
         if let (Some(r), Some(e)) = (returned, expected) {
             if r != e {
                 println!("[await_cb] state mismatch: returned={}, expected={}", r, e);
-                return Err(anyhow::anyhow!(
-                    "state mismatch: returned={}, expected={}",
-                    r,
-                    e
-                ));
+                return Err(anyhow::anyhow!("state mismatch: returned={}, expected={}", r, e));
             }
             println!("[await_cb] state validation passed");
         } else {
@@ -198,10 +181,8 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
 
         // Prepare the output JSON
         let mut out = json!({ "code": code });
-        if let Some(v) = ctx
-            .get("expected_pkce")
-            .and_then(|o| o.get("code_verifier"))
-            .and_then(|v| v.as_str())
+        if let Some(v) =
+            ctx.get("expected_pkce").and_then(|o| o.get("code_verifier")).and_then(|v| v.as_str())
         {
             out["code_verifier"] = Value::String(v.to_string());
         }

@@ -64,41 +64,24 @@ async fn run() -> CliResult<()> {
                 max_concurrency,
                 timeout_secs,
             );
-            let cfg = openact_server::ServeConfig {
-                rest_addr: rest,
-                mcp_http_addr: mcp_http,
-                mcp_stdio,
-            };
-            openact_server::serve_unified(app_state, governance, cfg)
-                .await
-                .map_err(|e| e.into())
+            let cfg =
+                openact_server::ServeConfig { rest_addr: rest, mcp_http_addr: mcp_http, mcp_stdio };
+            openact_server::serve_unified(app_state, governance, cfg).await.map_err(|e| e.into())
         }
 
         Commands::Migrate { force } => MigrateCommand::run(&cli.db_path, force).await,
 
-        Commands::Import {
-            file,
-            conflict_resolution,
-            dry_run,
-        } => ImportCommand::run(&cli.db_path, &file, conflict_resolution, dry_run).await,
+        Commands::Import { file, conflict_resolution, dry_run } => {
+            ImportCommand::run(&cli.db_path, &file, conflict_resolution, dry_run).await
+        }
 
-        Commands::Export {
-            file,
-            connectors,
-            include_sensitive,
-            pretty,
-        } => ExportCommand::run(&cli.db_path, &file, connectors, include_sensitive, pretty).await,
+        Commands::Export { file, connectors, include_sensitive, pretty } => {
+            ExportCommand::run(&cli.db_path, &file, connectors, include_sensitive, pretty).await
+        }
 
         Commands::List { resource } => ListCommand::run(&cli.db_path, resource).await,
 
-        Commands::Execute {
-            action_trn,
-            input,
-            input_file,
-            format,
-            output,
-            show_metadata,
-        } => {
+        Commands::Execute { action_trn, input, input_file, format, output, show_metadata } => {
             ExecuteCommand::run(
                 &cli.db_path,
                 &action_trn,
@@ -193,13 +176,7 @@ mod tests {
         ])
         .unwrap();
 
-        if let Commands::Execute {
-            action_trn,
-            input,
-            show_metadata,
-            ..
-        } = cli.command
-        {
+        if let Commands::Execute { action_trn, input, show_metadata, .. } = cli.command {
             assert_eq!(action_trn, "trn:openact:test:action/http/get-user");
             assert_eq!(input, Some(r#"{"id": 123}"#.to_string()));
             assert!(show_metadata);

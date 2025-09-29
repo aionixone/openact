@@ -61,11 +61,7 @@ pub struct JsonRpcError {
 
 impl JsonRpcError {
     pub fn new(code: i32, message: String) -> Self {
-        Self {
-            code,
-            message,
-            data: None,
-        }
+        Self { code, message, data: None }
     }
 
     pub fn with_data(mut self, data: Value) -> Self {
@@ -96,20 +92,10 @@ impl JsonRpcError {
 
 /// Create a successful JSON-RPC response
 pub fn success_response(id: Option<RequestId>, result: Value) -> JsonRpcResponse {
-    JsonRpcResponse {
-        jsonrpc: JSONRPC_VERSION.to_string(),
-        result: Some(result),
-        error: None,
-        id,
-    }
+    JsonRpcResponse { jsonrpc: JSONRPC_VERSION.to_string(), result: Some(result), error: None, id }
 }
 
 /// Create an error JSON-RPC response
 pub fn error_response(id: Option<RequestId>, error: JsonRpcError) -> JsonRpcResponse {
-    JsonRpcResponse {
-        jsonrpc: JSONRPC_VERSION.to_string(),
-        result: None,
-        error: Some(error),
-        id,
-    }
+    JsonRpcResponse { jsonrpc: JSONRPC_VERSION.to_string(), result: None, error: Some(error), id }
 }

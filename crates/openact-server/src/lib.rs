@@ -55,16 +55,12 @@ pub async fn serve_unified(
     if let Some(addr) = cfg.rest_addr.clone() {
         let st = app_state.clone();
         let gv = governance.clone();
-        tasks.push(tokio::spawn(
-            async move { restapi::serve(st, gv, &addr).await },
-        ));
+        tasks.push(tokio::spawn(async move { restapi::serve(st, gv, &addr).await }));
     }
     if let Some(addr) = cfg.mcp_http_addr.clone() {
         let st = app_state.clone();
         let gv = governance.clone();
-        tasks.push(tokio::spawn(
-            async move { mcp::serve_http(st, gv, &addr).await },
-        ));
+        tasks.push(tokio::spawn(async move { mcp::serve_http(st, gv, &addr).await }));
     }
     if cfg.mcp_stdio {
         let st = app_state.clone();
@@ -74,15 +70,12 @@ pub async fn serve_unified(
 
     // If no services configured, return error
     if tasks.is_empty() {
-        return Err(ServerError::InvalidInput(
-            "No services configured to run".to_string(),
-        ));
+        return Err(ServerError::InvalidInput("No services configured to run".to_string()));
     }
 
     // Wait for any task to finish with error, or all to complete
     for t in tasks {
-        t.await
-            .map_err(|e| ServerError::Internal(format!("Join error: {}", e)))??;
+        t.await.map_err(|e| ServerError::Internal(format!("Join error: {}", e)))??;
     }
     Ok(())
 }

@@ -5,7 +5,7 @@ use crate::error::{CliError, CliResult};
 use crate::utils::{read_input_data, write_output_data, ColoredOutput};
 use openact_config::{ConfigLoader, ConfigManager};
 use openact_runtime::{
-    registry_from_records_ext, execute_action, ExecutionOptions, records_from_manifest
+    execute_action, records_from_manifest, registry_from_records_ext, ExecutionOptions,
 };
 use std::path::Path;
 use std::time::Duration;
@@ -23,7 +23,7 @@ pub async fn execute(
     timeout: u64,
 ) -> CliResult<()> {
     info!("Loading configuration from file: {}", config_file);
-    
+
     // Load configuration file
     let config_path = Path::new(config_file);
     if !config_path.exists() {
@@ -34,22 +34,27 @@ pub async fn execute(
     }
 
     let loader = ConfigLoader::new("cli");
-    let manifest = loader.load_from_file(config_path).await
+    let manifest = loader
+        .load_from_file(config_path)
+        .await
         .map_err(|e| CliError::ConfigError(format!("Failed to load config: {}", e)))?;
 
     // Validate configuration
     let config_manager = ConfigManager::new();
-    config_manager.validate(&manifest)
+    config_manager
+        .validate(&manifest)
         .map_err(|e| CliError::ConfigError(format!("Invalid configuration: {}", e)))?;
 
     info!("Configuration loaded successfully");
 
     // Convert manifest to records to get the correct TRNs
-    let (connection_records, action_records) = records_from_manifest(manifest.clone()).await
+    let (connection_records, action_records) = records_from_manifest(manifest.clone())
+        .await
         .map_err(|e| CliError::RuntimeError(format!("Failed to convert manifest: {}", e)))?;
 
     // Find the action in the action records and get its TRN
-    let action_trn = action_records.iter()
+    let action_trn = action_records
+        .iter()
         .find(|record| record.name == action_name)
         .ok_or_else(|| {
             CliError::ActionNotFound(format!(
@@ -57,17 +62,19 @@ pub async fn execute(
                 action_name
             ))
         })?
-        .trn.clone();
+        .trn
+        .clone();
 
     info!("Found action: {}", action_trn.as_str());
 
     // Build registry from records using plugin registrars
     let registry = registry_from_records_ext(
-        connection_records, 
-        action_records, 
-        &[], 
-        &openact_plugins::registrars()
-    ).await
+        connection_records,
+        action_records,
+        &[],
+        &openact_plugins::registrars(),
+    )
+    .await
     .map_err(|e| CliError::RuntimeError(format!("Failed to build registry: {}", e)))?;
 
     info!("Registry built with {} connector plugins", openact_plugins::registrars().len());
@@ -89,18 +96,14 @@ pub async fn execute(
         info!("Running in dry-run mode");
     }
 
-    let result = execute_action(
-        &registry,
-        action_trn.as_str(),
-        input_data,
-        execution_options,
-    ).await
-    .map_err(|e| CliError::RuntimeError(format!("Execution failed: {}", e)))?;
+    let result = execute_action(&registry, action_trn.as_str(), input_data, execution_options)
+        .await
+        .map_err(|e| CliError::RuntimeError(format!("Execution failed: {}", e)))?;
 
     // Handle result
     if result.success {
         info!("Action executed successfully");
-        
+
         let output_data = if show_metadata {
             serde_json::json!({
                 "success": result.success,
@@ -111,33 +114,34 @@ pub async fn execute(
             result.output.unwrap_or(serde_json::json!({}))
         };
 
-        let formatted_output = format.format_json(&output_data)
+        let formatted_output = format
+            .format_json(&output_data)
             .map_err(|e| CliError::SerializationError(e.to_string()))?;
 
         if let Some(output_file) = output {
             write_output_data(&output_file, &formatted_output)?;
-            println!("{} Output written to: {}", 
-                ColoredOutput::success("✓"), output_file);
+            println!("{} Output written to: {}", ColoredOutput::success("✓"), output_file);
         } else {
             println!("{}", formatted_output);
         }
     } else {
         let error_msg = result.error.unwrap_or_else(|| "Unknown error".to_string());
         warn!("Action execution failed: {}", error_msg);
-        
+
         if show_metadata {
             let error_data = serde_json::json!({
                 "success": result.success,
                 "error": error_msg,
                 "metadata": result.metadata
             });
-            let formatted_output = format.format_json(&error_data)
+            let formatted_output = format
+                .format_json(&error_data)
                 .map_err(|e| CliError::SerializationError(e.to_string()))?;
             println!("{}", formatted_output);
         } else {
             println!("{} {}", ColoredOutput::error("Error:"), error_msg);
         }
-        
+
         return Err(CliError::ExecutionError(error_msg));
     }
 
@@ -147,8 +151,8 @@ pub async fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn test_execute_file_missing_config() {
@@ -162,8 +166,9 @@ mod tests {
             false,
             false,
             30,
-        ).await;
-        
+        )
+        .await;
+
         assert!(result.is_err());
     }
 
@@ -171,7 +176,7 @@ mod tests {
     async fn test_execute_file_invalid_config() {
         let mut temp_file = NamedTempFile::new().unwrap();
         write!(temp_file, "invalid yaml content [").unwrap();
-        
+
         let result = execute(
             temp_file.path().to_str().unwrap(),
             "test-action",
@@ -182,8 +187,9 @@ mod tests {
             false,
             false,
             30,
-        ).await;
-        
+        )
+        .await;
+
         assert!(result.is_err());
     }
 }

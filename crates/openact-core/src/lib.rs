@@ -5,7 +5,9 @@ pub mod types;
 
 // Re-export commonly used types
 pub use error::{CoreError, CoreResult};
-pub use sanitization::{sanitize_json_value, sanitize_string, create_debug_string, is_sensitive_field};
+pub use sanitization::{
+    create_debug_string, is_sensitive_field, sanitize_json_value, sanitize_string,
+};
 pub use types::{
     ActionRecord, ActionTrnComponents, AuthConnection, Checkpoint, ConnectionRecord,
     ConnectionTrnComponents, ConnectorKind, McpOverrides, Trn, TrnComponents,

@@ -50,18 +50,12 @@ impl Default for EnvResolver {
 impl EnvResolver {
     /// Create a new resolver with specified allowed prefixes
     pub fn new(allowed_prefixes: Vec<String>) -> Self {
-        Self {
-            allowed_prefixes,
-            max_depth: 10,
-        }
+        Self { allowed_prefixes, max_depth: 10 }
     }
 
     /// Create a resolver with no restrictions (allow all variables)
     pub fn unrestricted() -> Self {
-        Self {
-            allowed_prefixes: vec![],
-            max_depth: 10,
-        }
+        Self { allowed_prefixes: vec![], max_depth: 10 }
     }
 
     /// Set maximum recursion depth
@@ -299,10 +293,7 @@ mod tests {
         let input = json!("${FORBIDDEN_VAR}");
         let result = resolver.resolve(&input);
 
-        assert!(matches!(
-            result,
-            Err(EnvResolverError::VarNotWhitelisted(_, _))
-        ));
+        assert!(matches!(result, Err(EnvResolverError::VarNotWhitelisted(_, _))));
     }
 
     #[test]

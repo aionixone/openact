@@ -80,11 +80,8 @@ pub async fn get_actions(
     }
 
     // Tenant-scope filtering
-    records.retain(|r| {
-        parse_action_trn(&r.trn)
-            .map(|c| c.tenant == tenant.as_str())
-            .unwrap_or(false)
-    });
+    records
+        .retain(|r| parse_action_trn(&r.trn).map(|c| c.tenant == tenant.as_str()).unwrap_or(false));
 
     // Text query filter
     if let Some(q) = &query.q {
@@ -109,11 +106,7 @@ pub async fn get_actions(
     let page_size = query.page_size.max(1);
     let start = ((page - 1) as usize) * (page_size as usize);
     let end = (start + page_size as usize).min(records.len());
-    let page_slice = if start < records.len() {
-        &records[start..end]
-    } else {
-        &[]
-    };
+    let page_slice = if start < records.len() { &records[start..end] } else { &[] };
 
     // Map to summaries
     let actions: Vec<ActionSummary> = page_slice
@@ -229,9 +222,7 @@ pub async fn get_action_schema(
         .map_err(|e| e.to_http_response(request_id.0.clone()))?;
         records.retain(|r| r.name == name);
         records.retain(|r| {
-            parse_action_trn(&r.trn)
-                .map(|c| c.tenant == tenant.as_str())
-                .unwrap_or(false)
+            parse_action_trn(&r.trn).map(|c| c.tenant == tenant.as_str()).unwrap_or(false)
         });
         if records.is_empty() {
             let err = ServerError::NotFound(format!(
@@ -261,10 +252,7 @@ pub async fn get_action_schema(
         ActionSchemaResponse {
             input_schema: json!({ "type": "object", "additionalProperties": true }),
             output_schema: json!({ "type": "object", "additionalProperties": true }),
-            examples: vec![Example {
-                name: "default".to_string(),
-                input: json!({}),
-            }],
+            examples: vec![Example { name: "default".to_string(), input: json!({}) }],
         }
     };
 
@@ -334,10 +322,7 @@ fn schema_from_config(
         let mut out = serde_json::json!({ "type": "object", "properties": properties });
         if !required.is_empty() {
             out["required"] = serde_json::Value::Array(
-                required
-                    .into_iter()
-                    .map(serde_json::Value::String)
-                    .collect(),
+                required.into_iter().map(serde_json::Value::String).collect(),
             );
         }
         return Some(ActionSchemaResponse {
@@ -433,9 +418,7 @@ pub async fn execute_action(
             .into_iter()
             .filter(|r| r.name == name)
             .filter(|r| {
-                parse_action_trn(&r.trn)
-                    .map(|c| c.tenant == tenant.as_str())
-                    .unwrap_or(false)
+                parse_action_trn(&r.trn).map(|c| c.tenant == tenant.as_str()).unwrap_or(false)
             })
             .collect();
 
@@ -461,13 +444,15 @@ pub async fn execute_action(
     let effective_timeout = options
         .and_then(|o| o.timeout_ms)
         .map(Duration::from_millis)
-        .map(|requested| {
-            if requested < governance.timeout {
-                requested
-            } else {
-                governance.timeout
-            }
-        })
+        .map(
+            |requested| {
+                if requested < governance.timeout {
+                    requested
+                } else {
+                    governance.timeout
+                }
+            },
+        )
         .unwrap_or(governance.timeout);
     let mut warnings: Option<Vec<String>> = None;
     if dry_run {
@@ -531,13 +516,9 @@ pub async fn execute_action(
     drop(action_record_for_validation);
     let fut = async move {
         let ctx = openact_registry::ExecutionContext::new();
-        let exec = registry
-            .execute(&action_trn, input, Some(ctx))
-            .await
-            .map_err(map_registry_error)?;
-        Ok::<_, ServerError>(ExecuteResponse {
-            result: exec.output,
-        })
+        let exec =
+            registry.execute(&action_trn, input, Some(ctx)).await.map_err(map_registry_error)?;
+        Ok::<_, ServerError>(ExecuteResponse { result: exec.output })
     };
 
     let exec_response = match timeout(effective_timeout, fut).await {
@@ -641,13 +622,15 @@ pub async fn execute_by_trn(
         .and_then(|opts| opts.get("timeout_ms"))
         .and_then(|v| v.as_u64())
         .map(Duration::from_millis)
-        .map(|requested| {
-            if requested < governance.timeout {
-                requested
-            } else {
-                governance.timeout
-            }
-        })
+        .map(
+            |requested| {
+                if requested < governance.timeout {
+                    requested
+                } else {
+                    governance.timeout
+                }
+            },
+        )
         .unwrap_or(governance.timeout);
     let mut warnings: Option<Vec<String>> = None;
     if dry_run {
@@ -702,13 +685,9 @@ pub async fn execute_by_trn(
 
     let fut = async move {
         let ctx = ExecutionContext::new();
-        let exec = registry
-            .execute(&action_trn, input, Some(ctx))
-            .await
-            .map_err(map_registry_error)?;
-        Ok::<_, ServerError>(ExecuteResponse {
-            result: exec.output,
-        })
+        let exec =
+            registry.execute(&action_trn, input, Some(ctx)).await.map_err(map_registry_error)?;
+        Ok::<_, ServerError>(ExecuteResponse { result: exec.output })
     };
 
     let exec_response = match timeout(effective_timeout, fut).await {
@@ -799,10 +778,5 @@ fn parse_action_trn(trn: &Trn) -> Option<ParsedActionTrn<'_>> {
     if segments.next().is_some() {
         return None;
     }
-    Some(ParsedActionTrn {
-        tenant,
-        connector,
-        name,
-        _version: version,
-    })
+    Some(ParsedActionTrn { tenant, connector, name, _version: version })
 }

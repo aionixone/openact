@@ -12,22 +12,14 @@ pub struct OAuth2RefreshTokenHandler;
 impl TaskHandler for OAuth2RefreshTokenHandler {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
         // ctx: { tokenUrl, clientId, clientSecret, refresh_token }
-        let token_url = ctx
-            .get("tokenUrl")
-            .and_then(|v| v.as_str())
-            .context("tokenUrl required")?;
-        let client_id = ctx
-            .get("clientId")
-            .and_then(|v| v.as_str())
-            .context("clientId required")?;
-        let client_secret = ctx
-            .get("clientSecret")
-            .and_then(|v| v.as_str())
-            .context("clientSecret required")?;
-        let refresh_token = ctx
-            .get("refresh_token")
-            .and_then(|v| v.as_str())
-            .context("refresh_token required")?;
+        let token_url =
+            ctx.get("tokenUrl").and_then(|v| v.as_str()).context("tokenUrl required")?;
+        let client_id =
+            ctx.get("clientId").and_then(|v| v.as_str()).context("clientId required")?;
+        let client_secret =
+            ctx.get("clientSecret").and_then(|v| v.as_str()).context("clientSecret required")?;
+        let refresh_token =
+            ctx.get("refresh_token").and_then(|v| v.as_str()).context("refresh_token required")?;
 
         let client = BasicClient::new(
             ClientId::new(client_id.to_string()),
@@ -38,9 +30,7 @@ impl TaskHandler for OAuth2RefreshTokenHandler {
 
         let rt = RefreshToken::new(refresh_token.to_string());
         let req = client.exchange_refresh_token(&rt);
-        let token = req
-            .request(http_client)
-            .context("oauth2 refresh_token request failed")?;
+        let token = req.request(http_client).context("oauth2 refresh_token request failed")?;
 
         let access_token = token.access_token().secret().to_string();
         let new_refresh = token.refresh_token().map(|t| t.secret().to_string());

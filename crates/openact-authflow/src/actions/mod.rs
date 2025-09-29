@@ -88,10 +88,7 @@ pub struct ActionRouter {
 
 impl ActionRouter {
     pub fn new(connection_store: Arc<dyn AuthConnectionStore>) -> Self {
-        Self {
-            default_router: DefaultRouter,
-            connection_store,
-        }
+        Self { default_router: DefaultRouter, connection_store }
     }
 }
 
@@ -125,9 +122,7 @@ impl TaskHandler for ActionRouter {
                         expected: Option<&AuthConnection>,
                         new_connection: Option<&AuthConnection>,
                     ) -> openact_core::CoreResult<bool> {
-                        self.0
-                            .compare_and_swap(connection_ref, expected, new_connection)
-                            .await
+                        self.0.compare_and_swap(connection_ref, expected, new_connection).await
                     }
                     async fn list_refs(&self) -> openact_core::CoreResult<Vec<String>> {
                         self.0.list_refs().await
@@ -170,9 +165,7 @@ impl TaskHandler for ActionRouter {
                         expected: Option<&AuthConnection>,
                         new_connection: Option<&AuthConnection>,
                     ) -> openact_core::CoreResult<bool> {
-                        self.0
-                            .compare_and_swap(connection_ref, expected, new_connection)
-                            .await
+                        self.0.compare_and_swap(connection_ref, expected, new_connection).await
                     }
                     async fn list_refs(&self) -> openact_core::CoreResult<Vec<String>> {
                         self.0.list_refs().await
@@ -189,9 +182,8 @@ impl TaskHandler for ActionRouter {
                 ConnectionUpdateHandler { ctx: ctx_wrap }.execute(resource, state_name, ctx)
             }
             "ensure.fresh_token" => {
-                let handler = EnsureFreshTokenHandler {
-                    store: Arc::new(MemoryAuthConnectionStore::new()),
-                };
+                let handler =
+                    EnsureFreshTokenHandler { store: Arc::new(MemoryAuthConnectionStore::new()) };
                 handler.execute(resource, state_name, ctx)
             }
             _ => self.default_router.execute(resource, state_name, ctx),

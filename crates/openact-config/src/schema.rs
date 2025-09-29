@@ -61,19 +61,12 @@ pub struct ActionConfig {
 
 impl Default for ConfigManifest {
     fn default() -> Self {
-        Self {
-            version: "v1".to_string(),
-            metadata: None,
-            connectors: HashMap::new(),
-        }
+        Self { version: "v1".to_string(), metadata: None, connectors: HashMap::new() }
     }
 }
 
 impl Default for ConnectorConfig {
     fn default() -> Self {
-        Self {
-            connections: HashMap::new(),
-            actions: HashMap::new(),
-        }
+        Self { connections: HashMap::new(), actions: HashMap::new() }
     }
 }

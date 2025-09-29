@@ -22,18 +22,13 @@ impl TaskHandler for EnsureFreshTokenHandler {
         let token_url = ctx.get("tokenUrl").and_then(|v| v.as_str());
         let client_id = ctx.get("clientId").and_then(|v| v.as_str());
         let client_secret = ctx.get("clientSecret").and_then(|v| v.as_str());
-        let skew = ctx
-            .get("skewSeconds")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(120);
+        let skew = ctx.get("skewSeconds").and_then(|v| v.as_i64()).unwrap_or(120);
 
         let mut conn = futures::executor::block_on(self.store.get(cref))?.unwrap_or_default();
 
         // decide if needs refresh
         let now = Utc::now();
-        let expiry = conn
-            .expires_at
-            .unwrap_or_else(|| now - Duration::seconds(1)); // treat unknown as expired
+        let expiry = conn.expires_at.unwrap_or_else(|| now - Duration::seconds(1)); // treat unknown as expired
         let needs = expiry <= now + Duration::seconds(skew);
 
         if needs {
@@ -45,9 +40,7 @@ impl TaskHandler for EnsureFreshTokenHandler {
             {
                 (Some(a), Some(b), Some(c)) => (a.to_string(), b.to_string(), c.to_string()),
                 _ => {
-                    return Err(anyhow!(
-                        "tokenUrl/clientId/clientSecret required to refresh"
-                    ));
+                    return Err(anyhow!("tokenUrl/clientId/clientSecret required to refresh"));
                 }
             };
             let handler = actions::OAuth2RefreshTokenHandler;

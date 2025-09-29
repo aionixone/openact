@@ -12,9 +12,7 @@ async fn create_test_db() -> (SqlStore, TempDir) {
     let dir = tempdir().expect("Failed to create temp dir");
     let db_path = dir.path().join("test.sqlite");
     let db_url = format!("sqlite://{}", db_path.to_string_lossy());
-    let store = SqlStore::new(&db_url)
-        .await
-        .expect("Failed to create test database");
+    let store = SqlStore::new(&db_url).await.expect("Failed to create test database");
     (store, dir)
 }
 
@@ -41,23 +39,17 @@ async fn test_connection_store_crud() {
     };
 
     // Test upsert (insert)
-    ConnectionStore::upsert(&store, &connection_record)
-        .await
-        .expect("Failed to insert connection");
+    ConnectionStore::upsert(&store, &connection_record).await.expect("Failed to insert connection");
 
     // Test get
-    let retrieved = ConnectionStore::get(&store, &connection_trn)
-        .await
-        .expect("Failed to get connection");
+    let retrieved =
+        ConnectionStore::get(&store, &connection_trn).await.expect("Failed to get connection");
     assert!(retrieved.is_some());
     let retrieved_record = retrieved.unwrap();
     assert_eq!(retrieved_record.trn, connection_record.trn);
     assert_eq!(retrieved_record.connector.as_str(), "http");
     assert_eq!(retrieved_record.name, "github-api");
-    assert_eq!(
-        retrieved_record.config_json["base_url"],
-        "https://api.github.com"
-    );
+    assert_eq!(retrieved_record.config_json["base_url"], "https://api.github.com");
 
     // Test list_by_connector
     let connections = ConnectionStore::list_by_connector(&store, "http")
@@ -79,9 +71,7 @@ async fn test_connection_store_crud() {
     updated_record.updated_at = Utc::now();
     updated_record.version = 2;
 
-    ConnectionStore::upsert(&store, &updated_record)
-        .await
-        .expect("Failed to update connection");
+    ConnectionStore::upsert(&store, &updated_record).await.expect("Failed to update connection");
 
     let retrieved_updated = ConnectionStore::get(&store, &connection_trn)
         .await
@@ -97,9 +87,8 @@ async fn test_connection_store_crud() {
         .expect("Failed to delete connection");
     assert!(deleted);
 
-    let after_delete = ConnectionStore::get(&store, &connection_trn)
-        .await
-        .expect("Failed to get after delete");
+    let after_delete =
+        ConnectionStore::get(&store, &connection_trn).await.expect("Failed to get after delete");
     assert!(after_delete.is_none());
 
     // Test delete non-existent
@@ -124,9 +113,7 @@ async fn test_action_repository_crud() {
         updated_at: Utc::now(),
         version: 1,
     };
-    ConnectionStore::upsert(&store, &connection_record)
-        .await
-        .expect("Failed to insert connection");
+    ConnectionStore::upsert(&store, &connection_record).await.expect("Failed to insert connection");
 
     // Now create an action
     let action_trn = Trn::new("trn:openact:tenant1:action/http/get-user@v1".to_string());
@@ -150,14 +137,10 @@ async fn test_action_repository_crud() {
     };
 
     // Test upsert (insert)
-    ActionRepository::upsert(&store, &action_record)
-        .await
-        .expect("Failed to insert action");
+    ActionRepository::upsert(&store, &action_record).await.expect("Failed to insert action");
 
     // Test get
-    let retrieved = ActionRepository::get(&store, &action_trn)
-        .await
-        .expect("Failed to get action");
+    let retrieved = ActionRepository::get(&store, &action_trn).await.expect("Failed to get action");
     assert!(retrieved.is_some());
     let retrieved_record = retrieved.unwrap();
     assert_eq!(retrieved_record.trn, action_record.trn);
@@ -186,36 +169,27 @@ async fn test_action_repository_crud() {
     updated_record.updated_at = Utc::now();
     updated_record.version = 2;
 
-    ActionRepository::upsert(&store, &updated_record)
-        .await
-        .expect("Failed to update action");
+    ActionRepository::upsert(&store, &updated_record).await.expect("Failed to update action");
 
-    let retrieved_updated = ActionRepository::get(&store, &action_trn)
-        .await
-        .expect("Failed to get updated action");
+    let retrieved_updated =
+        ActionRepository::get(&store, &action_trn).await.expect("Failed to get updated action");
     assert!(retrieved_updated.is_some());
     let retrieved_updated_record = retrieved_updated.unwrap();
-    assert_eq!(
-        retrieved_updated_record.config_json["path"],
-        "/user/profile"
-    );
+    assert_eq!(retrieved_updated_record.config_json["path"], "/user/profile");
     assert_eq!(retrieved_updated_record.version, 2);
 
     // Test delete
-    let deleted = ActionRepository::delete(&store, &action_trn)
-        .await
-        .expect("Failed to delete action");
+    let deleted =
+        ActionRepository::delete(&store, &action_trn).await.expect("Failed to delete action");
     assert!(deleted);
 
-    let after_delete = ActionRepository::get(&store, &action_trn)
-        .await
-        .expect("Failed to get after delete");
+    let after_delete =
+        ActionRepository::get(&store, &action_trn).await.expect("Failed to get after delete");
     assert!(after_delete.is_none());
 
     // Test delete non-existent
-    let deleted_again = ActionRepository::delete(&store, &action_trn)
-        .await
-        .expect("Failed to delete non-existent");
+    let deleted_again =
+        ActionRepository::delete(&store, &action_trn).await.expect("Failed to delete non-existent");
     assert!(!deleted_again);
 }
 
@@ -239,28 +213,19 @@ async fn test_run_store_crud() {
     };
 
     // Test put (insert)
-    RunStore::put(&store, checkpoint.clone())
-        .await
-        .expect("Failed to put checkpoint");
+    RunStore::put(&store, checkpoint.clone()).await.expect("Failed to put checkpoint");
 
     // Test get
-    let retrieved = RunStore::get(&store, &checkpoint.run_id)
-        .await
-        .expect("Failed to get checkpoint");
+    let retrieved =
+        RunStore::get(&store, &checkpoint.run_id).await.expect("Failed to get checkpoint");
     assert!(retrieved.is_some());
     let retrieved_checkpoint = retrieved.unwrap();
     assert_eq!(retrieved_checkpoint.run_id, checkpoint.run_id);
     assert_eq!(retrieved_checkpoint.paused_state, checkpoint.paused_state);
     assert_eq!(retrieved_checkpoint.context_json["tenant"], "tenant1");
-    assert_eq!(
-        retrieved_checkpoint.context_json["flow_step"],
-        "authorization"
-    );
+    assert_eq!(retrieved_checkpoint.context_json["flow_step"], "authorization");
     assert!(retrieved_checkpoint.await_meta_json.is_some());
-    assert_eq!(
-        retrieved_checkpoint.await_meta_json.as_ref().unwrap()["state"],
-        "random-state-abc"
-    );
+    assert_eq!(retrieved_checkpoint.await_meta_json.as_ref().unwrap()["state"], "random-state-abc");
 
     // Test put (update)
     let updated_checkpoint = Checkpoint {
@@ -275,40 +240,28 @@ async fn test_run_store_crud() {
         await_meta_json: None, // No longer waiting
     };
 
-    RunStore::put(&store, updated_checkpoint.clone())
-        .await
-        .expect("Failed to update checkpoint");
+    RunStore::put(&store, updated_checkpoint.clone()).await.expect("Failed to update checkpoint");
 
-    let retrieved_updated = RunStore::get(&store, &checkpoint.run_id)
-        .await
-        .expect("Failed to get updated checkpoint");
+    let retrieved_updated =
+        RunStore::get(&store, &checkpoint.run_id).await.expect("Failed to get updated checkpoint");
     assert!(retrieved_updated.is_some());
     let retrieved_updated_checkpoint = retrieved_updated.unwrap();
-    assert_eq!(
-        retrieved_updated_checkpoint.paused_state,
-        "waiting-for-token"
-    );
-    assert_eq!(
-        retrieved_updated_checkpoint.context_json["flow_step"],
-        "token_exchange"
-    );
+    assert_eq!(retrieved_updated_checkpoint.paused_state, "waiting-for-token");
+    assert_eq!(retrieved_updated_checkpoint.context_json["flow_step"], "token_exchange");
     assert!(retrieved_updated_checkpoint.await_meta_json.is_none());
 
     // Test delete
-    let deleted = RunStore::delete(&store, &checkpoint.run_id)
-        .await
-        .expect("Failed to delete checkpoint");
+    let deleted =
+        RunStore::delete(&store, &checkpoint.run_id).await.expect("Failed to delete checkpoint");
     assert!(deleted);
 
-    let after_delete = RunStore::get(&store, &checkpoint.run_id)
-        .await
-        .expect("Failed to get after delete");
+    let after_delete =
+        RunStore::get(&store, &checkpoint.run_id).await.expect("Failed to get after delete");
     assert!(after_delete.is_none());
 
     // Test delete non-existent
-    let deleted_again = RunStore::delete(&store, &checkpoint.run_id)
-        .await
-        .expect("Failed to delete non-existent");
+    let deleted_again =
+        RunStore::delete(&store, &checkpoint.run_id).await.expect("Failed to delete non-existent");
     assert!(!deleted_again);
 }
 
@@ -379,24 +332,14 @@ async fn test_migration_idempotency() {
     let db_url = format!("sqlite://{}", db_path.to_string_lossy());
 
     // Create first store (runs migrations)
-    let store1 = SqlStore::new(&db_url)
-        .await
-        .expect("Failed to create first store");
+    let store1 = SqlStore::new(&db_url).await.expect("Failed to create first store");
 
     // Create second store with same database (should not fail)
-    let store2 = SqlStore::new(&db_url)
-        .await
-        .expect("Failed to create second store");
+    let store2 = SqlStore::new(&db_url).await.expect("Failed to create second store");
 
     // Manually run migrations again (should be idempotent)
-    store1
-        .migrate()
-        .await
-        .expect("Failed to run migrations again");
-    store2
-        .migrate()
-        .await
-        .expect("Failed to run migrations on second store");
+    store1.migrate().await.expect("Failed to run migrations again");
+    store2.migrate().await.expect("Failed to run migrations on second store");
 
     // Verify database still works
     let connection_record = ConnectionRecord {

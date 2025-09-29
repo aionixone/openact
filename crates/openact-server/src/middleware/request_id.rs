@@ -40,16 +40,13 @@ where
     }
 
     fn call(&mut self, mut req: Request<B>) -> Self::Future {
-        let request_id = if let Some(existing_id) = req
-            .headers()
-            .get("x-request-id")
-            .and_then(|v| v.to_str().ok())
+        let request_id = if let Some(existing_id) =
+            req.headers().get("x-request-id").and_then(|v| v.to_str().ok())
         {
             existing_id.to_string()
         } else {
             let id = Uuid::new_v4().to_string();
-            req.headers_mut()
-                .insert("x-request-id", id.parse().unwrap());
+            req.headers_mut().insert("x-request-id", id.parse().unwrap());
             id
         };
 
@@ -59,9 +56,7 @@ where
         let mut inner = self.inner.clone();
         Box::pin(async move {
             let mut response = inner.call(req).await?;
-            response
-                .headers_mut()
-                .insert("x-request-id", request_id.parse().unwrap());
+            response.headers_mut().insert("x-request-id", request_id.parse().unwrap());
             Ok(response)
         })
     }

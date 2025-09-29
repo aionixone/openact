@@ -40,34 +40,20 @@ impl SqlStore {
         // Robust handling for sqlite file URLs; enable create_if_missing
         let pool = if let Some(path_str) = database_url.strip_prefix("sqlite://") {
             let path = PathBuf::from(path_str);
-            let options = SqliteConnectOptions::new()
-                .filename(path)
-                .create_if_missing(true);
-            SqlitePoolOptions::new()
-                .max_connections(max_conn)
-                .connect_with(options)
-                .await?
+            let options = SqliteConnectOptions::new().filename(path).create_if_missing(true);
+            SqlitePoolOptions::new().max_connections(max_conn).connect_with(options).await?
         } else {
             // Fallback for other forms (e.g., sqlite::memory:)
             let mut options = SqliteConnectOptions::from_str(database_url)?;
             // Try to create if missing when a filename is present
             options = options.create_if_missing(true);
-            SqlitePoolOptions::new()
-                .max_connections(max_conn)
-                .connect_with(options)
-                .await?
+            SqlitePoolOptions::new().max_connections(max_conn).connect_with(options).await?
         };
 
         // Configure SQLite for better performance and consistency
-        sqlx::query("PRAGMA foreign_keys = ON;")
-            .execute(&pool)
-            .await?;
-        sqlx::query("PRAGMA journal_mode = WAL;")
-            .execute(&pool)
-            .await?;
-        sqlx::query("PRAGMA synchronous = NORMAL;")
-            .execute(&pool)
-            .await?;
+        sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await?;
+        sqlx::query("PRAGMA journal_mode = WAL;").execute(&pool).await?;
+        sqlx::query("PRAGMA synchronous = NORMAL;").execute(&pool).await?;
 
         let store = Self { pool };
 
@@ -661,10 +647,7 @@ impl AuthConnectionStore for SqlStore {
             .await
             .map_err(StoreError::Database)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| row.get::<String, _>("trn"))
-            .collect())
+        Ok(rows.into_iter().map(|row| row.get::<String, _>("trn")).collect())
     }
 
     async fn cleanup_expired(&self) -> CoreResult<u64> {
@@ -871,9 +854,7 @@ mod tests {
     #[cfg(not(feature = "encryption"))]
     #[tokio::test]
     async fn compare_and_swap_insert_stores_plain_tokens_when_encryption_disabled() {
-        let store = SqlStore::new("sqlite::memory:")
-            .await
-            .expect("create store");
+        let store = SqlStore::new("sqlite::memory:").await.expect("create store");
 
         let mut auth = AuthConnection::new("tenant", "provider", "user", "access-token");
         auth.refresh_token = Some("refresh-token".to_string());

@@ -44,18 +44,11 @@ impl ImportCommand {
         };
 
         if dry_run {
-            println!(
-                "{}",
-                ColoredOutput::info("🔍 Dry run mode - no changes will be made")
-            );
+            println!("{}", ColoredOutput::info("🔍 Dry run mode - no changes will be made"));
 
             // TODO: Implement dry run preview
             let connectors: Vec<_> = manifest.connectors.keys().collect();
-            println!(
-                "Would import {} connector(s): {:?}",
-                connectors.len(),
-                connectors
-            );
+            println!("Would import {} connector(s): {:?}", connectors.len(), connectors);
 
             for (connector_name, connector_config) in &manifest.connectors {
                 println!("  {} connector:", ColoredOutput::highlight(connector_name));
@@ -67,9 +60,7 @@ impl ImportCommand {
         }
 
         // Import to database
-        let result = config_manager
-            .import_to_db(&manifest, &store, &store, &options)
-            .await?;
+        let result = config_manager.import_to_db(&manifest, &store, &store, &options).await?;
 
         // Display results
         display_import_result(&result)?;
@@ -190,11 +181,8 @@ connectors:
                 }
             }
         });
-        fs::write(
-            &config_file.path(),
-            serde_json::to_string_pretty(&config_content).unwrap(),
-        )
-        .unwrap();
+        fs::write(&config_file.path(), serde_json::to_string_pretty(&config_content).unwrap())
+            .unwrap();
 
         // Initialize database
         let store = SqlStore::new(db_path_str).await.unwrap();

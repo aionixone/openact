@@ -29,11 +29,8 @@ pub fn normalize_dsl_json(mut dsl: serde_json::Value) -> serde_json::Value {
     }
 
     // Provider-level config fan-out to states.parameters
-    let provider_config = dsl
-        .get("provider")
-        .and_then(|p| p.get("config"))
-        .cloned()
-        .unwrap_or(serde_json::json!({}));
+    let provider_config =
+        dsl.get("provider").and_then(|p| p.get("config")).cloned().unwrap_or(serde_json::json!({}));
     if provider_config.is_object() {
         if let Some(provider) = dsl.get_mut("provider") {
             if let Some(flows) = provider.get_mut("flows").and_then(|v| v.as_object_mut()) {

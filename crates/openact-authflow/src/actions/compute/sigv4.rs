@@ -14,22 +14,12 @@ pub struct ComputeSigV4Handler;
 impl TaskHandler for ComputeSigV4Handler {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
         // input: { region, service, accessKey, secretKey|vault://, sessionToken?, request:{ method, url, headers?:{}, body?:string } }
-        let region = ctx
-            .get("region")
-            .and_then(|v| v.as_str())
-            .context("region required")?;
-        let service = ctx
-            .get("service")
-            .and_then(|v| v.as_str())
-            .context("service required")?;
-        let access_key = ctx
-            .get("accessKey")
-            .and_then(|v| v.as_str())
-            .context("accessKey required")?;
-        let secret_key_in = ctx
-            .get("secretKey")
-            .and_then(|v| v.as_str())
-            .context("secretKey required")?;
+        let region = ctx.get("region").and_then(|v| v.as_str()).context("region required")?;
+        let service = ctx.get("service").and_then(|v| v.as_str()).context("service required")?;
+        let access_key =
+            ctx.get("accessKey").and_then(|v| v.as_str()).context("accessKey required")?;
+        let secret_key_in =
+            ctx.get("secretKey").and_then(|v| v.as_str()).context("secretKey required")?;
 
         // Resolve secret key if it's a vault reference
         let secret_key = if secret_key_in.starts_with("vault://") {
@@ -49,40 +39,25 @@ impl TaskHandler for ComputeSigV4Handler {
         let session_token = ctx.get("sessionToken").and_then(|v| v.as_str());
 
         // Parse request details
-        let req = ctx
-            .get("request")
-            .and_then(|v| v.as_object())
-            .context("request required")?;
+        let req = ctx.get("request").and_then(|v| v.as_object()).context("request required")?;
         let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
-        let url = req
-            .get("url")
-            .and_then(|v| v.as_str())
-            .context("request.url required")?;
+        let url = req.get("url").and_then(|v| v.as_str()).context("request.url required")?;
 
         // Parse headers - collect into owned strings to avoid lifetime issues
         let mut header_pairs = Vec::new();
         if let Some(h) = req.get("headers").and_then(|v| v.as_object()) {
             for (k, v) in h.iter() {
-                let val_s = v
-                    .as_str()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| v.to_string());
+                let val_s = v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string());
                 header_pairs.push((k.clone(), val_s));
             }
         }
 
         // Convert to references for SignableRequest
-        let headers: Vec<(&str, &str)> = header_pairs
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
+        let headers: Vec<(&str, &str)> =
+            header_pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
 
         // Parse body
-        let body = req
-            .get("body")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .as_bytes();
+        let body = req.get("body").and_then(|v| v.as_str()).unwrap_or("").as_bytes();
 
         // Create signable request
         let signable = SignableRequest::new(

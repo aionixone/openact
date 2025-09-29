@@ -5,13 +5,12 @@ use crate::{
     error::CliResult,
     utils::{format_duration, parse_trn, validate_file_exists, ColoredOutput},
 };
-use openact_registry::{ConnectorRegistry, ExecutionContext, ExecutionResult};
 use openact_plugins as plugins;
+use openact_registry::{ConnectorRegistry, ExecutionContext, ExecutionResult};
 use openact_store::sql_store::SqlStore;
 use serde_json::{json, Value as JsonValue};
 use std::path::Path;
 use tracing::{debug, info};
-
 
 pub struct ExecuteCommand;
 
@@ -145,10 +144,7 @@ impl ExecuteCommand {
         if let Some(ref output_path) = output_file {
             crate::utils::ensure_parent_dir(Path::new(&output_path))?;
             tokio::fs::write(&output_path, &formatted_output).await?;
-            println!(
-                "{}",
-                ColoredOutput::success(&format!("✓ Output saved to: {}", output_path))
-            );
+            println!("{}", ColoredOutput::success(&format!("✓ Output saved to: {}", output_path)));
         } else {
             println!("{}", formatted_output);
         }
@@ -195,18 +191,9 @@ impl ExecuteCommand {
     }
 
     fn display_execution_summary(result: &ExecutionResult, total_duration: std::time::Duration) {
-        println!(
-            "\n{}",
-            ColoredOutput::success("✓ Action executed successfully")
-        );
-        println!(
-            "Execution ID: {}",
-            ColoredOutput::dim(&result.context.execution_id)
-        );
-        println!(
-            "Total Duration: {}",
-            ColoredOutput::info(&format_duration(total_duration))
-        );
+        println!("\n{}", ColoredOutput::success("✓ Action executed successfully"));
+        println!("Execution ID: {}", ColoredOutput::dim(&result.context.execution_id));
+        println!("Total Duration: {}", ColoredOutput::info(&format_duration(total_duration)));
 
         // Show result metadata if available
         if let Some(duration_ms) = result.metadata.get("duration_ms") {
@@ -220,10 +207,7 @@ impl ExecuteCommand {
         }
 
         if let Some(status_code) = result.metadata.get("status_code") {
-            println!(
-                "Status Code: {}",
-                ColoredOutput::highlight(&status_code.to_string())
-            );
+            println!("Status Code: {}", ColoredOutput::highlight(&status_code.to_string()));
         }
     }
 }
@@ -237,9 +221,7 @@ mod tests {
     #[tokio::test]
     async fn test_parse_input_json_string() {
         let input = r#"{"key": "value"}"#;
-        let result = ExecuteCommand::parse_input(Some(input.to_string()), None)
-            .await
-            .unwrap();
+        let result = ExecuteCommand::parse_input(Some(input.to_string()), None).await.unwrap();
         assert_eq!(result, json!({"key": "value"}));
     }
 

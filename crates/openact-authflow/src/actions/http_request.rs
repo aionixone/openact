@@ -45,10 +45,7 @@ impl HttpTaskHandler {
     }
 
     fn content_type(headers: &HeaderMap) -> Option<String> {
-        headers
-            .get("Content-Type")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_ascii_lowercase())
+        headers.get("Content-Type").and_then(|v| v.to_str().ok()).map(|s| s.to_ascii_lowercase())
     }
 }
 
@@ -56,10 +53,7 @@ impl HttpTaskHandler {
     fn execute_sync(&self, ctx: &Value) -> Result<Value> {
         // ctx is provided by mapping.input
         let method = ctx.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
-        let url = ctx
-            .get("url")
-            .and_then(|v| v.as_str())
-            .context("http.request requires url")?;
+        let url = ctx.get("url").and_then(|v| v.as_str()).context("http.request requires url")?;
         let mut headers = Self::build_headers(ctx.get("headers"))?;
         let timeout_ms = ctx.get("timeoutMs").and_then(|v| v.as_u64());
         let want_trace = ctx.get("trace").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -78,9 +72,7 @@ impl HttpTaskHandler {
             for (k, v) in q.iter() {
                 qp.push((
                     k.clone(),
-                    v.as_str()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| v.to_string()),
+                    v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string()),
                 ));
             }
             req = req.query(&qp);
@@ -94,10 +86,8 @@ impl HttpTaskHandler {
                     match body {
                         Value::String(s) => {
                             req = req.body(s.clone());
-                            request_body_repr = Some(Value::String(format!(
-                                "<form-urlencoded:{} bytes>",
-                                s.len()
-                            )));
+                            request_body_repr =
+                                Some(Value::String(format!("<form-urlencoded:{} bytes>", s.len())));
                         }
                         Value::Object(obj) => {
                             // Convert to key=value pairs (ignore null values)
@@ -119,10 +109,8 @@ impl HttpTaskHandler {
                         _ => {
                             let s = body.to_string();
                             req = req.body(s.clone());
-                            request_body_repr = Some(Value::String(format!(
-                                "<form-urlencoded:{} bytes>",
-                                s.len()
-                            )));
+                            request_body_repr =
+                                Some(Value::String(format!("<form-urlencoded:{} bytes>", s.len())));
                         }
                     }
                     if !headers.contains_key("Content-Type") {
@@ -137,10 +125,8 @@ impl HttpTaskHandler {
                     request_body_repr = Some(json!("<json>"));
                 }
                 Some(ct) if ct.starts_with("text/") => {
-                    let s = body
-                        .as_str()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| body.to_string());
+                    let s =
+                        body.as_str().map(|s| s.to_string()).unwrap_or_else(|| body.to_string());
                     req = req.body(s.clone());
                     request_body_repr = Some(Value::String(format!("<text:{} bytes>", s.len())));
                 }

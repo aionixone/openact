@@ -20,20 +20,12 @@ pub async fn execute_workflow(state: ServerState, execution_id: String) {
             Some(w) => w.clone(),
             None => return,
         };
-        (
-            workflow,
-            execution.flow.clone(),
-            execution.input.clone(),
-            execution.context.clone(),
-        )
+        (workflow, execution.flow.clone(), execution.input.clone(), execution.context.clone())
     };
 
     let mut exec_context = serde_json::Map::new();
     exec_context.insert("input".to_string(), input);
-    exec_context.insert(
-        "provider".to_string(),
-        json!({ "config": workflow.dsl.provider.config }),
-    );
+    exec_context.insert("provider".to_string(), json!({ "config": workflow.dsl.provider.config }));
     if let Some(ctx) = context {
         if let serde_json::Value::Object(ctx_map) = ctx {
             for (k, v) in ctx_map {
@@ -62,23 +54,14 @@ pub async fn execute_workflow(state: ServerState, execution_id: String) {
     let start_state = {
         let executions = state.executions.read().unwrap();
         if let Some(execution) = executions.get(&execution_id) {
-            execution
-                .current_state
-                .as_deref()
-                .unwrap_or(&flow.start_at)
-                .to_string()
+            execution.current_state.as_deref().unwrap_or(&flow.start_at).to_string()
         } else {
             flow.start_at.clone()
         }
     };
 
-    let result = run_until_pause_or_end(
-        flow,
-        &start_state,
-        exec_context,
-        state.task_handler.as_ref(),
-        100,
-    );
+    let result =
+        run_until_pause_or_end(flow, &start_state, exec_context, state.task_handler.as_ref(), 100);
 
     let mut executions = state.executions.write().unwrap();
     if let Some(execution) = executions.get_mut(&execution_id) {
@@ -103,10 +86,7 @@ pub async fn execute_workflow(state: ServerState, execution_id: String) {
                 execution.context = Some(pending.context.clone());
                 // Set current_state to the paused state's next_state so we resume correctly
                 execution.current_state = Some(pending.next_state.clone());
-                println!(
-                    "[server] execution {} paused at {}",
-                    execution_id, pending.next_state
-                );
+                println!("[server] execution {} paused at {}", execution_id, pending.next_state);
                 state.broadcast_event(ExecutionEvent {
                     event_type: "execution_paused".to_string(),
                     execution_id: execution_id.clone(),

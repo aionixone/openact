@@ -1,6 +1,6 @@
-use openact_core::{ActionRecord, ConnectionRecord, Trn, ConnectorKind};
-use openact_config::{ConfigManifest, ConfigLoader};
 use crate::error::{RuntimeError, RuntimeResult};
+use openact_config::{ConfigLoader, ConfigManifest};
+use openact_core::{ActionRecord, ConnectionRecord, ConnectorKind, Trn};
 
 /// Convert a ConfigManifest to connection and action records
 /// This bridges the gap between file/JSON config and the execution runtime
@@ -9,7 +9,9 @@ pub async fn records_from_manifest(
 ) -> RuntimeResult<(Vec<ConnectionRecord>, Vec<ActionRecord>)> {
     // Use ConfigLoader to convert manifest to records
     let loader = ConfigLoader::new("default");
-    let (connection_records, action_records) = loader.manifest_to_records(&manifest).await
+    let (connection_records, action_records) = loader
+        .manifest_to_records(&manifest)
+        .await
         .map_err(|e| RuntimeError::config(format!("Failed to convert manifest: {}", e)))?;
 
     tracing::debug!(
@@ -29,31 +31,32 @@ pub fn records_from_inline_config(
 ) -> RuntimeResult<(Vec<ConnectionRecord>, Vec<ActionRecord>)> {
     let mut connection_records = Vec::new();
     let mut action_records = Vec::new();
-    
+
     let now = chrono::Utc::now();
 
     // Process connections
     if let Some(conn_configs) = connections {
         for config in conn_configs {
             // Extract required fields
-            let trn = config.get("trn")
+            let trn = config
+                .get("trn")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| RuntimeError::config("Connection missing 'trn' field"))?
                 .to_string();
-            
-            let connector = config.get("connector")
+
+            let connector = config
+                .get("connector")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| RuntimeError::config("Connection missing 'connector' field"))?
                 .to_string();
 
-            let name = config.get("name")
+            let name = config
+                .get("name")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| RuntimeError::config("Connection missing 'name' field"))?
                 .to_string();
 
-            let version = config.get("version")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(1);
+            let version = config.get("version").and_then(|v| v.as_i64()).unwrap_or(1);
 
             // Extract config_json (everything except trn, connector, name, version)
             let mut config_json = config.clone();
@@ -81,33 +84,33 @@ pub fn records_from_inline_config(
     if let Some(action_configs) = actions {
         for config in action_configs {
             // Extract required fields
-            let trn = config.get("trn")
+            let trn = config
+                .get("trn")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| RuntimeError::config("Action missing 'trn' field"))?
                 .to_string();
-            
-            let connector = config.get("connector")
+
+            let connector = config
+                .get("connector")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| RuntimeError::config("Action missing 'connector' field"))?
                 .to_string();
 
-            let name = config.get("name")
+            let name = config
+                .get("name")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| RuntimeError::config("Action missing 'name' field"))?
                 .to_string();
 
-            let connection_trn = config.get("connection_trn")
+            let connection_trn = config
+                .get("connection_trn")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| RuntimeError::config("Action missing 'connection_trn' field"))?
                 .to_string();
 
-            let mcp_enabled = config.get("mcp_enabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
+            let mcp_enabled = config.get("mcp_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
 
-            let version = config.get("version")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(1);
+            let version = config.get("version").and_then(|v| v.as_i64()).unwrap_or(1);
 
             // Extract config_json (everything except meta fields)
             let mut config_json = config.clone();
@@ -152,29 +155,26 @@ mod tests {
 
     #[test]
     fn test_records_from_inline_config() {
-        let connections = Some(vec![
-            json!({
-                "trn": "test:conn:api",
-                "connector": "http",
-                "name": "api",
-                "version": 1,
-                "base_url": "https://api.example.com"
-            })
-        ]);
+        let connections = Some(vec![json!({
+            "trn": "test:conn:api",
+            "connector": "http",
+            "name": "api",
+            "version": 1,
+            "base_url": "https://api.example.com"
+        })]);
 
-        let actions = Some(vec![
-            json!({
-                "trn": "test:action:get-user",
-                "connector": "http",
-                "name": "get_user",
-                "connection_trn": "test:conn:api",
-                "version": 1,
-                "method": "GET",
-                "path": "/users/{id}"
-            })
-        ]);
+        let actions = Some(vec![json!({
+            "trn": "test:action:get-user",
+            "connector": "http",
+            "name": "get_user",
+            "connection_trn": "test:conn:api",
+            "version": 1,
+            "method": "GET",
+            "path": "/users/{id}"
+        })]);
 
-        let (conn_records, action_records) = records_from_inline_config(connections, actions).unwrap();
+        let (conn_records, action_records) =
+            records_from_inline_config(connections, actions).unwrap();
 
         assert_eq!(conn_records.len(), 1);
         assert_eq!(action_records.len(), 1);
@@ -195,13 +195,11 @@ mod tests {
 
     #[test]
     fn test_records_from_inline_config_missing_fields() {
-        let connections = Some(vec![
-            json!({
-                "connector": "http",
-                "name": "api"
-                // Missing trn
-            })
-        ]);
+        let connections = Some(vec![json!({
+            "connector": "http",
+            "name": "api"
+            // Missing trn
+        })]);
 
         let result = records_from_inline_config(connections, None);
         assert!(result.is_err());

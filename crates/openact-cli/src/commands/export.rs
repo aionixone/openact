@@ -41,9 +41,7 @@ impl ExportCommand {
         };
 
         // Export from database
-        let manifest = config_manager
-            .export_from_db(&store, &store, &options)
-            .await?;
+        let manifest = config_manager.export_from_db(&store, &store, &options).await?;
 
         // Determine output format from file extension
         let output_format = Self::determine_format(file, pretty);
@@ -79,24 +77,12 @@ impl ExportCommand {
         println!("{}", ColoredOutput::success("✓ Export completed"));
         println!("Output file: {}", ColoredOutput::highlight(file));
         println!("Summary:");
-        println!(
-            "  Connectors: {}",
-            ColoredOutput::highlight(&connector_count.to_string())
-        );
-        println!(
-            "  Connections: {}",
-            ColoredOutput::highlight(&connection_count.to_string())
-        );
-        println!(
-            "  Actions: {}",
-            ColoredOutput::highlight(&action_count.to_string())
-        );
+        println!("  Connectors: {}", ColoredOutput::highlight(&connector_count.to_string()));
+        println!("  Connections: {}", ColoredOutput::highlight(&connection_count.to_string()));
+        println!("  Actions: {}", ColoredOutput::highlight(&action_count.to_string()));
 
         if !include_sensitive {
-            println!(
-                "  {}",
-                ColoredOutput::warning("⚠ Sensitive data was redacted")
-            );
+            println!("  {}", ColoredOutput::warning("⚠ Sensitive data was redacted"));
         }
 
         Ok(())

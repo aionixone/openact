@@ -35,9 +35,7 @@ pub struct ConfigLoader {
 impl ConfigLoader {
     /// Create a new config loader for a specific tenant
     pub fn new(tenant: impl Into<String>) -> Self {
-        Self {
-            tenant: tenant.into(),
-        }
+        Self { tenant: tenant.into() }
     }
 
     /// Load configuration from a file
@@ -105,10 +103,7 @@ impl ConfigLoader {
             // Process actions
             for (action_name, action_config) in &connector_config.actions {
                 // Validate that referenced connection exists
-                if !connector_config
-                    .connections
-                    .contains_key(&action_config.connection)
-                {
+                if !connector_config.connections.contains_key(&action_config.connection) {
                     return Err(ConfigError::Validation(format!(
                         "Action '{}' references non-existent connection '{}' in connector '{}'",
                         action_name, action_config.connection, connector_type
@@ -164,10 +159,7 @@ impl ConfigLoader {
                 map.insert(
                     "_metadata".to_string(),
                     JsonValue::Object(
-                        metadata
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect(),
+                        metadata.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                     ),
                 );
             }
@@ -186,10 +178,7 @@ impl ConfigLoader {
                 map.insert(
                     "_metadata".to_string(),
                     JsonValue::Object(
-                        metadata
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect(),
+                        metadata.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                     ),
                 );
             }
@@ -220,11 +209,7 @@ impl ConfigLoader {
         use crate::schema::{ActionConfig, ConnectionConfig, ConnectorConfig};
         let mut connectors: HashMap<String, ConnectorConfig> = HashMap::new();
 
-        let version = root
-            .get("version")
-            .and_then(|v| v.as_str())
-            .unwrap_or("1.0")
-            .to_string();
+        let version = root.get("version").and_then(|v| v.as_str()).unwrap_or("1.0").to_string();
         let metadata = root.get("metadata").cloned().and_then(|m| match m {
             JsonValue::Object(map) => Some(map.into_iter().collect()),
             _ => None,
@@ -242,15 +227,12 @@ impl ConfigLoader {
                     ConfigError::Validation(format!("Connection '{}' must be an object", conn_name))
                 })?;
 
-                let kind = conn_obj
-                    .get("kind")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        ConfigError::Validation(format!(
-                            "Connection '{}' missing required field 'kind'",
-                            conn_name
-                        ))
-                    })?;
+                let kind = conn_obj.get("kind").and_then(|v| v.as_str()).ok_or_else(|| {
+                    ConfigError::Validation(format!(
+                        "Connection '{}' missing required field 'kind'",
+                        conn_name
+                    ))
+                })?;
                 // Canonicalize connector kind
                 let kind_canon = openact_core::ConnectorKind::new(kind.to_string()).canonical();
                 connection_kind_by_name.insert(conn_name.clone(), kind_canon.as_str().to_string());
@@ -258,7 +240,9 @@ impl ConfigLoader {
                 // Build connection config by excluding only outer keys; keep all others (connector-agnostic)
                 let mut config_map = serde_json::Map::new();
                 for (k, v) in conn_obj {
-                    if k == "kind" || k == "description" { continue; }
+                    if k == "kind" || k == "description" {
+                        continue;
+                    }
                     config_map.insert(k.clone(), v.clone());
                 }
 
@@ -289,10 +273,8 @@ impl ConfigLoader {
                     ConfigError::Validation(format!("Action '{}' must be an object", act_name))
                 })?;
 
-                let connection_name = act_obj
-                    .get("connection")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
+                let connection_name =
+                    act_obj.get("connection").and_then(|v| v.as_str()).ok_or_else(|| {
                         ConfigError::Validation(format!(
                             "Action '{}' missing required field 'connection'",
                             act_name
@@ -305,7 +287,8 @@ impl ConfigLoader {
                     .ok_or_else(|| ConfigError::Validation(format!(
                         "Action '{}' cannot determine kind (no explicit kind and connection not found)", act_name
                     )))?;
-                let action_kind_canon = openact_core::ConnectorKind::new(action_kind.clone()).canonical();
+                let action_kind_canon =
+                    openact_core::ConnectorKind::new(action_kind.clone()).canonical();
 
                 // Build action.config (prefer 'config' object; support 'statement' sugar)
                 let mut config_json = if let Some(cfg) = act_obj.get("config") {
@@ -318,7 +301,10 @@ impl ConfigLoader {
                     // Connector-agnostic: include all non-metadata fields into config_json
                     let mut config_map = serde_json::Map::new();
                     for (key, value) in act_obj {
-                        if !matches!(key.as_str(), "connection" | "description" | "mcp_enabled" | "mcp") {
+                        if !matches!(
+                            key.as_str(),
+                            "connection" | "description" | "mcp_enabled" | "mcp"
+                        ) {
                             config_map.insert(key.clone(), value.clone());
                         }
                     }
@@ -364,11 +350,7 @@ impl ConfigLoader {
                         .and_then(|v| v.get("enabled"))
                         .and_then(|v| v.as_bool()),
                     config: config_json,
-                    metadata: if metadata_map.is_empty() {
-                        None
-                    } else {
-                        Some(metadata_map)
-                    },
+                    metadata: if metadata_map.is_empty() { None } else { Some(metadata_map) },
                 };
 
                 let connector = connectors
@@ -378,11 +360,7 @@ impl ConfigLoader {
             }
         }
 
-        Ok(ConfigManifest {
-            version,
-            metadata,
-            connectors,
-        })
+        Ok(ConfigManifest { version, metadata, connectors })
     }
 
     /// Export database records back to manifest format
@@ -404,9 +382,7 @@ impl ConfigLoader {
                 metadata: None, // TODO: Extract _metadata if present
             };
 
-            connector_config
-                .connections
-                .insert(conn.name, connection_config);
+            connector_config.connections.insert(conn.name, connection_config);
         }
 
         // Group actions by connector type
@@ -436,11 +412,7 @@ impl ConfigLoader {
             connector_config.actions.insert(action.name, action_config);
         }
 
-        Ok(ConfigManifest {
-            version: "v1".to_string(),
-            metadata: None,
-            connectors,
-        })
+        Ok(ConfigManifest { version: "v1".to_string(), metadata: None, connectors })
     }
 }
 
@@ -484,18 +456,12 @@ actions:
 "#;
 
         let loader = ConfigLoader::new("default");
-        let manifest = loader
-            .parse_content(flat_yaml, FileFormat::Yaml)
-            .await
-            .unwrap();
+        let manifest = loader.parse_content(flat_yaml, FileFormat::Yaml).await.unwrap();
 
         // Verify top-level structure
         assert_eq!(manifest.version, "1.0");
         assert!(manifest.metadata.is_some());
-        assert_eq!(
-            manifest.metadata.as_ref().unwrap().get("author").unwrap(),
-            "test"
-        );
+        assert_eq!(manifest.metadata.as_ref().unwrap().get("author").unwrap(), "test");
 
         // Verify connections were normalized into connectors
         assert!(manifest.connectors.contains_key("http"));
@@ -542,10 +508,7 @@ actions:
 "#;
 
         let loader = ConfigLoader::new("default");
-        let manifest = loader
-            .parse_content(flat_yaml, FileFormat::Yaml)
-            .await
-            .unwrap();
+        let manifest = loader.parse_content(flat_yaml, FileFormat::Yaml).await.unwrap();
 
         // Action should be placed in http connector due to kind inheritance
         assert!(manifest.connectors.contains_key("http"));
@@ -569,20 +532,14 @@ actions:
 "#;
 
         let loader = ConfigLoader::new("default");
-        let manifest = loader
-            .parse_content(flat_yaml, FileFormat::Yaml)
-            .await
-            .unwrap();
+        let manifest = loader.parse_content(flat_yaml, FileFormat::Yaml).await.unwrap();
 
         let postgres_connector = &manifest.connectors["postgres"];
         let action = &postgres_connector.actions["test-query"];
 
         // Statement should be normalized into config
         assert!(action.config.get("statement").is_some());
-        assert_eq!(
-            action.config["statement"],
-            json!("SELECT * FROM users WHERE id = $1")
-        );
+        assert_eq!(action.config["statement"], json!("SELECT * FROM users WHERE id = $1"));
     }
 
     #[tokio::test]
@@ -662,11 +619,7 @@ actions:
 
         connectors.insert("http".to_string(), http_connector);
 
-        let manifest = ConfigManifest {
-            version: "1.0".to_string(),
-            metadata: None,
-            connectors,
-        };
+        let manifest = ConfigManifest { version: "1.0".to_string(), metadata: None, connectors };
 
         let (connections, actions) = loader.manifest_to_records(&manifest).await.unwrap();
 

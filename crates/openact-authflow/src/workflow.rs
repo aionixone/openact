@@ -52,16 +52,8 @@ pub async fn start_obtain(
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("state missing"))?
         .to_string();
-    let code_verifier = auth
-        .get("code_verifier")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    Ok(StartObtainResult {
-        run_id: pending.run_id,
-        authorize_url,
-        state,
-        code_verifier,
-    })
+    let code_verifier = auth.get("code_verifier").and_then(|v| v.as_str()).map(|s| s.to_string());
+    Ok(StartObtainResult { run_id: pending.run_id, authorize_url, state, code_verifier })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,10 +69,7 @@ pub async fn resume_obtain(
     run_store: &impl RunStore,
     args: ResumeObtainArgs,
 ) -> Result<Value> {
-    let cp = run_store
-        .get(&args.run_id)
-        .await?
-        .ok_or_else(|| anyhow!("run_id not found"))?;
+    let cp = run_store.get(&args.run_id).await?.ok_or_else(|| anyhow!("run_id not found"))?;
     // Inject code/state into context.input for Await mapping (external mode can use input)
     let mut ctx = cp.context_json.clone();
     let input = ctx.get_mut("input").and_then(|v| v.as_object_mut());
@@ -201,17 +190,10 @@ states:
             &dsl,
             &Router,
             &run_store,
-            ResumeObtainArgs {
-                run_id: start.run_id,
-                code: "thecode".into(),
-                state: start.state,
-            },
+            ResumeObtainArgs { run_id: start.run_id, code: "thecode".into(), state: start.state },
         ))
         .unwrap();
         m_token.assert();
-        assert_eq!(
-            final_ctx.pointer("/states/Exchange/result").unwrap(),
-            &json!("tok")
-        );
+        assert_eq!(final_ctx.pointer("/states/Exchange/result").unwrap(), &json!("tok"));
     }
 }

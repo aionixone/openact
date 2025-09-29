@@ -12,18 +12,12 @@ pub struct OAuth2ClientCredentialsHandler;
 impl TaskHandler for OAuth2ClientCredentialsHandler {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
         // ctx from mapping.input: { tokenUrl, clientId, clientSecret, scopes?: [..], extra?: {audience?:..} }
-        let token_url = ctx
-            .get("tokenUrl")
-            .and_then(|v| v.as_str())
-            .context("tokenUrl required")?;
-        let client_id = ctx
-            .get("clientId")
-            .and_then(|v| v.as_str())
-            .context("clientId required")?;
-        let client_secret = ctx
-            .get("clientSecret")
-            .and_then(|v| v.as_str())
-            .context("clientSecret required")?;
+        let token_url =
+            ctx.get("tokenUrl").and_then(|v| v.as_str()).context("tokenUrl required")?;
+        let client_id =
+            ctx.get("clientId").and_then(|v| v.as_str()).context("clientId required")?;
+        let client_secret =
+            ctx.get("clientSecret").and_then(|v| v.as_str()).context("clientSecret required")?;
 
         let client = BasicClient::new(
             ClientId::new(client_id.to_string()),
@@ -38,9 +32,7 @@ impl TaskHandler for OAuth2ClientCredentialsHandler {
                 req = req.add_scope(Scope::new(s.to_string()));
             }
         }
-        let token = req
-            .request(http_client)
-            .context("oauth2 client_credentials request failed")?;
+        let token = req.request(http_client).context("oauth2 client_credentials request failed")?;
 
         let access_token = token.access_token().secret().to_string();
         let refresh_token = token.refresh_token().map(|t| t.secret().to_string());

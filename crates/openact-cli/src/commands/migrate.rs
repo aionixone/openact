@@ -26,10 +26,7 @@ impl MigrateCommand {
         // Run migrations
         store.migrate().await?;
 
-        println!(
-            "{}",
-            ColoredOutput::success("✓ Database initialized successfully")
-        );
+        println!("{}", ColoredOutput::success("✓ Database initialized successfully"));
 
         // Display database info
         let connectors = ConnectionStore::list_distinct_connectors(&store).await?;

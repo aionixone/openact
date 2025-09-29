@@ -39,4 +39,3 @@ fn invalid_prefix_rejected() {
     let trn = Trn::new(s.to_string());
     assert!(trn.parse_action().is_none());
 }
-

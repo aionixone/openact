@@ -29,11 +29,7 @@ pub enum ConfigManagerError {
     #[error(
         "Connection '{connection}' not found for action '{action}' in connector '{connector}'"
     )]
-    ConnectionNotFound {
-        connector: String,
-        action: String,
-        connection: String,
-    },
+    ConnectionNotFound { connector: String, action: String, connection: String },
     #[error("Invalid configuration structure: {0}")]
     InvalidStructure(String),
     #[error("Import conflict: {0}")]
@@ -81,12 +77,7 @@ pub struct ImportOptions {
 
 impl Default for ImportOptions {
     fn default() -> Self {
-        Self {
-            dry_run: false,
-            force: false,
-            validate: true,
-            namespace: None,
-        }
+        Self { dry_run: false, force: false, validate: true, namespace: None }
     }
 }
 
@@ -103,11 +94,7 @@ pub struct ExportOptions {
 
 impl Default for ExportOptions {
     fn default() -> Self {
-        Self {
-            connectors: vec![],
-            include_sensitive: false,
-            resolve_env_vars: false,
-        }
+        Self { connectors: vec![], include_sensitive: false, resolve_env_vars: false }
     }
 }
 
@@ -162,11 +149,7 @@ impl ConfigManager {
         schema_validator: SchemaValidator,
         config_loader: ConfigLoader,
     ) -> Self {
-        Self {
-            env_resolver,
-            schema_validator,
-            config_loader,
-        }
+        Self { env_resolver, schema_validator, config_loader }
     }
 
     /// Load configuration from file with environment variable resolution
@@ -296,8 +279,7 @@ impl ConfigManager {
     {
         // For SQL stores, we should use transactions. For now, continue with current implementation
         // TODO: Add transaction support for atomicity
-        self.import_to_db_impl(manifest, connection_repo, action_repo, options)
-            .await
+        self.import_to_db_impl(manifest, connection_repo, action_repo, options).await
     }
 
     /// Internal implementation of import_to_db
@@ -330,13 +312,49 @@ impl ConfigManager {
         for (connector_name, connector_config) in &manifest.connectors {
             let connector_kind = ConnectorKind::new(connector_name.clone());
 
-            // Import connections
-            for (connection_name, connection_config) in &connector_config.connections {
-                let connection_trn = self.build_connection_trn(
+            // Preload existing records for this connector to determine next versions
+            let existing_conn_records = connection_repo
+                .list_by_connector(connector_kind.canonical().as_str())
+                .await
+                .map_err(|e| ConfigManagerError::Database(e.to_string()))?;
+
+            // Compute versioned TRNs for all connections first, to keep actions referencing consistent versions
+            let mut planned_connection_trns: HashMap<String, Trn> = HashMap::new();
+            for (connection_name, _connection_config) in &connector_config.connections {
+                let resource_name = match options.namespace.as_deref() {
+                    Some(ns) => format!("{}-{}", ns, connection_name),
+                    None => connection_name.clone(),
+                };
+                // Determine next version for this (tenant, connector, name)
+                let mut max_ver = 0i64;
+                for rec in existing_conn_records.iter() {
+                    if let Some(parsed) = rec.trn.parse_connection() {
+                        if parsed.tenant == "default" && parsed.name == resource_name {
+                            if parsed.version > max_ver {
+                                max_ver = parsed.version;
+                            }
+                        }
+                    }
+                }
+                let next_ver = max_ver + 1;
+                let trn = self.build_connection_trn_with_version(
                     &connector_kind,
-                    connection_name,
-                    options.namespace.as_deref(),
+                    &resource_name,
+                    next_ver,
                 );
+                planned_connection_trns.insert(resource_name, trn);
+            }
+
+            // Import connections with planned versioned TRNs
+            for (connection_name, connection_config) in &connector_config.connections {
+                let resource_name = match options.namespace.as_deref() {
+                    Some(ns) => format!("{}-{}", ns, connection_name),
+                    None => connection_name.clone(),
+                };
+                let connection_trn = planned_connection_trns
+                    .get(&resource_name)
+                    .expect("planned connection TRN must exist")
+                    .clone();
 
                 match self
                     .import_connection(
@@ -358,18 +376,49 @@ impl ConfigManager {
             // Import actions
             if !connector_config.actions.is_empty() {
                 let actions = &connector_config.actions;
+                // Preload existing actions for next-version calculation
+                let existing_action_records = action_repo
+                    .list_by_connector(&connector_kind)
+                    .await
+                    .map_err(|e| ConfigManagerError::Database(e.to_string()))?;
+
                 for (action_name, action_config) in actions {
-                    let action_trn = self.build_action_trn(
+                    let resource_name = match options.namespace.as_deref() {
+                        Some(ns) => format!("{}-{}", ns, action_name),
+                        None => action_name.clone(),
+                    };
+                    // Compute next version for action
+                    let mut max_ver = 0i64;
+                    for rec in existing_action_records.iter() {
+                        if rec.name == resource_name {
+                            if let Some(parsed) = rec.trn.parse_action() {
+                                if parsed.tenant == "default" && parsed.name == resource_name {
+                                    if parsed.version > max_ver {
+                                        max_ver = parsed.version;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let next_ver = max_ver + 1;
+                    let action_trn = self.build_action_trn_with_version(
                         &connector_kind,
-                        action_name,
-                        options.namespace.as_deref(),
+                        &resource_name,
+                        next_ver,
                     );
 
-                    let connection_trn = self.build_connection_trn(
-                        &connector_kind,
-                        &action_config.connection,
-                        options.namespace.as_deref(),
-                    );
+                    // Use the planned versioned connection TRN for this connector
+                    let conn_res_name = match options.namespace.as_deref() {
+                        Some(ns) => format!("{}-{}", ns, &action_config.connection),
+                        None => action_config.connection.clone(),
+                    };
+                    let connection_trn =
+                        planned_connection_trns.get(&conn_res_name).cloned().ok_or_else(|| {
+                            ConfigManagerError::InvalidStructure(format!(
+                                "Missing connection '{}' for action '{}' in connector '{}'",
+                                action_config.connection, action_name, connector_name
+                            ))
+                        })?;
 
                     match self
                         .import_action(
@@ -439,10 +488,8 @@ impl ConfigManager {
         // Process each connector
         for (connector_kind, connections) in connections_by_connector {
             let connector_name = connector_kind.to_string();
-            let mut connector_config = ConnectorConfig {
-                connections: HashMap::new(),
-                actions: HashMap::new(),
-            };
+            let mut connector_config =
+                ConnectorConfig { connections: HashMap::new(), actions: HashMap::new() };
 
             // Add connections
             for connection in connections {
@@ -456,11 +503,7 @@ impl ConfigManager {
 
                 connector_config.connections.insert(
                     connection_name,
-                    ConnectionConfig {
-                        description: None,
-                        config: config_json,
-                        metadata: None,
-                    },
+                    ConnectionConfig { description: None, config: config_json, metadata: None },
                 );
             }
 
@@ -512,36 +555,25 @@ impl ConfigManager {
 
     // Helper methods
 
-    fn build_connection_trn(
+    fn build_connection_trn_with_version(
         &self,
         connector: &ConnectorKind,
-        name: &str,
-        namespace: Option<&str>,
+        resource_name: &str,
+        version: i64,
     ) -> Trn {
-        let resource_name = match namespace {
-            Some(ns) => format!("{}-{}", ns, name),
-            None => name.to_string(),
-        };
         Trn::new(format!(
-            "trn:openact:default:connection/{}/{}",
-            connector, resource_name
+            "trn:openact:default:connection/{}/{}@v{}",
+            connector, resource_name, version
         ))
     }
 
-    fn build_action_trn(
+    fn build_action_trn_with_version(
         &self,
         connector: &ConnectorKind,
-        name: &str,
-        namespace: Option<&str>,
+        resource_name: &str,
+        version: i64,
     ) -> Trn {
-        let resource_name = match namespace {
-            Some(ns) => format!("{}-{}", ns, name),
-            None => name.to_string(),
-        };
-        Trn::new(format!(
-            "trn:openact:default:action/{}/{}",
-            connector, resource_name
-        ))
+        Trn::new(format!("trn:openact:default:action/{}/{}@v{}", connector, resource_name, version))
     }
 
     fn extract_resource_name(&self, trn: &Trn) -> Result<String, ConfigManagerError> {
@@ -550,10 +582,7 @@ impl ConfigManager {
         if parts.len() >= 2 {
             Ok(parts[parts.len() - 1].to_string())
         } else {
-            Err(ConfigManagerError::InvalidStructure(format!(
-                "Invalid TRN format: {}",
-                trn_str
-            )))
+            Err(ConfigManagerError::InvalidStructure(format!("Invalid TRN format: {}", trn_str)))
         }
     }
 
@@ -569,10 +598,8 @@ impl ConfigManager {
     where
         C: ConnectionStore,
     {
-        let existing = repo
-            .get(trn)
-            .await
-            .map_err(|e| ConfigManagerError::Database(e.to_string()))?;
+        let existing =
+            repo.get(trn).await.map_err(|e| ConfigManagerError::Database(e.to_string()))?;
 
         let record = ConnectionRecord {
             trn: trn.clone(),
@@ -625,10 +652,8 @@ impl ConfigManager {
     where
         A: ActionRepository,
     {
-        let existing = repo
-            .get(trn)
-            .await
-            .map_err(|e| ConfigManagerError::Database(e.to_string()))?;
+        let existing =
+            repo.get(trn).await.map_err(|e| ConfigManagerError::Database(e.to_string()))?;
 
         // Extract MCP overrides from metadata if present
         let mcp_overrides = if let Some(ref metadata) = config.metadata {
@@ -757,11 +782,7 @@ fn normalize_action_schema(mut config: JsonValue) -> JsonValue {
             return config;
         }
     }
-    if config
-        .get("schema")
-        .and_then(|s| if s.is_object() { Some(()) } else { None })
-        .is_some()
-    {
+    if config.get("schema").and_then(|s| if s.is_object() { Some(()) } else { None }).is_some() {
         // Clone value first to avoid borrow conflict
         let schema_value = config.get("schema").cloned().unwrap();
         if let Some(obj) = config.as_object_mut() {
@@ -793,10 +814,7 @@ fn normalize_action_schema(mut config: JsonValue) -> JsonValue {
         let mut out = serde_json::json!({ "type": "object", "properties": properties });
         if !required.is_empty() {
             out["required"] = serde_json::Value::Array(
-                required
-                    .into_iter()
-                    .map(serde_json::Value::String)
-                    .collect(),
+                required.into_iter().map(serde_json::Value::String).collect(),
             );
         }
         if let Some(obj) = config.as_object_mut() {
@@ -866,14 +884,8 @@ actions:
 
         // Check environment variable resolution
         let github_connection = &manifest.connectors["http"].connections["github"];
-        assert_eq!(
-            github_connection.config["base_url"],
-            json!("https://api.github.com")
-        );
-        assert_eq!(
-            github_connection.config["auth"]["token"],
-            json!("test-token")
-        );
+        assert_eq!(github_connection.config["base_url"], json!("https://api.github.com"));
+        assert_eq!(github_connection.config["auth"]["token"], json!("test-token"));
 
         // Cleanup
         std::env::remove_var("OPENACT_BASE_URL");
@@ -887,10 +899,8 @@ actions:
             metadata: None,
             connectors: {
                 let mut connectors = HashMap::new();
-                let mut connector_config = ConnectorConfig {
-                    connections: HashMap::new(),
-                    actions: HashMap::new(),
-                };
+                let mut connector_config =
+                    ConnectorConfig { connections: HashMap::new(), actions: HashMap::new() };
 
                 connector_config.connections.insert(
                     "test-conn".to_string(),
@@ -938,11 +948,12 @@ actions:
         assert_eq!(result.conflicts.len(), 0);
 
         // Verify data was imported
-        let connection_trn = Trn::new("trn:openact:default:connection/http/test-conn".to_string());
+        let connection_trn =
+            Trn::new("trn:openact:default:connection/http/test-conn@v1".to_string());
         let imported_connection = connection_repo.get(&connection_trn).await.unwrap().unwrap();
         assert_eq!(imported_connection.name, "test-conn");
 
-        let action_trn = Trn::new("trn:openact:default:action/http/test-action".to_string());
+        let action_trn = Trn::new("trn:openact:default:action/http/test-action@v1".to_string());
         let imported_action = action_repo.get(&action_trn).await.unwrap().unwrap();
         assert_eq!(imported_action.name, "test-action");
         assert!(imported_action.mcp_enabled);
@@ -955,7 +966,7 @@ actions:
 
         // Insert test data
         let connection_record = ConnectionRecord {
-            trn: Trn::new("trn:openact:default:connection/http/test-conn".to_string()),
+            trn: Trn::new("trn:openact:default:connection/http/test-conn@v1".to_string()),
             connector: ConnectorKind::new("http"),
             name: "test-conn".to_string(),
             config_json: json!({
@@ -969,7 +980,7 @@ actions:
         connection_repo.upsert(&connection_record).await.unwrap();
 
         let action_record = ActionRecord {
-            trn: Trn::new("trn:openact:default:action/http/test-action".to_string()),
+            trn: Trn::new("trn:openact:default:action/http/test-action@v1".to_string()),
             connector: ConnectorKind::new("http"),
             name: "test-action".to_string(),
             connection_trn: connection_record.trn.clone(),
@@ -988,10 +999,8 @@ actions:
         let manager = ConfigManager::new();
         let options = ExportOptions::default();
 
-        let manifest = manager
-            .export_from_db(&connection_repo, &action_repo, &options)
-            .await
-            .unwrap();
+        let manifest =
+            manager.export_from_db(&connection_repo, &action_repo, &options).await.unwrap();
 
         assert!(manifest.connectors.contains_key("http"));
         let http_connector = &manifest.connectors["http"];
@@ -1013,10 +1022,8 @@ actions:
             metadata: None,
             connectors: {
                 let mut connectors = HashMap::new();
-                let mut connector_config = ConnectorConfig {
-                    connections: HashMap::new(),
-                    actions: HashMap::new(),
-                };
+                let mut connector_config =
+                    ConnectorConfig { connections: HashMap::new(), actions: HashMap::new() };
 
                 connector_config.actions.insert(
                     "test-action".to_string(),
@@ -1038,9 +1045,6 @@ actions:
         };
 
         let result = manager.validate(&invalid_manifest);
-        assert!(matches!(
-            result,
-            Err(ConfigManagerError::ConnectionNotFound { .. })
-        ));
+        assert!(matches!(result, Err(ConfigManagerError::ConnectionNotFound { .. })));
     }
 }

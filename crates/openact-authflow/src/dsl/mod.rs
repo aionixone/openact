@@ -405,10 +405,7 @@ impl OpenactDsl {
             }
 
             if flow_dsl.states.is_empty() {
-                return Err(anyhow!(
-                    "Flow '{}' must define at least one state",
-                    flow_name
-                ));
+                return Err(anyhow!("Flow '{}' must define at least one state", flow_name));
             }
         }
 
@@ -460,12 +457,7 @@ mod tests {
             policy: None,
         };
 
-        let dsl = OpenactDsl {
-            version: Version::V1_0,
-            metadata: None,
-            provider,
-            global: None,
-        };
+        let dsl = OpenactDsl { version: Version::V1_0, metadata: None, provider, global: None };
 
         assert_eq!(dsl.version, Version::V1_0);
         assert_eq!(dsl.provider.name, "test_provider");
@@ -526,12 +518,8 @@ mod tests {
             },
         );
 
-        let valid_dsl = OpenactDsl {
-            version: Version::V1_0,
-            metadata: None,
-            provider,
-            global: None,
-        };
+        let valid_dsl =
+            OpenactDsl { version: Version::V1_0, metadata: None, provider, global: None };
 
         assert!(valid_dsl.validate().is_ok());
     }

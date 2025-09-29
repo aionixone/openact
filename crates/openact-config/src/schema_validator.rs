@@ -11,23 +11,11 @@ pub enum SchemaValidationError {
     #[error("Missing required field: '{0}'")]
     MissingRequiredField(String),
     #[error("Invalid field type for '{field}': expected {expected}, got {actual}")]
-    InvalidFieldType {
-        field: String,
-        expected: String,
-        actual: String,
-    },
+    InvalidFieldType { field: String, expected: String, actual: String },
     #[error("Invalid enum value for '{field}': '{value}'. Valid values: {valid_values:?}")]
-    InvalidEnumValue {
-        field: String,
-        value: String,
-        valid_values: Vec<String>,
-    },
+    InvalidEnumValue { field: String, value: String, valid_values: Vec<String> },
     #[error("Field '{field}' value '{value}' is out of range: {constraint}")]
-    ValueOutOfRange {
-        field: String,
-        value: String,
-        constraint: String,
-    },
+    ValueOutOfRange { field: String, value: String, constraint: String },
     #[error("Unsupported connector type: '{0}'")]
     UnsupportedConnectorType(String),
     #[error("Invalid URL format in field '{field}': '{value}'")]
@@ -56,9 +44,7 @@ pub struct SchemaValidator {
 
 impl SchemaValidator {
     pub fn new() -> Self {
-        Self {
-            validators: HashMap::new(),
-        }
+        Self { validators: HashMap::new() }
     }
 
     pub fn register_validator(&mut self, validator: Box<dyn ConnectorValidator + Send + Sync>) {

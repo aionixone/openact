@@ -82,12 +82,7 @@ pub enum Commands {
         file: String,
 
         /// Conflict resolution strategy
-        #[arg(
-            long,
-            value_enum,
-            default_value = "abort",
-            help = "How to handle conflicts"
-        )]
+        #[arg(long, value_enum, default_value = "abort", help = "How to handle conflicts")]
         conflict_resolution: ConflictResolution,
 
         /// Dry run - don't actually import
@@ -102,11 +97,7 @@ pub enum Commands {
         file: String,
 
         /// Connector types to export (default: all)
-        #[arg(
-            short,
-            long,
-            help = "Connector types to export (e.g., http,postgresql)"
-        )]
+        #[arg(short, long, help = "Connector types to export (e.g., http,postgresql)")]
         connectors: Vec<String>,
 
         /// Include sensitive data in export
@@ -135,11 +126,7 @@ pub enum Commands {
         input: Option<String>,
 
         /// Input data from file
-        #[arg(
-            long,
-            conflicts_with = "input",
-            help = "Read input data from file (JSON or YAML)"
-        )]
+        #[arg(long, conflicts_with = "input", help = "Read input data from file (JSON or YAML)")]
         input_file: Option<String>,
 
         /// Output format
@@ -170,11 +157,7 @@ pub enum Commands {
         input: Option<String>,
 
         /// Input data from file
-        #[arg(
-            long,
-            conflicts_with = "input",
-            help = "Read input data from file (JSON or YAML)"
-        )]
+        #[arg(long, conflicts_with = "input", help = "Read input data from file (JSON or YAML)")]
         input_file: Option<String>,
 
         /// Output format
@@ -213,11 +196,7 @@ pub enum Commands {
         input: Option<String>,
 
         /// Input data from file
-        #[arg(
-            long,
-            conflicts_with = "input",
-            help = "Read input data from file (JSON or YAML)"
-        )]
+        #[arg(long, conflicts_with = "input", help = "Read input data from file (JSON or YAML)")]
         input_file: Option<String>,
 
         /// Output format

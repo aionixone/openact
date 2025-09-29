@@ -87,16 +87,8 @@ pub async fn create_workflow(
         created_at: now,
         updated_at: now,
     };
-    state
-        .workflows
-        .write()
-        .unwrap()
-        .insert(workflow_id.clone(), workflow.clone());
-    (
-        StatusCode::CREATED,
-        Json(serde_json::to_value(workflow).unwrap()),
-    )
-        .into_response()
+    state.workflows.write().unwrap().insert(workflow_id.clone(), workflow.clone());
+    (StatusCode::CREATED, Json(serde_json::to_value(workflow).unwrap())).into_response()
 }
 
 #[cfg(feature = "server")]

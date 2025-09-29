@@ -14,16 +14,16 @@ use crate::{
     },
     mcp::{
         ContentBlock, InitializeRequest, InitializeResponse, ServerCapabilities, Tool,
-        ToolAnnotations, ToolsCallRequest, ToolsCallResponse, ToolsListRequest,
-        ToolsListResponse, LATEST_PROTOCOL_VERSION, METHOD_INITIALIZE, METHOD_PING,
-        METHOD_TOOLS_CALL, METHOD_TOOLS_LIST, SUPPORTED_PROTOCOL_VERSIONS,
+        ToolAnnotations, ToolsCallRequest, ToolsCallResponse, ToolsListRequest, ToolsListResponse,
+        LATEST_PROTOCOL_VERSION, METHOD_INITIALIZE, METHOD_PING, METHOD_TOOLS_CALL,
+        METHOD_TOOLS_LIST, SUPPORTED_PROTOCOL_VERSIONS,
     },
     AppState, GovernanceConfig, McpError, McpResult,
 };
 use openact_core::store::{ActionRepository, ConnectionStore};
 use openact_core::{ConnectorKind, Trn};
-use openact_registry::{ConnectorRegistry, ExecutionContext};
 use openact_plugins as plugins;
+use openact_registry::{ConnectorRegistry, ExecutionContext};
 
 /// MCP Server
 pub struct McpServer {
@@ -45,11 +45,7 @@ impl McpServer {
             registrar(&mut registry);
         }
 
-        Self {
-            app_state,
-            registry,
-            governance,
-        }
+        Self { app_state, registry, governance }
     }
 
     /// Process a single MCP message (following Go's processMcpMessage pattern)
@@ -137,10 +133,7 @@ impl McpServer {
             ),
         };
 
-        Ok(success_response(
-            request.id.clone(),
-            serde_json::to_value(response)?,
-        ))
+        Ok(success_response(request.id.clone(), serde_json::to_value(response)?))
     }
 
     /// Handle ping method
@@ -187,10 +180,7 @@ impl McpServer {
                 output_schema: None,
             });
         } else {
-            debug!(
-                "Tool '{}' filtered by governance policy",
-                openact_execute_name
-            );
+            debug!("Tool '{}' filtered by governance policy", openact_execute_name);
         }
 
         // Optimize: Get all MCP-enabled actions in one query to avoid N+1
@@ -226,24 +216,37 @@ impl McpServer {
             }
 
             // Determine description/title (prefer overrides)
-            let description = a
-                .mcp_overrides
-                .as_ref()
-                .and_then(|o| o.description.clone());
+            let description = a.mcp_overrides.as_ref().and_then(|o| o.description.clone());
             let title = description.clone();
 
             // Derive schemas via action instance MCP hooks
             let (input_schema, output_schema) = match self.registry.derive_mcp_schemas(&a).await {
                 Ok((input_v, output_v_opt)) => {
-                    let input = serde_json::from_value::<openact_mcp_types::ToolInputSchema>(input_v)
-                        .unwrap_or(openact_mcp_types::ToolInputSchema { r#type: "object".into(), properties: None, required: None });
-                    let output = output_v_opt.and_then(|v| serde_json::from_value::<openact_mcp_types::ToolOutputSchema>(v).ok());
+                    let input =
+                        serde_json::from_value::<openact_mcp_types::ToolInputSchema>(input_v)
+                            .unwrap_or(openact_mcp_types::ToolInputSchema {
+                                r#type: "object".into(),
+                                properties: None,
+                                required: None,
+                            });
+                    let output = output_v_opt.and_then(|v| {
+                        serde_json::from_value::<openact_mcp_types::ToolOutputSchema>(v).ok()
+                    });
                     (input, output)
                 }
                 Err(e) => {
-                    warn!("Failed to derive MCP schemas for {}.{}: {}", a.connector.as_str(), a.name, e);
+                    warn!(
+                        "Failed to derive MCP schemas for {}.{}: {}",
+                        a.connector.as_str(),
+                        a.name,
+                        e
+                    );
                     (
-                        openact_mcp_types::ToolInputSchema { r#type: "object".into(), properties: None, required: None },
+                        openact_mcp_types::ToolInputSchema {
+                            r#type: "object".into(),
+                            properties: None,
+                            required: None,
+                        },
                         None,
                     )
                 }
@@ -264,22 +267,12 @@ impl McpServer {
 
         // Log alias conflicts if any
         if !alias_conflicts.is_empty() {
-            warn!(
-                "Detected {} tool name conflicts: {:?}",
-                alias_conflicts.len(),
-                alias_conflicts
-            );
+            warn!("Detected {} tool name conflicts: {:?}", alias_conflicts.len(), alias_conflicts);
         }
 
-        let response = ToolsListResponse {
-            tools,
-            next_cursor: None,
-        };
+        let response = ToolsListResponse { tools, next_cursor: None };
 
-        Ok(success_response(
-            request.id.clone(),
-            serde_json::to_value(response)?,
-        ))
+        Ok(success_response(request.id.clone(), serde_json::to_value(response)?))
     }
 
     /// Handle tools/call method
@@ -302,17 +295,12 @@ impl McpServer {
         }
 
         // Acquire concurrency permit
-        let _permit = self
-            .governance
-            .concurrency_limiter
-            .acquire()
-            .await
-            .map_err(|_| McpError::Internal("Failed to acquire concurrency permit".to_string()))?;
+        let _permit =
+            self.governance.concurrency_limiter.acquire().await.map_err(|_| {
+                McpError::Internal("Failed to acquire concurrency permit".to_string())
+            })?;
 
-        debug!(
-            "Acquired concurrency permit for tool: {}",
-            call_request.name
-        );
+        debug!("Acquired concurrency permit for tool: {}", call_request.name);
 
         // Execute with timeout
         let execution_future = async {
@@ -321,10 +309,7 @@ impl McpServer {
                     let empty = serde_json::json!({});
                     let args_ref = call_request.arguments.as_ref().unwrap_or(&empty);
                     let result = self.execute_openact_action(args_ref).await?;
-                    Ok(success_response(
-                        request.id.clone(),
-                        serde_json::to_value(result)?,
-                    ))
+                    Ok(success_response(request.id.clone(), serde_json::to_value(result)?))
                 }
                 // For per-action tools (both direct connector.action and aliased tools)
                 other => {
@@ -367,10 +352,7 @@ impl McpServer {
                     }
 
                     let result = self.execute_openact_action(&wrapped).await?;
-                    Ok(success_response(
-                        request.id.clone(),
-                        serde_json::to_value(result)?,
-                    ))
+                    Ok(success_response(request.id.clone(), serde_json::to_value(result)?))
                 }
             }
         };
@@ -379,10 +361,7 @@ impl McpServer {
         match timeout(self.governance.timeout, execution_future).await {
             Ok(result) => result,
             Err(_) => {
-                warn!(
-                    "Tool '{}' timed out after {:?}",
-                    call_request.name, self.governance.timeout
-                );
+                warn!("Tool '{}' timed out after {:?}", call_request.name, self.governance.timeout);
                 Err(McpError::Timeout)
             }
         }
@@ -460,32 +439,27 @@ impl McpServer {
             if !connector.is_empty() && !action.is_empty() {
                 // Verify this action exists (using canonical connector)
                 let kind = ConnectorKind::new(connector.to_string()).canonical();
-                let actions = ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
+                let actions =
+                    ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
                         .await
-                        .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
+                        .map_err(|e| {
+                            McpError::Internal(format!("Failed to list actions: {}", e))
+                        })?;
                 if actions.iter().any(|a| a.name == action && a.mcp_enabled) {
-                    debug!(
-                        "Resolved direct tool '{}' to {}.{}",
-                        tool_name, connector, action
-                    );
+                    debug!("Resolved direct tool '{}' to {}.{}", tool_name, connector, action);
                     return Ok((connector.to_string(), action.to_string()));
                 }
             }
         }
 
-        Err(McpError::ToolNotFound(format!(
-            "Tool not found: {}",
-            tool_name
-        )))
+        Err(McpError::ToolNotFound(format!("Tool not found: {}", tool_name)))
     }
 
     /// Execute an OpenAct action
     async fn execute_openact_action(&self, arguments: &Value) -> McpResult<ToolsCallResponse> {
         // Validate arguments object
         if !arguments.is_object() {
-            return Err(McpError::InvalidArguments(
-                "Arguments must be an object".to_string(),
-            ));
+            return Err(McpError::InvalidArguments("Arguments must be an object".to_string()));
         }
 
         let input = arguments
@@ -524,20 +498,15 @@ impl McpServer {
                     )
                 })?;
 
-            let tenant = arguments
-                .get("tenant")
-                .and_then(|v| v.as_str())
-                .unwrap_or("default");
+            let tenant = arguments.get("tenant").and_then(|v| v.as_str()).unwrap_or("default");
             // Accept version as number or string "latest". When "latest", treat as None to pick highest.
             let version_opt = match arguments.get("version") {
                 Some(v) if v.is_i64() => v.as_i64(),
                 Some(v) if v.is_u64() => v.as_u64().and_then(|n| i64::try_from(n).ok()),
-                Some(v) if v.is_string() => {
-                    match v.as_str().unwrap_or("") {
-                        "latest" | "" => None,
-                        s => s.parse::<i64>().ok(),
-                    }
-                }
+                Some(v) if v.is_string() => match v.as_str().unwrap_or("") {
+                    "latest" | "" => None,
+                    s => s.parse::<i64>().ok(),
+                },
                 _ => None,
             };
 
@@ -587,12 +556,7 @@ impl McpServer {
                 candidates
                     .into_iter()
                     .rev()
-                    .find(|a| {
-                        a.trn
-                            .parse_action()
-                            .map(|c| c.version == v)
-                            .unwrap_or(false)
-                    })
+                    .find(|a| a.trn.parse_action().map(|c| c.version == v).unwrap_or(false))
                     .ok_or_else(|| {
                         McpError::ToolNotFound(format!(
                             "Action not found: {}.{}@v{} (tenant: {})",
@@ -1000,15 +964,10 @@ pub async fn serve_http(
                     "mcp-protocol-version",
                     crate::mcp::LATEST_PROTOCOL_VERSION.parse().unwrap(),
                 );
-                response_headers.insert(
-                    "mcp-session-id",
-                    Uuid::new_v4().to_string().parse().unwrap(),
-                );
+                response_headers
+                    .insert("mcp-session-id", Uuid::new_v4().to_string().parse().unwrap());
 
-                Ok((
-                    response_headers,
-                    Json(serde_json::to_value(response).unwrap()),
-                ))
+                Ok((response_headers, Json(serde_json::to_value(response).unwrap())))
             }
             Ok(None) => {
                 // Notification - no response
@@ -1018,10 +977,8 @@ pub async fn serve_http(
                     "mcp-protocol-version",
                     crate::mcp::LATEST_PROTOCOL_VERSION.parse().unwrap(),
                 );
-                response_headers.insert(
-                    "mcp-session-id",
-                    Uuid::new_v4().to_string().parse().unwrap(),
-                );
+                response_headers
+                    .insert("mcp-session-id", Uuid::new_v4().to_string().parse().unwrap());
 
                 Ok((response_headers, Json(serde_json::json!({}))))
             }
@@ -1043,9 +1000,7 @@ pub async fn serve_http(
         }
     }
 
-    let app = Router::new()
-        .route("/mcp", post(handle_mcp_request))
-        .with_state(server);
+    let app = Router::new().route("/mcp", post(handle_mcp_request)).with_state(server);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

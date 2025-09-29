@@ -32,10 +32,7 @@ impl TaskHandler for Router {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn end_to_end_http_with_encrypted_auth_store() {
-    std::env::set_var(
-        "OPENACT_ENC_KEY",
-        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-    );
+    std::env::set_var("OPENACT_ENC_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("enc_authflow.sqlite");
@@ -50,9 +47,7 @@ async fn end_to_end_http_with_encrypted_auth_store() {
 
     // Verify ciphertext in db
     let pool = SqlitePool::connect_with(
-        SqliteConnectOptions::new()
-            .filename(PathBuf::from(&db_path))
-            .create_if_missing(true),
+        SqliteConnectOptions::new().filename(PathBuf::from(&db_path)).create_if_missing(true),
     )
     .await
     .unwrap();
@@ -69,9 +64,7 @@ async fn end_to_end_http_with_encrypted_auth_store() {
     // Mock API requiring Bearer token
     let server = MockServer::start();
     let m = server.mock(|when, then| {
-        when.method(GET)
-            .path("/secure")
-            .header("authorization", "Bearer tok_abc");
+        when.method(GET).path("/secure").header("authorization", "Bearer tok_abc");
         then.status(200).json_body(json!({"ok": true}));
     });
 

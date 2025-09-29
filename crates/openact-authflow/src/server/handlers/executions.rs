@@ -174,10 +174,7 @@ pub async fn get_execution_trace(
     // Add current state (if running or paused)
     let mut current_trace = trace;
     if let Some(current_state) = &execution.current_state {
-        if matches!(
-            execution.status,
-            ExecutionStatus::Running | ExecutionStatus::Paused
-        ) {
+        if matches!(execution.status, ExecutionStatus::Running | ExecutionStatus::Paused) {
             current_trace.push(json!({
                 "state": current_state,
                 "status": "active",
@@ -299,11 +296,7 @@ pub async fn start_execution(
         runtime::execute_workflow(state_clone, execution_id_clone).await;
     });
 
-    (
-        StatusCode::CREATED,
-        Json(serde_json::to_value(execution).unwrap()),
-    )
-        .into_response()
+    (StatusCode::CREATED, Json(serde_json::to_value(execution).unwrap())).into_response()
 }
 
 /// Resume paused execution

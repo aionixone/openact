@@ -16,9 +16,7 @@ pub struct AppState {
 impl AppState {
     /// Create a new AppState
     pub fn new(store: SqlStore) -> Self {
-        Self {
-            store: Arc::new(store),
-        }
+        Self { store: Arc::new(store) }
     }
 
     /// Create a new AppState from an Arc<SqlStore> without cloning the inner store

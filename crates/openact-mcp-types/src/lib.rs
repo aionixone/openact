@@ -37,11 +37,7 @@ fn default_jsonrpc() -> String {
 pub struct Annotations {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audience: Option<Vec<Role>>,
-    #[serde(
-        rename = "lastModified",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "lastModified", default, skip_serializing_if = "Option::is_none")]
     pub last_modified: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<f64>,
@@ -107,11 +103,7 @@ pub struct CallToolResult {
     pub content: Vec<ContentBlock>,
     #[serde(rename = "isError", default, skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
-    #[serde(
-        rename = "structuredContent",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "structuredContent", default, skip_serializing_if = "Option::is_none")]
     pub structured_content: Option<serde_json::Value>,
 }
 
@@ -155,11 +147,7 @@ pub struct ClientCapabilities {
 /// Present if the client supports listing roots.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ClientCapabilitiesRoots {
-    #[serde(
-        rename = "listChanged",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "listChanged", default, skip_serializing_if = "Option::is_none")]
     pub list_changed: Option<bool>,
 }
 
@@ -296,34 +284,18 @@ impl ModelContextProtocolRequest for CreateMessageRequest {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CreateMessageRequestParams {
-    #[serde(
-        rename = "includeContext",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "includeContext", default, skip_serializing_if = "Option::is_none")]
     pub include_context: Option<String>,
     #[serde(rename = "maxTokens")]
     pub max_tokens: i64,
     pub messages: Vec<SamplingMessage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
-    #[serde(
-        rename = "modelPreferences",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "modelPreferences", default, skip_serializing_if = "Option::is_none")]
     pub model_preferences: Option<ModelPreferences>,
-    #[serde(
-        rename = "stopSequences",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "stopSequences", default, skip_serializing_if = "Option::is_none")]
     pub stop_sequences: Option<Vec<String>>,
-    #[serde(
-        rename = "systemPrompt",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "systemPrompt", default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
@@ -335,11 +307,7 @@ pub struct CreateMessageResult {
     pub content: CreateMessageResultContent,
     pub model: String,
     pub role: Role,
-    #[serde(
-        rename = "stopReason",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "stopReason", default, skip_serializing_if = "Option::is_none")]
     pub stop_reason: Option<String>,
 }
 
@@ -613,11 +581,7 @@ pub struct ListPromptsRequestParams {
 /// The server's response to a prompts/list request from the client.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ListPromptsResult {
-    #[serde(
-        rename = "nextCursor",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "nextCursor", default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
     pub prompts: Vec<Prompt>,
 }
@@ -648,11 +612,7 @@ pub struct ListResourceTemplatesRequestParams {
 /// The server's response to a resources/templates/list request from the client.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ListResourceTemplatesResult {
-    #[serde(
-        rename = "nextCursor",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "nextCursor", default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
     #[serde(rename = "resourceTemplates")]
     pub resource_templates: Vec<ResourceTemplate>,
@@ -684,11 +644,7 @@ pub struct ListResourcesRequestParams {
 /// The server's response to a resources/list request from the client.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ListResourcesResult {
-    #[serde(
-        rename = "nextCursor",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "nextCursor", default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
     pub resources: Vec<Resource>,
 }
@@ -744,11 +700,7 @@ pub struct ListToolsRequestParams {
 /// The server's response to a tools/list request from the client.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ListToolsResult {
-    #[serde(
-        rename = "nextCursor",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "nextCursor", default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
     pub tools: Vec<Tool>,
 }
@@ -824,25 +776,13 @@ pub struct ModelHint {
 /// balance them against other considerations.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ModelPreferences {
-    #[serde(
-        rename = "costPriority",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "costPriority", default, skip_serializing_if = "Option::is_none")]
     pub cost_priority: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hints: Option<Vec<ModelHint>>,
-    #[serde(
-        rename = "intelligencePriority",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "intelligencePriority", default, skip_serializing_if = "Option::is_none")]
     pub intelligence_priority: Option<f64>,
-    #[serde(
-        rename = "speedPriority",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "speedPriority", default, skip_serializing_if = "Option::is_none")]
     pub speed_priority: Option<f64>,
 }
 
@@ -881,11 +821,7 @@ pub struct PaginatedRequestParams {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct PaginatedResult {
-    #[serde(
-        rename = "nextCursor",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "nextCursor", default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
 
@@ -1194,22 +1130,14 @@ pub struct ServerCapabilities {
 /// Present if the server offers any tools to call.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ServerCapabilitiesTools {
-    #[serde(
-        rename = "listChanged",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "listChanged", default, skip_serializing_if = "Option::is_none")]
     pub list_changed: Option<bool>,
 }
 
 /// Present if the server offers any resources to read.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ServerCapabilitiesResources {
-    #[serde(
-        rename = "listChanged",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "listChanged", default, skip_serializing_if = "Option::is_none")]
     pub list_changed: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscribe: Option<bool>,
@@ -1218,11 +1146,7 @@ pub struct ServerCapabilitiesResources {
 /// Present if the server offers any prompt templates.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ServerCapabilitiesPrompts {
-    #[serde(
-        rename = "listChanged",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "listChanged", default, skip_serializing_if = "Option::is_none")]
     pub list_changed: Option<bool>,
 }
 
@@ -1350,11 +1274,7 @@ pub struct Tool {
     #[serde(rename = "inputSchema")]
     pub input_schema: ToolInputSchema,
     pub name: String,
-    #[serde(
-        rename = "outputSchema",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "outputSchema", default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<ToolOutputSchema>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -1391,29 +1311,13 @@ pub struct ToolInputSchema {
 /// received from untrusted servers.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ToolAnnotations {
-    #[serde(
-        rename = "destructiveHint",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "destructiveHint", default, skip_serializing_if = "Option::is_none")]
     pub destructive_hint: Option<bool>,
-    #[serde(
-        rename = "idempotentHint",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "idempotentHint", default, skip_serializing_if = "Option::is_none")]
     pub idempotent_hint: Option<bool>,
-    #[serde(
-        rename = "openWorldHint",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "openWorldHint", default, skip_serializing_if = "Option::is_none")]
     pub open_world_hint: Option<bool>,
-    #[serde(
-        rename = "readOnlyHint",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "readOnlyHint", default, skip_serializing_if = "Option::is_none")]
     pub read_only_hint: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
