@@ -17,29 +17,53 @@ impl Trn {
     }
 
     /// Parse TRN components
-    /// Format: trn:openact:{tenant}:{resource_type}/{name}@v{version}
+    /// Supported formats:
+    /// - trn:openact:{tenant}:{resource_type}/{name}@v{version}
+    /// - trn:openact:{tenant}:{resource_type}/{name}            (version optional)
+    ///
+    /// For resources that include a subtype (e.g., action/{connector}/name or
+    /// connection/{connector}/name), `{resource_type}` may itself contain a
+    /// slash (e.g., "action/http"). We therefore split on the LAST '/' to
+    /// separate `{resource_type}` and `{name}`.
     pub fn parse(&self) -> Option<TrnComponents> {
-        let parts: Vec<&str> = self.0.split(':').collect();
-        if parts.len() < 4 || parts[0] != "trn" || parts[1] != "openact" {
+        // Basic prefix validation and segment extraction
+        let mut parts = self.0.split(':');
+        let scheme = parts.next()?; // "trn"
+        let system = parts.next()?; // "openact"
+        let tenant = parts.next()?;
+        let remainder = parts.next()?; // "action/http/get-ip@v1" or similar
+        if scheme != "trn" || system != "openact" {
             return None;
         }
 
-        let tenant = parts[2];
-        let resource_part = parts[3];
+        // Split off optional version suffix
+        let (resource_and_name, version_part_opt) = match remainder.split_once('@') {
+            Some((r, v)) => (r, Some(v)),
+            None => (remainder, None),
+        };
 
-        // Parse resource_type/name@version
-        if let Some((resource_type_name, version_part)) = resource_part.split_once('@') {
-            if let Some((resource_type, name)) = resource_type_name.split_once('/') {
-                let version = version_part.strip_prefix('v')?.parse().ok()?;
-                return Some(TrnComponents {
-                    tenant: tenant.to_string(),
-                    resource_type: resource_type.to_string(),
-                    name: name.to_string(),
-                    version,
-                });
-            }
+        // Separate resource_type and name using the last '/'
+        let last_slash = resource_and_name.rfind('/')?;
+        let resource_type = &resource_and_name[..last_slash];
+        let name = &resource_and_name[last_slash + 1..];
+        if resource_type.is_empty() || name.is_empty() {
+            return None;
         }
-        None
+
+        // Parse version if present; default to 0 when absent
+        let version = if let Some(vraw) = version_part_opt {
+            let vnum = vraw.strip_prefix('v')?.parse().ok()?;
+            vnum
+        } else {
+            0
+        };
+
+        Some(TrnComponents {
+            tenant: tenant.to_string(),
+            resource_type: resource_type.to_string(),
+            name: name.to_string(),
+            version,
+        })
     }
 
     /// Helper to parse connection TRN: trn:openact:{tenant}:connection/{connector}/{name}@v{version}
@@ -142,6 +166,17 @@ impl ConnectorKind {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Return the canonical name for this connector (apply alias mapping).
+    pub fn canonical(&self) -> ConnectorKind {
+        let k = self.0.to_ascii_lowercase();
+        match k.as_str() {
+            "postgresql" | "pg" => ConnectorKind::new("postgres"),
+            _ => ConnectorKind::new(k),
+        }
+    }
+
+    // Note: alias expansion discouraged in core to avoid maintenance burden.
 }
 
 impl fmt::Display for ConnectorKind {

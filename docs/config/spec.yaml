@@ -2,13 +2,16 @@
 
 # Top-level manifest
 version: "1.0"            # required
-metadata: {}               # optional key-value map
+metadata: {}               # optional key-value map (free-form)
 
 # Flat connections catalog (aka sources)
 connections:
   # Connection name (unique)
   <connection_name>:
-    kind: <connector>      # required: http | postgres | mysql | redis | bigtable | ...
+    kind: <connector>      # required: http | postgres | mysql | redis | ...
+                           # NOTE: use canonical ids as accepted by the loader and registry.
+                           # - databases: use "postgres" (not "postgresql"). The build feature is named
+                           #   "postgresql", but config kind is "postgres".
     description: "..."     # optional
 
     # Style A (flattened syntax, recommended for authoring)
@@ -43,9 +46,18 @@ actions:
     parameters:            # optional
       - name: <param_name>
         type: string|number|boolean|object|array
-        required: true|false
-        default: <any>     # optional
-        schema: {}         # optional, JSON Schema for complex structures
+        required: true|false           # optional (connector-dependent; for Postgres all declared params are required)
+        default: <any>                 # optional (used by validators/clients; connector-dependent at runtime)
+        description: "..."             # optional
+        nullable: true|false           # optional (maps to JSON Schema nullability)
+        enum: [a, b, c]               # optional
+        format: email|uri|uuid|...     # optional (JSON Schema well-known formats)
+        minLength: 1                   # optional (strings)
+        maxLength: 128                 # optional (strings)
+        pattern: "^[a-z0-9_]+$"        # optional (strings)
+        minimum: 0                     # optional (numbers)
+        maximum: 100                   # optional (numbers)
+        schema: {}                     # optional: full JSON Schema for complex objects/arrays
 
     # Connector-specific execution config (HTTP/SQL/Redis/...) kept inside config
     config:
@@ -64,12 +76,23 @@ actions:
       # redis example:
       # command: ["GET", "{{key}}"]          # template placeholders map from parameters
 
-    # MCP exposure and overrides
+    # Optional MCP exposure and overrides
     mcp:                    # optional
       enabled: true|false
       tool_name: <alias>    # optional; overrides action key in tools/list
-      description: "..."     # optional; overrides description
-      input_schema: {}      # optional; overrides schema derived from parameters
+      description: "..."     # optional; overrides description for MCP clients
+      tags: ["db", "users"] # optional; categorization for discovery/UX
+      requires_auth: false  # optional; advisory flag for clients/governance
+      input_shape: object|args  # optional; hints preferred input shape for tools/call
+      # input_schema: {}     # optional; override derived schema (CURRENTLY EXPERIMENTAL –
+                             # wire up only if server side supports it; otherwise prefer parameters → schema)
+
+    # Optional execution limits (connector-dependent; enforced when supported)
+    limits:                 # optional
+      timeout_ms: 5000      # optional; action-level timeout
+      max_rows: 1000        # optional; for query-like actions
+      max_bytes: 1048576    # optional; truncate or error past this size
+      dry_run: false        # optional; validate/bind only, skip execution if supported
 
 
 # Normalization & validation rules (comments):
@@ -80,6 +103,7 @@ actions:
 #   actions export use config wrapper for execution details.
 # - Env vars: ${VAR_NAME} are resolved at load/import.
 # - Names: action keys are globally unique; used as default MCP tool names/aliases and for governance filters.
+#   Use stable, semantic names to avoid alias conflicts when combined with mcp.tool_name.
 
 # HTTP-only merge semantics (comments):
 # - Precedence (low → high): connection.config < action.config < call input
@@ -92,13 +116,20 @@ actions:
 
 # Parameters (comments):
 # - May be defined on both connection and action; merged by name (action overrides). Used for validation & MCP inputSchema.
-# - mcp.input_schema may override the derived schema when provided.
+# - For Postgres actions, declared parameters are treated as required and bound positionally or by name.
+#   The loader stores `parameters` into action config (_metadata) to let MCP derive inputSchema.
+# - mcp.input_schema: keep as an advanced override only if server supports it; otherwise prefer deriving from `parameters`.
 
 # Input mapping (comments):
 # - Recognized input keys: query, headers, body, path, and template variables.
 # - Path templating: /users/{id} is filled from input.path.id or by name; missing required vars cause validation errors.
+# - For Postgres, inputs can be either `{ args: [..] }` (positional) or an object with parameter names; both are supported.
 
 # Export style (comments):
 # - Connections: flattened style by default (or configurable). Actions: config wrapper; explicit kind always present.
+# - Statement sugar: actions may specify `statement: "..."` which normalizes into `config.statement` during load.
 
+# Governance (comments):
+# - Server-level governance can allow/deny tools by pattern (e.g., ["openact.execute"], ["postgres.*"]).
+# - Combine with `mcp.requires_auth` and tags to drive client-side UX or policy engines.
 

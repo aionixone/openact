@@ -1,0 +1,37 @@
+version: "1.0"
+
+connections:
+  httpbin:
+    kind: http
+    base_url: https://httpbin.org
+
+actions:
+  get-ip:
+    connection: httpbin
+    description: "GET /ip"
+    config:
+      method: "GET"
+      path: "/ip"
+      # Optional examples to exercise schema generation
+      query_params:
+        foo: ["bar"]
+      headers:
+        X-Debug: ["1"]
+    mcp:
+      enabled: true
+
+  post-json:
+    connection: httpbin
+    description: "POST /anything with JSON body"
+    config:
+      method: "POST"
+      path: "/anything"
+      body:
+        type: json
+        data:
+          name: "alice"
+          score: 99
+          tags: ["a", "b"]
+    mcp:
+      enabled: true
+

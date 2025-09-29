@@ -1,0 +1,19 @@
+[package]
+name = "openact-mcp-types"
+version = "0.1.0"
+edition = "2021"
+description = "Generated MCP protocol types (from JSON Schema) for OpenAct"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ts-rs = { version = "10", optional = true }
+
+[features]
+default = []
+# Enable TypeScript type generation for these types.
+ts_rs = ["dep:ts-rs"]
+
+[package.metadata]
+generated-from = "rf/codex/codex-rs/mcp-types/schema/2025-06-18/schema.json"

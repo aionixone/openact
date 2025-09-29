@@ -251,7 +251,9 @@ impl ConfigLoader {
                             conn_name
                         ))
                     })?;
-                connection_kind_by_name.insert(conn_name.clone(), kind.to_string());
+                // Canonicalize connector kind
+                let kind_canon = openact_core::ConnectorKind::new(kind.to_string()).canonical();
+                connection_kind_by_name.insert(conn_name.clone(), kind_canon.as_str().to_string());
 
                 // Build connection config by excluding only outer keys; keep all others (connector-agnostic)
                 let mut config_map = serde_json::Map::new();
@@ -270,7 +272,7 @@ impl ConfigLoader {
                 };
 
                 let connector = connectors
-                    .entry(kind.to_string())
+                    .entry(kind_canon.as_str().to_string())
                     .or_insert_with(ConnectorConfig::default);
                 connector.connections.insert(conn_name.clone(), connection);
             }
@@ -303,6 +305,7 @@ impl ConfigLoader {
                     .ok_or_else(|| ConfigError::Validation(format!(
                         "Action '{}' cannot determine kind (no explicit kind and connection not found)", act_name
                     )))?;
+                let action_kind_canon = openact_core::ConnectorKind::new(action_kind.clone()).canonical();
 
                 // Build action.config (prefer 'config' object; support 'statement' sugar)
                 let mut config_json = if let Some(cfg) = act_obj.get("config") {
@@ -369,7 +372,7 @@ impl ConfigLoader {
                 };
 
                 let connector = connectors
-                    .entry(action_kind.clone())
+                    .entry(action_kind_canon.as_str().to_string())
                     .or_insert_with(ConnectorConfig::default);
                 connector.actions.insert(act_name.clone(), action);
             }

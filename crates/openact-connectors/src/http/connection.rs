@@ -222,6 +222,7 @@ pub struct HttpConnection {
     pub base_url: String,
     
     /// Authorization configuration
+    #[serde(default = "default_authorization_type")]
     pub authorization: AuthorizationType,
     
     /// Authentication parameters (optional for None authorization type)
@@ -284,4 +285,8 @@ impl Default for HttpConnection {
     fn default() -> Self {
         Self::new("http://localhost".to_string(), AuthorizationType::None)
     }
+}
+
+fn default_authorization_type() -> AuthorizationType {
+    AuthorizationType::None
 }

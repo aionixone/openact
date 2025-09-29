@@ -291,6 +291,53 @@ impl Action for PostgresActionWrapper {
         }
         Ok(())
     }
+
+    fn mcp_input_schema(&self, _record: &openact_core::ActionRecord) -> JsonValue {
+        // Derive from action parameters
+        let mut properties = serde_json::Map::new();
+        let mut required: Vec<String> = Vec::new();
+        for p in &self.action.parameters {
+            let ty = match p.param_type.as_deref() {
+                Some("number") => "number",
+                Some("boolean") => "boolean",
+                Some("object") => "object",
+                Some("array") => "array",
+                _ => "string",
+            };
+            properties.insert(p.name.clone(), serde_json::json!({"type": ty}));
+            required.push(p.name.clone());
+        }
+        serde_json::json!({
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        })
+    }
+
+    fn mcp_output_schema(&self, _record: &openact_core::ActionRecord) -> Option<JsonValue> {
+        let stmt = self.action.statement.to_lowercase();
+        let returns_rows = stmt.starts_with("select") || stmt.starts_with("with") || stmt.starts_with("show") || stmt.contains(" returning ");
+        if returns_rows {
+            Some(serde_json::json!({
+                "type": "object",
+                "properties": { "rows": { "type": "array", "items": { "type": "object" } } },
+                "required": ["rows"],
+            }))
+        } else {
+            Some(serde_json::json!({
+                "type": "object",
+                "properties": { "rows_affected": { "type": "integer" } },
+                "required": ["rows_affected"],
+            }))
+        }
+    }
+
+    fn mcp_wrap_output(&self, output: JsonValue) -> JsonValue {
+        match output {
+            JsonValue::Array(arr) => serde_json::json!({"rows": arr}),
+            other => other,
+        }
+    }
 }
 
 #[cfg(test)]

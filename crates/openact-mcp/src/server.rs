@@ -13,10 +13,10 @@ use crate::{
         JSONRPC_VERSION,
     },
     mcp::{
-        Content, Implementation, InitializeRequest, InitializeResponse, ServerCapabilities, Tool,
-        ToolsCallRequest, ToolsCallResponse, ToolsCapability, ToolsListRequest, ToolsListResponse,
-        LATEST_PROTOCOL_VERSION, METHOD_INITIALIZE, METHOD_PING, METHOD_TOOLS_CALL,
-        METHOD_TOOLS_LIST, SUPPORTED_PROTOCOL_VERSIONS,
+        ContentBlock, InitializeRequest, InitializeResponse, ServerCapabilities, Tool,
+        ToolAnnotations, ToolsCallRequest, ToolsCallResponse, ToolsListRequest,
+        ToolsListResponse, LATEST_PROTOCOL_VERSION, METHOD_INITIALIZE, METHOD_PING,
+        METHOD_TOOLS_CALL, METHOD_TOOLS_LIST, SUPPORTED_PROTOCOL_VERSIONS,
     },
     AppState, GovernanceConfig, McpError, McpResult,
 };
@@ -119,13 +119,18 @@ impl McpServer {
         let response = InitializeResponse {
             protocol_version,
             capabilities: ServerCapabilities {
-                tools: Some(ToolsCapability { list_changed: None }),
-                resources: None,
+                completions: None,
+                experimental: None,
+                logging: None,
                 prompts: None,
+                resources: None,
+                tools: Some(openact_mcp_types::ServerCapabilitiesTools { list_changed: None }),
             },
-            server_info: Implementation {
+            server_info: openact_mcp_types::Implementation {
                 name: "OpenAct MCP Server".to_string(),
+                title: Some("OpenAct MCP".to_string()),
                 version: env!("CARGO_PKG_VERSION").to_string(),
+                user_agent: None,
             },
             instructions: Some(
                 "OpenAct MCP Server - Execute actions through connectors".to_string(),
@@ -159,44 +164,27 @@ impl McpServer {
             tools.push(Tool {
                 name: openact_execute_name.to_string(),
                 description: Some("Execute an OpenAct action using either explicit TRN or connector/action components".to_string()),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "action_trn": {
-                            "type": "string",
-                            "description": "Explicit action TRN (e.g., 'trn:openact:tenant:action/http/get@v1')"
-                        },
-                        "connector": {
-                            "type": "string",
-                            "description": "Connector type (e.g., 'http') - required when action_trn not provided"
-                        },
-                        "action": {
-                            "type": "string",
-                            "description": "Action name (e.g., 'get') - required when action_trn not provided"
-                        },
-                        "tenant": {
-                            "type": "string",
-                            "description": "Tenant name (default: 'default')"
-                        },
-                        "version": {
-                            "type": "integer",
-                            "description": "Action version (default: latest)"
-                        },
-                        "input": {
-                            "type": "object",
-                            "description": "Input parameters for the action"
-                        }
-                    },
-                    "required": ["input"],
-                    "oneOf": [
-                        {
-                            "required": ["action_trn", "input"]
-                        },
-                        {
-                            "required": ["connector", "action", "input"]
-                        }
-                    ]
+                title: Some("OpenAct Execute".to_string()),
+                annotations: Some(ToolAnnotations {
+                    destructive_hint: Some(false),
+                    idempotent_hint: None,
+                    open_world_hint: None,
+                    read_only_hint: Some(false),
+                    title: Some("Execute OpenAct action".to_string()),
                 }),
+                input_schema: openact_mcp_types::ToolInputSchema {
+                    r#type: "object".into(),
+                    properties: Some(serde_json::json!({
+                        "action_trn": {"type": "string", "description": "Explicit action TRN (e.g., 'trn:openact:tenant:action/http/get@v1')"},
+                        "connector": {"type": "string", "description": "Connector type (e.g., 'http') - required when action_trn not provided"},
+                        "action": {"type": "string", "description": "Action name (e.g., 'get') - required when action_trn not provided"},
+                        "tenant": {"type": "string", "description": "Tenant name (default: 'default')"},
+                        "version": {"type": "integer", "description": "Action version (default: latest)"},
+                        "input": {"type": "object", "description": "Input parameters for the action"}
+                    })),
+                    required: Some(vec!["input".into()]),
+                },
+                output_schema: None,
             });
         } else {
             debug!(
@@ -237,21 +225,40 @@ impl McpServer {
                 continue;
             }
 
-            // Determine description: use mcp_overrides.description if available
-            let description = a.mcp_overrides.as_ref().and_then(|o| o.description.clone());
+            // Determine description/title (prefer overrides)
+            let description = a
+                .mcp_overrides
+                .as_ref()
+                .and_then(|o| o.description.clone());
+            let title = description.clone();
 
-            // TODO: Generate schema from ActionInput definition in the future
-            // For now, use a permissive schema that accepts any object input
-            let schema = serde_json::json!({
-                "type": "object",
-                "additionalProperties": true,
-                "description": "Action-specific input parameters"
-            });
+            // Derive schemas via action instance MCP hooks
+            let (input_schema, output_schema) = match self.registry.derive_mcp_schemas(&a).await {
+                Ok((input_v, output_v_opt)) => {
+                    let input = serde_json::from_value::<openact_mcp_types::ToolInputSchema>(input_v)
+                        .unwrap_or(openact_mcp_types::ToolInputSchema { r#type: "object".into(), properties: None, required: None });
+                    let output = output_v_opt.and_then(|v| serde_json::from_value::<openact_mcp_types::ToolOutputSchema>(v).ok());
+                    (input, output)
+                }
+                Err(e) => {
+                    warn!("Failed to derive MCP schemas for {}.{}: {}", a.connector.as_str(), a.name, e);
+                    (
+                        openact_mcp_types::ToolInputSchema { r#type: "object".into(), properties: None, required: None },
+                        None,
+                    )
+                }
+            };
+
+            // Add annotations (best-effort hints)
+            let annotations = derive_annotations(&a);
 
             tools.push(Tool {
                 name: tool_name,
                 description,
-                input_schema: schema,
+                title,
+                annotations,
+                input_schema,
+                output_schema,
             });
         }
 
@@ -311,7 +318,9 @@ impl McpServer {
         let execution_future = async {
             match call_request.name.as_str() {
                 "openact.execute" => {
-                    let result = self.execute_openact_action(&call_request.arguments).await?;
+                    let empty = serde_json::json!({});
+                    let args_ref = call_request.arguments.as_ref().unwrap_or(&empty);
+                    let result = self.execute_openact_action(args_ref).await?;
                     Ok(success_response(
                         request.id.clone(),
                         serde_json::to_value(result)?,
@@ -321,12 +330,42 @@ impl McpServer {
                 other => {
                     let (connector, action) = self.resolve_tool_to_action(other).await?;
 
-                    // The tool's arguments are treated as the action input directly
-                    let wrapped = serde_json::json!({
+                    // Flatten arguments: if user provided { input: {...} } use that;
+                    // otherwise, treat the whole arguments object as input. Also pass through
+                    // optional tenant/version if provided in arguments.
+                    let empty = serde_json::json!({});
+                    let args_ref = call_request.arguments.as_ref().unwrap_or(&empty);
+
+                    let (tenant_val, version_val) = if let Some(obj) = args_ref.as_object() {
+                        (obj.get("tenant").cloned(), obj.get("version").cloned())
+                    } else {
+                        (None, None)
+                    };
+
+                    let input_value = if let Some(obj) = args_ref.as_object() {
+                        if let Some(inner) = obj.get("input") {
+                            inner.clone()
+                        } else {
+                            // Use full object as input, but it may contain tenant/version; keep simple for now.
+                            args_ref.clone()
+                        }
+                    } else {
+                        args_ref.clone()
+                    };
+
+                    let mut wrapped = serde_json::json!({
                         "connector": connector,
                         "action": action,
-                        "input": call_request.arguments
+                        "input": input_value
                     });
+
+                    if let Some(t) = tenant_val {
+                        wrapped["tenant"] = t;
+                    }
+                    if let Some(v) = version_val {
+                        wrapped["version"] = v;
+                    }
+
                     let result = self.execute_openact_action(&wrapped).await?;
                     Ok(success_response(
                         request.id.clone(),
@@ -419,15 +458,11 @@ impl McpServer {
             let connector = parts.next().unwrap_or("");
             let action = parts.next().unwrap_or("");
             if !connector.is_empty() && !action.is_empty() {
-                // Verify this action exists
-                let kind = ConnectorKind::new(connector.to_string());
-                let actions =
-                    ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
+                // Verify this action exists (using canonical connector)
+                let kind = ConnectorKind::new(connector.to_string()).canonical();
+                let actions = ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
                         .await
-                        .map_err(|e| {
-                            McpError::Internal(format!("Failed to list actions: {}", e))
-                        })?;
-
+                        .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
                 if actions.iter().any(|a| a.name == action && a.mcp_enabled) {
                     debug!(
                         "Resolved direct tool '{}' to {}.{}",
@@ -500,13 +535,13 @@ impl McpServer {
                 connector, action, tenant, version_opt
             );
 
-            // Resolve action TRN by scanning actions of the connector
-            let kind = ConnectorKind::new(connector.to_string());
-            let actions = ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
+            // Resolve action TRN by scanning actions of the canonical connector
+            let kind = ConnectorKind::new(connector.to_string()).canonical();
+            let all = ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
                 .await
                 .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
 
-            let mut candidates: Vec<_> = actions
+            let mut candidates: Vec<_> = all
                 .into_iter()
                 .filter(|a| {
                     debug!("Checking action: name='{}' vs target='{}'", a.name, action);
@@ -566,14 +601,266 @@ impl McpServer {
             .await
             .map_err(|e| McpError::Internal(e.to_string()))?;
 
-        let text = serde_json::to_string(&exec.output).unwrap_or_else(|_| "{}".to_string());
+        // The action has already had a chance to wrap/normalize its output via
+        // Action::mcp_wrap_output (applied in the registry). MCP server should
+        // treat it as the canonical structured content and avoid per-connector
+        // branching here.
+        let structured = exec.output.clone();
+        let text = serde_json::to_string(&structured).unwrap_or_else(|_| "{}".to_string());
+
+        let block = ContentBlock::TextContent(openact_mcp_types::TextContent {
+            annotations: None,
+            text,
+            r#type: "text".into(),
+        });
         Ok(ToolsCallResponse {
-            content: vec![Content::text(text)],
+            content: vec![block],
             is_error: None,
+            structured_content: Some(structured),
         })
     }
 }
 
+/// Build a JSON Schema for a tool's input from the action's declared parameters (if available).
+// Deprecated: input schema derivation moved into Action::mcp_input_schema
+
+/// Best-effort annotations from action config (e.g., read-only for SELECT)
+fn derive_annotations(action: &openact_core::types::ActionRecord) -> Option<ToolAnnotations> {
+    let connector = action.connector.as_str();
+    if connector == "postgres" {
+        if let Some(stmt) = action.config_json.get("statement").and_then(|v| v.as_str()) {
+            let trimmed = stmt.trim_start().to_lowercase();
+            let mut ann = ToolAnnotations {
+                destructive_hint: None,
+                idempotent_hint: None,
+                open_world_hint: None,
+                read_only_hint: None,
+                title: None,
+            };
+            if trimmed.starts_with("select") || trimmed.starts_with("with") {
+                ann.read_only_hint = Some(true);
+                ann.destructive_hint = Some(false);
+            } else if trimmed.starts_with("insert")
+                || trimmed.starts_with("update")
+                || trimmed.starts_with("delete")
+                || trimmed.starts_with("alter")
+                || trimmed.starts_with("drop")
+                || trimmed.starts_with("create")
+            {
+                ann.read_only_hint = Some(false);
+                ann.destructive_hint = Some(true);
+            }
+            return Some(ann);
+        }
+    }
+    None
+}
+
+/*
+/// Derive HTTP tool input schema based on action config (path variables, query/headers/body)
+// Deprecated: HTTP input schema derivation moved into HttpActionWrapper::mcp_input_schema
+    use serde_json::{Map, Value};
+
+    let mut properties: Map<String, Value> = Map::new();
+    let mut required: Vec<String> = Vec::new();
+
+    // Path variables from config_json.path
+    if let Some(path) = action
+        .config_json
+        .get("path")
+        .and_then(|v| v.as_str())
+    {
+        for var in extract_path_variables(path) {
+            properties.insert(var.clone(), json!({"type": "string", "description": "Path parameter"}));
+            required.push(var);
+        }
+    }
+
+    // If query_params present, expose detailed 'query' object
+    if let Some(Value::Object(q)) = action.config_json.get("query_params") {
+        let mut qprops = Map::new();
+        for (k, v) in q {
+            // Values can be arrays (MultiValue) or strings; infer basic type
+            let schema = match v {
+                Value::Array(_) => json!({"type": "array", "items": {"type": "string"}}),
+                Value::String(_) => json!({"type": "string"}),
+                _ => json!({"type": "string"}),
+            };
+            qprops.insert(k.clone(), schema);
+        }
+        properties.insert(
+            "query".into(),
+            json!({"type": "object", "description": "Query parameters", "properties": Value::Object(qprops)}),
+        );
+    } else if action.config_json.get("query_params").is_some() {
+        properties.insert("query".into(), json!({"type": "object", "description": "Query parameters"}));
+    }
+
+    // If headers present, expose detailed 'headers' object
+    if let Some(Value::Object(h)) = action.config_json.get("headers") {
+        let mut hprops = Map::new();
+        for (k, v) in h {
+            let schema = match v {
+                Value::Array(_) => json!({"type": "array", "items": {"type": "string"}}),
+                Value::String(_) => json!({"type": "string"}),
+                _ => json!({"type": "string"}),
+            };
+            hprops.insert(k.clone(), schema);
+        }
+        properties.insert(
+            "headers".into(),
+            json!({"type": "object", "description": "Additional headers", "properties": Value::Object(hprops)}),
+        );
+    } else if action.config_json.get("headers").is_some() {
+        properties.insert("headers".into(), json!({"type": "object", "description": "Additional headers"}));
+    }
+
+    // If method implies body, expose 'body' object
+    if let Some(method) = action.config_json.get("method").and_then(|v| v.as_str()) {
+        let mu = method.to_uppercase();
+        if matches!(mu.as_str(), "POST" | "PUT" | "PATCH") {
+            // Try to infer body schema from 'body' or legacy 'request_body'
+            if let Some(b) = action.config_json.get("body") {
+                if let Some(schema) = infer_body_schema(b) {
+                    properties.insert("body".into(), schema);
+                } else {
+                    properties.insert("body".into(), json!({"type": "object", "description": "Request body"}));
+                }
+            } else {
+                properties.insert("body".into(), json!({"type": "object", "description": "Request body"}));
+            }
+        }
+    }
+
+    openact_mcp_types::ToolInputSchema {
+        r#type: "object".into(),
+        properties: if properties.is_empty() { None } else { Some(Value::Object(properties)) },
+        required: if required.is_empty() { None } else { Some(required) },
+    }
+}
+
+/// Infer a JSON Schema (partial) for HTTP body based on RequestBodyType sample in config_json
+// Deprecated helper
+    // Expect shape: { "type": "json"|"form"|"multipart"|"raw"|"text", ... }
+    if let Value::Object(obj) = body_val {
+        if let Some(Value::String(kind)) = obj.get("type") {
+            match kind.as_str() {
+                "json" => {
+                    if let Some(data) = obj.get("data") {
+                        return Some(infer_objectish_schema(data).unwrap_or(json!({"type": "object"})));
+                    }
+                    return Some(json!({"type": "object"}));
+                }
+                "form" => {
+                    return Some(json!({"type": "object", "additionalProperties": {"type": "string"}}));
+                }
+                "multipart" => {
+                    return Some(json!({"type": "object"}));
+                }
+                "raw" => {
+                    return Some(json!({"type": "string", "description": "base64-encoded"}));
+                }
+                "text" => {
+                    return Some(json!({"type": "string"}));
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// Best-effort schema inference for JSON objects
+// Deprecated helper
+    match value {
+        Value::Object(map) => {
+            let mut props = serde_json::Map::new();
+            for (k, v) in map.iter() {
+                let t = match v {
+                    Value::Null => json!({"type": ["null", "string"]}),
+                    Value::Bool(_) => json!({"type": "boolean"}),
+                    Value::Number(n) => {
+                        if n.is_i64() || n.is_u64() { json!({"type": "integer"}) } else { json!({"type": "number"}) }
+                    }
+                    Value::String(_) => json!({"type": "string"}),
+                    Value::Array(_) => json!({"type": "array"}),
+                    Value::Object(_) => json!({"type": "object"}),
+                };
+                props.insert(k.clone(), t);
+            }
+            Some(json!({"type": "object", "properties": props}))
+        }
+        Value::Array(items) => {
+            if let Some(first) = items.first() {
+                let it = infer_objectish_schema(first).unwrap_or(json!({"type": "string"}));
+                Some(json!({"type": "array", "items": it}))
+            } else {
+                Some(json!({"type": "array"}))
+            }
+        }
+        _ => None,
+    }
+}
+
+// Deprecated helper
+    let mut res = Vec::new();
+    let mut chars = path.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '{' {
+            let mut name = String::new();
+            while let Some(c) = chars.next() {
+                if c == '}' { break; }
+                name.push(c);
+            }
+            if !name.is_empty() { res.push(name); }
+        }
+    }
+    res
+}
+
+/// Derive output schema for tools where we can predict object shape (e.g., Postgres write operations)
+// Deprecated: output schema derivation moved into Action::mcp_output_schema
+    if action.connector.as_str() == "postgres" {
+        if let Some(stmt) = action.config_json.get("statement").and_then(|v| v.as_str()) {
+            let s = stmt.to_lowercase();
+            let returns_rows = s.starts_with("select") || s.starts_with("with") || s.starts_with("show") || s.contains(" returning ");
+            if !returns_rows {
+                // rows_affected object
+                return Some(openact_mcp_types::ToolOutputSchema {
+                    r#type: "object".into(),
+                    properties: Some(json!({
+                        "rows_affected": {"type": "integer"}
+                    })),
+                    required: Some(vec!["rows_affected".into()]),
+                });
+            } else {
+                // rows array wrapper
+                return Some(openact_mcp_types::ToolOutputSchema {
+                    r#type: "object".into(),
+                    properties: Some(json!({
+                        "rows": { "type": "array", "items": { "type": "object" } }
+                    })),
+                    required: Some(vec!["rows".into()]),
+                });
+            }
+        }
+    }
+
+    // HTTP: default to data wrapper (object); if method looks like list (GET), still use data as generic default
+    if action.connector.as_str() == "http" {
+        // Optional: choose items vs data based on path ending with 's' or '/list', but keep stable default
+        return Some(openact_mcp_types::ToolOutputSchema {
+            r#type: "object".into(),
+            properties: Some(json!({
+                "data": { "type": ["object", "array", "string", "number", "boolean", "null"] }
+            })),
+            required: None,
+        });
+    }
+    None
+}
+
+*/
 /// Serve MCP over stdio (following Go's stdio pattern)
 pub async fn serve_stdio(app_state: AppState, governance: GovernanceConfig) -> McpResult<()> {
     info!("Starting OpenAct MCP server (stdio mode)");

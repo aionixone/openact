@@ -81,4 +81,22 @@ pub trait Action: Send + Sync {
         let _ = input;
         Ok(())
     }
+
+    /// Provide a JSON Schema (as serde_json::Value) describing expected MCP input for this action.
+    /// Default: a permissive object.
+    fn mcp_input_schema(&self, _record: &ActionRecord) -> JsonValue {
+        serde_json::json!({ "type": "object" })
+    }
+
+    /// Provide a JSON Schema describing structured MCP output for this action, if any.
+    /// Default: none (client may treat as arbitrary JSON).
+    fn mcp_output_schema(&self, _record: &ActionRecord) -> Option<JsonValue> {
+        None
+    }
+
+    /// Give the action a chance to wrap/normalize its execution output for MCP consumers.
+    /// Default: pass-through.
+    fn mcp_wrap_output(&self, output: JsonValue) -> JsonValue {
+        output
+    }
 }

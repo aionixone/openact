@@ -1,6 +1,6 @@
 use crate::{ConnectorError, ConnectorResult};
 use actions::{ActionParameter, PostgresAction};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer};
 use serde_json::{json, Map, Value};
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow, PgTypeInfo};
 use sqlx::{Column, Pool, Postgres, Row, TypeInfo, ValueRef};
@@ -22,7 +22,7 @@ pub struct PostgresConnection {
     pub port: u16,
     pub database: String,
     pub user: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "opt_string_coerce")]
     pub password: Option<String>,
     #[serde(default)]
     pub query_params: HashMap<String, String>,
@@ -34,6 +34,25 @@ pub struct PostgresConnection {
     pub connect_timeout_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_connections: Option<u32>,
+}
+
+// Accept string/number/bool for optional string fields, coercing to String. Useful for env defaults like 123456.
+fn opt_string_coerce<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    Ok(match v {
+        None => None,
+        Some(serde_json::Value::String(s)) => Some(s),
+        Some(serde_json::Value::Number(n)) => Some(n.to_string()),
+        Some(serde_json::Value::Bool(b)) => Some(b.to_string()),
+        Some(serde_json::Value::Null) => None,
+        Some(other) => {
+            // Coerce any other JSON to string via canonical representation
+            Some(other.to_string())
+        }
+    })
 }
 
 impl PostgresConnection {

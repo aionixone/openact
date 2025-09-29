@@ -194,7 +194,9 @@ impl ConnectorRegistry {
 
         // Execute action
         let start_time = std::time::Instant::now();
-        let output = action.execute(input).await?;
+        let raw_output = action.execute(input).await?;
+        // Allow action to present an MCP-friendly wrapped output
+        let output = action.mcp_wrap_output(raw_output);
         let duration = start_time.elapsed();
 
         // Build result with metadata
@@ -309,6 +311,46 @@ impl ConnectorRegistry {
         );
 
         stats
+    }
+
+    /// Instantiate an action instance for the given ActionRecord (helper for schema/metadata needs).
+    pub async fn instantiate_action_for_record(
+        &self,
+        action_record: &ActionRecord,
+    ) -> RegistryResult<Box<dyn Action>> {
+        // Fetch connection record backing this action
+        let connection_record = self
+            .connection_store
+            .get(&action_record.connection_trn)
+            .await?
+            .ok_or_else(|| RegistryError::ConnectionNotFound(action_record.connection_trn.clone()))?;
+
+        // Create connection instance via its factory
+        let conn_factory = self
+            .connection_factories
+            .get(&connection_record.connector)
+            .ok_or_else(|| RegistryError::ConnectorNotRegistered(connection_record.connector.clone()))?;
+        let connection = conn_factory.create_connection(&connection_record).await?;
+
+        // Create action instance via its factory
+        let act_factory = self
+            .action_factories
+            .get(&action_record.connector)
+            .ok_or_else(|| RegistryError::ConnectorNotRegistered(action_record.connector.clone()))?;
+
+        act_factory.create_action(action_record, connection).await
+    }
+
+    /// Derive MCP input/output schemas for an action by instantiating it and
+    /// calling the Action's MCP extension hooks.
+    pub async fn derive_mcp_schemas(
+        &self,
+        action_record: &ActionRecord,
+    ) -> RegistryResult<(JsonValue, Option<JsonValue>)> {
+        let action = self.instantiate_action_for_record(action_record).await?;
+        let input = action.mcp_input_schema(action_record);
+        let output = action.mcp_output_schema(action_record);
+        Ok((input, output))
     }
 }
 

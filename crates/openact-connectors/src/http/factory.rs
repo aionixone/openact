@@ -251,6 +251,173 @@ impl Action for HttpActionWrapper {
         }
         Ok(())
     }
+
+    fn mcp_input_schema(&self, _record: &openact_core::ActionRecord) -> JsonValue {
+        use serde_json::{json, Value};
+
+        let mut properties = serde_json::Map::new();
+        let mut required: Vec<String> = Vec::new();
+
+        // 1) Path variables from /path/{var}
+        for var in extract_path_variables(&self.action.path) {
+            properties.insert(
+                var.clone(),
+                json!({"type": "string", "description": "Path parameter"}),
+            );
+            required.push(var);
+        }
+
+        // 2) Query parameters (object with per-key hints when available)
+        if let Some(ref qp) = self.action.query_params {
+            let mut qprops = serde_json::Map::new();
+            for (k, v) in qp {
+                // MultiValue = Vec<String> implies array<string>, otherwise default to string
+                let schema = if v.len() > 1 {
+                    json!({"type": "array", "items": {"type": "string"}})
+                } else {
+                    json!({"type": "string"})
+                };
+                qprops.insert(k.clone(), schema);
+            }
+            properties.insert(
+                "query".to_string(),
+                json!({
+                    "type": "object",
+                    "description": "Query parameters",
+                    "properties": Value::Object(qprops)
+                }),
+            );
+        } else {
+            // Generic query object
+            properties.insert(
+                "query".to_string(),
+                json!({"type": "object", "description": "Query parameters"}),
+            );
+        }
+
+        // 3) Headers (object with per-key hints when available)
+        if let Some(ref hs) = self.action.headers {
+            let mut hprops = serde_json::Map::new();
+            for (k, v) in hs {
+                let schema = if v.len() > 1 {
+                    json!({"type": "array", "items": {"type": "string"}})
+                } else {
+                    json!({"type": "string"})
+                };
+                hprops.insert(k.clone(), schema);
+            }
+            properties.insert(
+                "headers".to_string(),
+                json!({
+                    "type": "object",
+                    "description": "Additional headers",
+                    "properties": Value::Object(hprops)
+                }),
+            );
+        } else {
+            properties.insert(
+                "headers".to_string(),
+                json!({"type": "object", "description": "Additional headers"}),
+            );
+        }
+
+        // 4) Body (for POST/PUT/PATCH), try to infer from typed body
+        let method_up = self.action.method.to_uppercase();
+        if matches!(method_up.as_str(), "POST" | "PUT" | "PATCH") {
+            let body_schema = if let Some(ref b) = self.action.body {
+                infer_body_schema_from_typed(b)
+            } else if let Some(ref legacy) = self.action.request_body {
+                // Legacy: infer from JSON sample
+                infer_objectish_schema(legacy).unwrap_or(json!({"type": "object"}))
+            } else {
+                json!({"type": "object", "description": "Request body"})
+            };
+            properties.insert("body".to_string(), body_schema);
+        }
+
+        json!({
+            "type": "object",
+            "properties": Value::Object(properties),
+            "required": required,
+        })
+    }
+
+    fn mcp_output_schema(&self, _record: &openact_core::ActionRecord) -> Option<JsonValue> {
+        Some(serde_json::json!({
+            "type": "object",
+            "properties": { "data": { "type": ["object","array","string","number","boolean","null"] } },
+        }))
+    }
+
+    fn mcp_wrap_output(&self, output: JsonValue) -> JsonValue {
+        // Wrap the HTTP execution details as data for a stable shape
+        serde_json::json!({ "data": output })
+    }
+}
+
+// --------- helpers (HTTP schema inference) ---------
+use crate::http::body_builder::RequestBodyType;
+
+fn extract_path_variables(path: &str) -> Vec<String> {
+    let mut res = Vec::new();
+    let mut chars = path.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '{' {
+            let mut name = String::new();
+            while let Some(c) = chars.next() {
+                if c == '}' { break; }
+                name.push(c);
+            }
+            if !name.is_empty() { res.push(name); }
+        }
+    }
+    res
+}
+
+fn infer_body_schema_from_typed(body: &RequestBodyType) -> JsonValue {
+    use serde_json::json;
+    match body {
+        RequestBodyType::Json { data } => infer_objectish_schema(data).unwrap_or(json!({"type": "object"})),
+        RequestBodyType::Form { .. } => json!({
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+        }),
+        RequestBodyType::Multipart { .. } => json!({"type": "object"}),
+        RequestBodyType::Raw { .. } => json!({"type": "string", "description": "base64-encoded"}),
+        RequestBodyType::Text { .. } => json!({"type": "string"}),
+    }
+}
+
+fn infer_objectish_schema(value: &JsonValue) -> Option<JsonValue> {
+    use serde_json::json;
+    match value {
+        JsonValue::Object(map) => {
+            let mut props = serde_json::Map::new();
+            for (k, v) in map.iter() {
+                let t = match v {
+                    JsonValue::Null => json!({"type": ["null", "string"]}),
+                    JsonValue::Bool(_) => json!({"type": "boolean"}),
+                    JsonValue::Number(n) => {
+                        if n.is_i64() || n.is_u64() { json!({"type": "integer"}) } else { json!({"type": "number"}) }
+                    }
+                    JsonValue::String(_) => json!({"type": "string"}),
+                    JsonValue::Array(_) => json!({"type": "array"}),
+                    JsonValue::Object(_) => json!({"type": "object"}),
+                };
+                props.insert(k.clone(), t);
+            }
+            Some(json!({"type": "object", "properties": props}))
+        }
+        JsonValue::Array(items) => {
+            if let Some(first) = items.first() {
+                let it = infer_objectish_schema(first).unwrap_or(json!({"type": "string"}));
+                Some(json!({"type": "array", "items": it}))
+            } else {
+                Some(json!({"type": "array"}))
+            }
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
