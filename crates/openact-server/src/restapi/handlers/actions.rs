@@ -405,7 +405,27 @@ pub async fn execute_action(
             return Err(err.to_http_response(req_id.clone()));
         }
 
-        // List actions by connector and pick latest version for current tenant and name
+        // Require explicit version selection for name-based execution
+        let version_sel = match query.get("version").map(|s| s.as_str()) {
+            None => {
+                let err = ServerError::InvalidInput(
+                    "When specifying action by name, you must provide ?version=latest or ?version=<integer>, or use action_trn with @vN".to_string(),
+                );
+                return Err(err.to_http_response(req_id.clone()));
+            }
+            Some("latest") | Some("") => None,
+            Some(vs) => match vs.parse::<i64>() {
+                Ok(v) => Some(v),
+                Err(_) => {
+                    let err = ServerError::InvalidInput(
+                        "Invalid 'version' query param: expected integer or 'latest'".to_string(),
+                    );
+                    return Err(err.to_http_response(req_id.clone()));
+                }
+            },
+        };
+
+        // List actions by connector and select by tenant/name and version
         let records = ActionRepository::list_by_connector(
             app_state.store.as_ref(),
             &ConnectorKind::new(connector),
@@ -432,8 +452,26 @@ pub async fn execute_action(
             return Err(err.to_http_response(req_id.clone()));
         }
 
-        candidates.sort_by_key(|r| r.version);
-        candidates.last().unwrap().trn.clone()
+        // Select specific version or latest based on TRN's version component
+        candidates.sort_by_key(|r| parse_action_trn(&r.trn).map(|c| c._version).unwrap_or(0));
+        match version_sel {
+            None => candidates.last().unwrap().trn.clone(),
+            Some(v) => candidates
+                .into_iter()
+                .rev()
+                .find(|r| parse_action_trn(&r.trn).map(|c| c._version == v).unwrap_or(false))
+                .map(|r| r.trn)
+                .ok_or_else(|| {
+                    let err = ServerError::NotFound(format!(
+                        "Action not found: {}.{}@v{} (tenant: {})",
+                        connector,
+                        name,
+                        v,
+                        tenant.as_str()
+                    ));
+                    err.to_http_response(req_id.clone())
+                })?
+        }
     };
 
     let registry = app_state.registry.clone();

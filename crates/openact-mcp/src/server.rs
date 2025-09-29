@@ -499,6 +499,8 @@ impl McpServer {
                 })?;
 
             let tenant = arguments.get("tenant").and_then(|v| v.as_str()).unwrap_or("default");
+            // Track whether caller provided version at all
+            let has_version_param = arguments.get("version").is_some();
             // Accept version as number or string "latest". When "latest", treat as None to pick highest.
             let version_opt = match arguments.get("version") {
                 Some(v) if v.is_i64() => v.as_i64(),
@@ -514,6 +516,13 @@ impl McpServer {
                 "Resolving action: {}.{} (tenant={} version={:?})",
                 connector, action, tenant, version_opt
             );
+
+            // Enforce explicit version when resolving by name (not TRN)
+            if !has_version_param {
+                return Err(McpError::InvalidArguments(
+                    "When specifying an action by name, include 'version' (integer) or set it to 'latest'; alternatively, use 'action_trn' with explicit @vN".to_string(),
+                ));
+            }
 
             // Resolve action TRN by scanning actions of the canonical connector
             let kind = ConnectorKind::new(connector.to_string()).canonical();

@@ -73,12 +73,25 @@ pub struct ImportOptions {
     pub validate: bool,
     /// Namespace prefix for imported resources
     pub namespace: Option<String>,
+    /// Versioning strategy for TRN generation and import behavior
+    pub versioning: VersioningStrategy,
 }
 
 impl Default for ImportOptions {
     fn default() -> Self {
-        Self { dry_run: false, force: false, validate: true, namespace: None }
+        Self { dry_run: false, force: false, validate: true, namespace: None, versioning: VersioningStrategy::AlwaysBump }
     }
+}
+
+/// Versioning strategies for import
+#[derive(Debug, Clone)]
+pub enum VersioningStrategy {
+    /// Always create a new TRN with next version (default)
+    AlwaysBump,
+    /// Only bump when the incoming config differs from the latest; otherwise reuse latest and skip update
+    ReuseIfUnchanged,
+    /// Do not create or update; keep pointing to latest existing TRN (skip import)
+    ForceRollbackToLatest,
 }
 
 /// Export options
@@ -319,30 +332,50 @@ impl ConfigManager {
                 .map_err(|e| ConfigManagerError::Database(e.to_string()))?;
 
             // Compute versioned TRNs for all connections first, to keep actions referencing consistent versions
-            let mut planned_connection_trns: HashMap<String, Trn> = HashMap::new();
-            for (connection_name, _connection_config) in &connector_config.connections {
+            // Map: resource_name -> (planned_trn, skip_import)
+            let mut planned_connection_trns: HashMap<String, (Trn, bool)> = HashMap::new();
+            for (connection_name, connection_config) in &connector_config.connections {
                 let resource_name = match options.namespace.as_deref() {
                     Some(ns) => format!("{}-{}", ns, connection_name),
                     None => connection_name.clone(),
                 };
-                // Determine next version for this (tenant, connector, name)
-                let mut max_ver = 0i64;
+                // Determine latest version and plan
+                let mut latest: Option<(&ConnectionRecord, i64)> = None;
                 for rec in existing_conn_records.iter() {
                     if let Some(parsed) = rec.trn.parse_connection() {
                         if parsed.tenant == "default" && parsed.name == resource_name {
-                            if parsed.version > max_ver {
-                                max_ver = parsed.version;
+                            let v = parsed.version;
+                            if latest.as_ref().map(|(_, lv)| v > *lv).unwrap_or(true) {
+                                latest = Some((rec, v));
                             }
                         }
                     }
                 }
-                let next_ver = max_ver + 1;
-                let trn = self.build_connection_trn_with_version(
-                    &connector_kind,
-                    &resource_name,
-                    next_ver,
-                );
-                planned_connection_trns.insert(resource_name, trn);
+                let (planned_trn, skip_import) = match options.versioning.clone() {
+                    VersioningStrategy::AlwaysBump => {
+                        let next_ver = latest.map(|(_, v)| v + 1).unwrap_or(1);
+                        (self.build_connection_trn_with_version(&connector_kind, &resource_name, next_ver), false)
+                    }
+                    VersioningStrategy::ReuseIfUnchanged => {
+                        if let Some((rec, v)) = latest {
+                            if rec.config_json == connection_config.config {
+                                (self.build_connection_trn_with_version(&connector_kind, &resource_name, v), true)
+                            } else {
+                                (self.build_connection_trn_with_version(&connector_kind, &resource_name, v + 1), false)
+                            }
+                        } else {
+                            (self.build_connection_trn_with_version(&connector_kind, &resource_name, 1), false)
+                        }
+                    }
+                    VersioningStrategy::ForceRollbackToLatest => {
+                        if let Some((_, v)) = latest {
+                            (self.build_connection_trn_with_version(&connector_kind, &resource_name, v), true)
+                        } else {
+                            (self.build_connection_trn_with_version(&connector_kind, &resource_name, 1), options.dry_run)
+                        }
+                    }
+                };
+                planned_connection_trns.insert(resource_name, (planned_trn, skip_import));
             }
 
             // Import connections with planned versioned TRNs
@@ -351,10 +384,11 @@ impl ConfigManager {
                     Some(ns) => format!("{}-{}", ns, connection_name),
                     None => connection_name.clone(),
                 };
-                let connection_trn = planned_connection_trns
+                let (connection_trn, skip_connection_import) = planned_connection_trns
                     .get(&resource_name)
                     .expect("planned connection TRN must exist")
                     .clone();
+                if skip_connection_import { continue; }
 
                 match self
                     .import_connection(
@@ -387,38 +421,59 @@ impl ConfigManager {
                         Some(ns) => format!("{}-{}", ns, action_name),
                         None => action_name.clone(),
                     };
-                    // Compute next version for action
-                    let mut max_ver = 0i64;
+                    // Compute next/reuse version for action
+                    let mut latest: Option<(&ActionRecord, i64)> = None;
                     for rec in existing_action_records.iter() {
                         if rec.name == resource_name {
                             if let Some(parsed) = rec.trn.parse_action() {
                                 if parsed.tenant == "default" && parsed.name == resource_name {
-                                    if parsed.version > max_ver {
-                                        max_ver = parsed.version;
+                                    let v = parsed.version;
+                                    if latest.as_ref().map(|(_, lv)| v > *lv).unwrap_or(true) {
+                                        latest = Some((rec, v));
                                     }
                                 }
                             }
                         }
                     }
-                    let next_ver = max_ver + 1;
-                    let action_trn = self.build_action_trn_with_version(
-                        &connector_kind,
-                        &resource_name,
-                        next_ver,
-                    );
+                    let (action_trn, skip_action_import) = match options.versioning.clone() {
+                        VersioningStrategy::AlwaysBump => {
+                            let next_ver = latest.map(|(_, v)| v + 1).unwrap_or(1);
+                            (self.build_action_trn_with_version(&connector_kind, &resource_name, next_ver), false)
+                        }
+                        VersioningStrategy::ReuseIfUnchanged => {
+                            if let Some((rec, v)) = latest {
+                                if rec.config_json == action_config.config {
+                                    (self.build_action_trn_with_version(&connector_kind, &resource_name, v), true)
+                                } else {
+                                    (self.build_action_trn_with_version(&connector_kind, &resource_name, v + 1), false)
+                                }
+                            } else {
+                                (self.build_action_trn_with_version(&connector_kind, &resource_name, 1), false)
+                            }
+                        }
+                        VersioningStrategy::ForceRollbackToLatest => {
+                            if let Some((_, v)) = latest {
+                                (self.build_action_trn_with_version(&connector_kind, &resource_name, v), true)
+                            } else {
+                                (self.build_action_trn_with_version(&connector_kind, &resource_name, 1), options.dry_run)
+                            }
+                        }
+                    };
 
                     // Use the planned versioned connection TRN for this connector
                     let conn_res_name = match options.namespace.as_deref() {
                         Some(ns) => format!("{}-{}", ns, &action_config.connection),
                         None => action_config.connection.clone(),
                     };
-                    let connection_trn =
+                    let (connection_trn, _) =
                         planned_connection_trns.get(&conn_res_name).cloned().ok_or_else(|| {
                             ConfigManagerError::InvalidStructure(format!(
                                 "Missing connection '{}' for action '{}' in connector '{}'",
                                 action_config.connection, action_name, connector_name
                             ))
                         })?;
+
+                    if skip_action_import { continue; }
 
                     match self
                         .import_action(

@@ -51,7 +51,7 @@
         "connector": "http",
         "connection": "test-api",
         "description": "GET /get",
-        "action_trn": "trn:openact:default:action/http/httpbin.get",
+        "action_trn": "trn:openact:default:action/http/httpbin.get@v1",
         "mcp_enabled": true,
         "input_schema_digest": "sha256:abcd..."
       }
@@ -98,6 +98,9 @@
 ```
 
 #### 4) POST /api/v1/actions/{action}/execute
+- Version selection is required when `{action}` is a named form like `connector.action` or `connector/action`:
+  - Use query `?version=latest` to select the newest, or `?version=<integer>` to select a specific version.
+  - Alternatively, provide a fully qualified `action_trn` (including `@vN`) as the `{action}` path segment.
 - Body:
 ```json
 { "input": { /* connector-specific */ }, "options": { "timeout_ms": 30000, "dry_run": false } }
@@ -122,7 +125,7 @@
   "metadata": {
     "request_id": "req_abc",
     "execution_time_ms": 842,
-    "action_trn": "trn:openact:default:action/http/httpbin.get"
+    "action_trn": "trn:openact:default:action/http/httpbin.get@v1"
   }
 }
 ```

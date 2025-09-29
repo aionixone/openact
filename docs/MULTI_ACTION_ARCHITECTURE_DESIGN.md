@@ -382,6 +382,9 @@ CREATE TABLE connector_action_sets (
 trn:openact:{tenant}:connection/{connector}/{name}@v{version}
 trn:openact:{tenant}:action/{connector}/{name}@v{version}
 
+Notes
+- `@v{version}` is required. When referencing an action by name via REST/MCP, callers must either provide an explicit TRN including `@vN`, or pass a separate `version` parameter (`latest` or integer).
+
 # Examples
 trn:openact:demo:connection/postgresql/prod-db@v1
 trn:openact:demo:action/postgresql/execute-sql@v1
