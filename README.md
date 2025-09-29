@@ -94,6 +94,25 @@ OpenAct now provides two powerful execution modes:
   --format yaml
 ```
 
+### 3b. Configuration Import/Export
+
+Import a flat config file and control TRN versioning strategy:
+
+```bash
+# Always create a new version for same-name resources (default)
+cargo run -q -p openact-cli -- import examples/http.yaml --versioning always-bump
+
+# Only bump when config actually changed; otherwise reuse latest and skip
+cargo run -q -p openact-cli -- import examples/http.yaml --versioning reuse-if-unchanged
+
+# Do not create new versions; keep pointing to latest existing (rollback use-cases)
+cargo run -q -p openact-cli -- import examples/http.yaml --versioning force-rollback
+```
+
+Notes
+- Importer writes fully-qualified TRNs with explicit version suffix: `...@vN`.
+- Actions reference the planned versioned connection TRNs within the same import batch for consistency.
+
 ### 4. Server Mode (REST API)
 
 ```bash
@@ -198,6 +217,14 @@ make test-all-quick
 # Specific test categories
 make test-architecture  # Architecture validation
 make test-connectors    # Connector functionality
+
+## 🧭 TRN and Versioning in APIs
+
+- TRN format: `trn:openact:{tenant}:{resource_type}/{name}@v{version}` (version required).
+- When calling REST/MCP by name (e.g., `http.get-ip`), clients must specify a version:
+  - REST: `POST /api/v1/actions/http.get-ip/execute?version=latest` or `?version=1`.
+  - MCP: include `"version": "latest"` or an integer in `tools/call` arguments.
+  - Alternatively, pass the fully-qualified `action_trn` with `@vN`.
 make test-performance   # Build and execution performance
 make test-integration   # End-to-end workflows
 ```
