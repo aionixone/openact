@@ -5,7 +5,7 @@ use crate::{
     error::CliResult,
     utils::{validate_file_exists, ColoredOutput},
 };
-use openact_config::{ConfigManager, ImportOptions, ImportResult};
+use openact_config::{ConfigManager, ImportOptions, ImportResult, VersioningStrategy};
 use openact_store::sql_store::SqlStore;
 use tracing::info;
 
@@ -41,6 +41,7 @@ impl ImportCommand {
             force: matches!(conflict_resolution, ConflictResolution::Overwrite),
             validate: true,
             namespace: None,
+            versioning: VersioningStrategy::AlwaysBump,
         };
 
         if dry_run {
