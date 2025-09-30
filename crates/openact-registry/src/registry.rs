@@ -329,6 +329,16 @@ impl ConnectorRegistry {
         let output = action.mcp_output_schema(action_record);
         Ok((input, output))
     }
+
+    /// Derive MCP annotations for an action (optional). Returns a JSON value compatible with
+    /// openact-mcp-types::ToolAnnotations, to be deserialized by the server layer if present.
+    pub async fn derive_mcp_annotations(
+        &self,
+        action_record: &ActionRecord,
+    ) -> RegistryResult<Option<JsonValue>> {
+        let action = self.instantiate_action_for_record(action_record).await?;
+        Ok(action.mcp_annotations(action_record))
+    }
 }
 
 /// Wrapper to convert Arc<dyn Connection> to Box<dyn Connection>

@@ -13,6 +13,7 @@ openact-plugins = { path = "../openact-plugins" }
 openact-authflow = { path = "../openact-authflow", optional = true, features = ["server"] }
 anyhow = "1.0"
 axum = { version = "0.7", features = ["json"] }
+futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
@@ -22,6 +23,7 @@ tower = { version = "0.4", features = ["util"] }
 uuid = { version = "1.0", features = ["v4"] }
 jsonschema = "0.17"
 sha2 = "0.10"
+async-stream = "0.3"
 
 [features]
 default = []

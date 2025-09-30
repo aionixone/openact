@@ -156,23 +156,102 @@ pub async fn get_actions(
 
 /// POST /api/v1/actions/{action}/execute/stream (SSE)
 pub async fn execute_action_stream(
-    _state: State<(AppState, GovernanceConfig)>,
-    _request_id: Extension<RequestId>,
-    _action: Path<String>,
-    _tenant: Extension<Tenant>,
-    _query: Query<std::collections::HashMap<String, String>>,
-    _req: Json<ExecuteRequest>,
-) -> Result<Json<ResponseEnvelope<ExecuteResponse>>, (axum::http::StatusCode, Json<crate::error::ErrorResponse>)> {
-    // Placeholder implementation without SSE dependency in this build environment.
-    // Respond with a clear message that streaming is not enabled in this binary.
-    let response = ResponseEnvelope {
-        success: true,
-        data: ExecuteResponse { result: json!({
-            "message": "Streaming endpoint is not enabled in this build. Use non-stream endpoint or build with SSE support."
-        }) },
-        metadata: ResponseMeta { request_id: "".into(), execution_time_ms: None, action_trn: None, version: None, warnings: Some(vec!["streaming-disabled".into()]) }
+    State((app_state, governance)): State<(AppState, GovernanceConfig)>,
+    Extension(request_id): Extension<RequestId>,
+    Path(action): Path<String>,
+    Extension(tenant): Extension<Tenant>,
+    Query(query): Query<std::collections::HashMap<String, String>>, // version & options
+    Json(req): Json<ExecuteRequest>,
+) -> Result<axum::response::sse::Sse<impl futures_util::stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>>, (axum::http::StatusCode, Json<crate::error::ErrorResponse>)>
+{
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    let req_id = request_id.0.clone();
+    let tool_name = normalize_action_to_tool_name(&action);
+    if !governance.is_tool_allowed(&tool_name) {
+        let err = ServerError::Forbidden(format!("Action not allowed: {}", tool_name));
+        return Err(err.to_http_response(req_id));
+    }
+
+    // Concurrency gate
+    let _permit = governance
+        .concurrency_limiter
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|e| ServerError::Internal(format!("Failed to acquire permit: {}", e)))
+        .map_err(|e| e.to_http_response(req_id.clone()))?;
+
+    // Resolve TRN (by TRN or name+version)
+    let action_trn = if action.starts_with("trn:openact:") {
+        Trn::new(action.clone())
+    } else {
+        let parsed = openact_core::policy::tools::parse_tool_name(&tool_name)
+            .map_err(|msg| ServerError::InvalidInput(msg))
+            .map_err(|e| e.to_http_response(req_id.clone()))?;
+        let version_sel = match query.get("version").map(|s| s.as_str()) {
+            None => {
+                let err = ServerError::InvalidInput(
+                    openact_core::policy::messages::version_required_message().to_string(),
+                );
+                return Err(err.to_http_response(req_id.clone()));
+            }
+            Some("latest") | Some("") => None,
+            Some(vs) => vs.parse::<i64>().ok(),
+        };
+        let kind = ConnectorKind::new(&parsed.connector).canonical();
+        openact_core::resolve::resolve_action_trn_by_name(
+            app_state.store.as_ref(),
+            tenant.as_str(),
+            &kind,
+            &parsed.action,
+            version_sel,
+        )
+        .await
+        .map_err(|e| match e {
+            openact_core::CoreError::NotFound(msg) => ServerError::NotFound(msg),
+            openact_core::CoreError::Invalid(msg) => ServerError::InvalidInput(msg),
+            other => ServerError::Internal(other.to_string()),
+        })
+        .map_err(|e| e.to_http_response(req_id.clone()))?
     };
-    Ok(Json(response))
+
+    let input = req.input.clone();
+    let registry = app_state.registry.clone();
+    let timeout_dur = governance.timeout;
+
+    let stream = async_stream::stream! {
+        let assembler = openact_core::stream::StreamAssembler::new();
+        let fut = async {
+            let ctx = openact_registry::ExecutionContext::new();
+            registry.execute(&action_trn, input, Some(ctx)).await
+        };
+        let result = tokio::time::timeout(timeout_dur, fut).await;
+        match result {
+            Ok(Ok(exec)) => {
+                let (text, usage, elapsed) = assembler.finish();
+                let final_obj = json!({
+                    "event": "done",
+                    "result": exec.output,
+                    "text": text,
+                    "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens, "total": usage.total()},
+                    "elapsed_ms": elapsed.as_millis(),
+                    "action_trn": action_trn.as_str(),
+                });
+                let _ = yield Ok(Event::default().event("message").data(final_obj.to_string()));
+            }
+            Ok(Err(e)) => {
+                let err_obj = json!({"event": "error", "message": e.to_string()});
+                let _ = yield Ok(Event::default().event("error").data(err_obj.to_string()));
+            }
+            Err(_) => {
+                let err_obj = json!({"event": "error", "message": "timeout"});
+                let _ = yield Ok(Event::default().event("error").data(err_obj.to_string()));
+            }
+        }
+    };
+
+    let sse = Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)).text("keep-alive"));
+    Ok(sse)
 }
 
 /// GET /api/v1/actions/{action}/schema

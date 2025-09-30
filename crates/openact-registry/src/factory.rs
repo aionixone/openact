@@ -99,4 +99,11 @@ pub trait Action: Send + Sync {
     fn mcp_wrap_output(&self, output: JsonValue) -> JsonValue {
         output
     }
+
+    /// Provide optional MCP tool annotations (best-effort hints) as JSON value compatible with
+    /// openact-mcp-types::ToolAnnotations. Server layer should deserialize this value into the
+    /// concrete ToolAnnotations type when present. Default: None.
+    fn mcp_annotations(&self, _record: &ActionRecord) -> Option<JsonValue> {
+        None
+    }
 }

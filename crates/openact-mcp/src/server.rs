@@ -252,8 +252,11 @@ impl McpServer {
                 }
             };
 
-            // Add annotations (best-effort hints)
-            let annotations = derive_annotations(&a);
+            // Annotations: fetch from registry hook if provided (JSON -> ToolAnnotations)
+            let annotations = match self.registry.derive_mcp_annotations(&a).await {
+                Ok(Some(json_val)) => serde_json::from_value::<ToolAnnotations>(json_val).ok(),
+                _ => None,
+            };
 
             tools.push(Tool {
                 name: tool_name,
@@ -459,6 +462,10 @@ impl McpServer {
         let input = arguments
             .get("input")
             .ok_or_else(|| McpError::InvalidArguments("Missing 'input' field".to_string()))?;
+        let stream_requested = arguments
+            .get("stream")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         // Check if explicit action_trn is provided
         let action_trn = if let Some(trn_str) = arguments.get("action_trn").and_then(|v| v.as_str())
@@ -547,7 +554,16 @@ impl McpServer {
         // Action::mcp_wrap_output (applied in the registry). MCP server should
         // treat it as the canonical structured content and avoid per-connector
         // branching here.
-        let structured = exec.output.clone();
+        // Attach stream hint if requested (final-only for now; incremental MCP streaming can be added later)
+        let mut structured = exec.output.clone();
+        if stream_requested {
+            if let serde_json::Value::Object(ref mut map) = structured {
+                map.insert(
+                    "_stream".to_string(),
+                    serde_json::json!({"mode": "final", "note": "incremental MCP streaming not enabled; returned final frame"}),
+                );
+            }
+        }
         let text = serde_json::to_string(&structured).unwrap_or_else(|_| "{}".to_string());
 
         let block = ContentBlock::TextContent(openact_mcp_types::TextContent {
@@ -567,36 +583,9 @@ impl McpServer {
 // Deprecated: input schema derivation moved into Action::mcp_input_schema
 
 /// Best-effort annotations from action config (e.g., read-only for SELECT)
-fn derive_annotations(action: &openact_core::types::ActionRecord) -> Option<ToolAnnotations> {
-    let connector = action.connector.as_str();
-    if connector == "postgres" {
-        if let Some(stmt) = action.config_json.get("statement").and_then(|v| v.as_str()) {
-            let trimmed = stmt.trim_start().to_lowercase();
-            let mut ann = ToolAnnotations {
-                destructive_hint: None,
-                idempotent_hint: None,
-                open_world_hint: None,
-                read_only_hint: None,
-                title: None,
-            };
-            if trimmed.starts_with("select") || trimmed.starts_with("with") {
-                ann.read_only_hint = Some(true);
-                ann.destructive_hint = Some(false);
-            } else if trimmed.starts_with("insert")
-                || trimmed.starts_with("update")
-                || trimmed.starts_with("delete")
-                || trimmed.starts_with("alter")
-                || trimmed.starts_with("drop")
-                || trimmed.starts_with("create")
-            {
-                ann.read_only_hint = Some(false);
-                ann.destructive_hint = Some(true);
-            }
-            return Some(ann);
-        }
-    }
-    None
-}
+// Note: tool annotations are intentionally not derived here to avoid connector-specific
+// logic at the server layer. Prefer adding optional hooks on connector actions to supply
+// annotations, or defining generic policy-driven hints in the future.
 
 /*
 /// Derive HTTP tool input schema based on action config (path variables, query/headers/body)
