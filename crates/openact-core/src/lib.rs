@@ -2,6 +2,7 @@ pub mod error;
 pub mod sanitization;
 pub mod store;
 pub mod types;
+pub mod resolve;
 
 // Re-export commonly used types
 pub use error::{CoreError, CoreResult};

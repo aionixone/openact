@@ -524,59 +524,23 @@ impl McpServer {
                 ));
             }
 
-            // Resolve action TRN by scanning actions of the canonical connector
+            // Resolve action TRN via shared resolver
             let kind = ConnectorKind::new(connector.to_string()).canonical();
-            let all = ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
-                .await
-                .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
+            let trn = openact_core::resolve::resolve_action_trn_by_name(
+                self.app_state.store.as_ref(),
+                tenant,
+                &kind,
+                action,
+                version_opt,
+            )
+            .await
+            .map_err(|e| match e {
+                openact_core::CoreError::NotFound(msg) => McpError::ToolNotFound(msg),
+                openact_core::CoreError::Invalid(msg) => McpError::InvalidArguments(msg),
+                other => McpError::Internal(other.to_string()),
+            })?;
 
-            let mut candidates: Vec<_> = all
-                .into_iter()
-                .filter(|a| {
-                    debug!("Checking action: name='{}' vs target='{}'", a.name, action);
-                    a.name == action
-                })
-                .filter(|a| {
-                    if let Some(parsed) = a.trn.parse_action() {
-                        debug!(
-                            "TRN '{}' parsed: tenant='{}' vs target='{}'",
-                            a.trn.as_str(),
-                            parsed.tenant,
-                            tenant
-                        );
-                        parsed.tenant == tenant
-                    } else {
-                        debug!("Failed to parse TRN: {}", a.trn.as_str());
-                        false
-                    }
-                })
-                .collect();
-
-            if candidates.is_empty() {
-                return Err(McpError::ToolNotFound(format!(
-                    "Action not found: {}.{} (tenant: {})",
-                    connector, action, tenant
-                )));
-            }
-
-            // Sort by version and pick the appropriate one
-            candidates.sort_by_key(|a| a.trn.parse_action().map(|c| c.version).unwrap_or(0));
-            let chosen = if let Some(v) = version_opt {
-                candidates
-                    .into_iter()
-                    .rev()
-                    .find(|a| a.trn.parse_action().map(|c| c.version == v).unwrap_or(false))
-                    .ok_or_else(|| {
-                        McpError::ToolNotFound(format!(
-                            "Action not found: {}.{}@v{} (tenant: {})",
-                            connector, action, v, tenant
-                        ))
-                    })?
-            } else {
-                candidates.pop().unwrap()
-            };
-
-            chosen.trn
+            trn
         };
         let ctx = ExecutionContext::new();
         let exec = self

@@ -425,53 +425,22 @@ pub async fn execute_action(
             },
         };
 
-        // List actions by connector and select by tenant/name and version
-        let records = ActionRepository::list_by_connector(
+        let kind = ConnectorKind::new(connector).canonical();
+        let trn = openact_core::resolve::resolve_action_trn_by_name(
             app_state.store.as_ref(),
-            &ConnectorKind::new(connector),
+            tenant.as_str(),
+            &kind,
+            name,
+            version_sel,
         )
         .await
-        .map_err(|e| ServerError::Internal(e.to_string()))
+        .map_err(|e| match e {
+            openact_core::CoreError::NotFound(msg) => ServerError::NotFound(msg),
+            openact_core::CoreError::Invalid(msg) => ServerError::InvalidInput(msg),
+            other => ServerError::Internal(other.to_string()),
+        })
         .map_err(|e| e.to_http_response(req_id.clone()))?;
-
-        let mut candidates: Vec<_> = records
-            .into_iter()
-            .filter(|r| r.name == name)
-            .filter(|r| {
-                parse_action_trn(&r.trn).map(|c| c.tenant == tenant.as_str()).unwrap_or(false)
-            })
-            .collect();
-
-        if candidates.is_empty() {
-            let err = ServerError::NotFound(format!(
-                "Action not found: {}.{} (tenant: {})",
-                connector,
-                name,
-                tenant.as_str()
-            ));
-            return Err(err.to_http_response(req_id.clone()));
-        }
-
-        // Select specific version or latest based on TRN's version component
-        candidates.sort_by_key(|r| parse_action_trn(&r.trn).map(|c| c._version).unwrap_or(0));
-        match version_sel {
-            None => candidates.last().unwrap().trn.clone(),
-            Some(v) => candidates
-                .into_iter()
-                .rev()
-                .find(|r| parse_action_trn(&r.trn).map(|c| c._version == v).unwrap_or(false))
-                .map(|r| r.trn)
-                .ok_or_else(|| {
-                    let err = ServerError::NotFound(format!(
-                        "Action not found: {}.{}@v{} (tenant: {})",
-                        connector,
-                        name,
-                        v,
-                        tenant.as_str()
-                    ));
-                    err.to_http_response(req_id.clone())
-                })?
-        }
+        trn
     };
 
     let registry = app_state.registry.clone();

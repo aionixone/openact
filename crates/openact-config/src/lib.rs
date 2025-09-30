@@ -11,7 +11,7 @@ pub use error::{ConfigError, ConfigResult};
 pub use loader::{ConfigLoader, FileFormat};
 pub use manager::{
     ConfigManager, ConfigManagerError, ConflictResolution, ExportOptions, ImportConflict,
-    ImportOptions, ImportResult, SyncStrategy,
+    ImportOptions, ImportResult, SyncStrategy, VersioningStrategy,
 };
 pub use schema::{ActionConfig, ConfigManifest, ConnectionConfig, ConnectorConfig};
 pub use schema_validator::{ConnectorValidator, SchemaValidationError, SchemaValidator};
