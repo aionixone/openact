@@ -154,6 +154,27 @@ pub async fn get_actions(
     Ok(Json(response))
 }
 
+/// POST /api/v1/actions/{action}/execute/stream (SSE)
+pub async fn execute_action_stream(
+    _state: State<(AppState, GovernanceConfig)>,
+    _request_id: Extension<RequestId>,
+    _action: Path<String>,
+    _tenant: Extension<Tenant>,
+    _query: Query<std::collections::HashMap<String, String>>,
+    _req: Json<ExecuteRequest>,
+) -> Result<Json<ResponseEnvelope<ExecuteResponse>>, (axum::http::StatusCode, Json<crate::error::ErrorResponse>)> {
+    // Placeholder implementation without SSE dependency in this build environment.
+    // Respond with a clear message that streaming is not enabled in this binary.
+    let response = ResponseEnvelope {
+        success: true,
+        data: ExecuteResponse { result: json!({
+            "message": "Streaming endpoint is not enabled in this build. Use non-stream endpoint or build with SSE support."
+        }) },
+        metadata: ResponseMeta { request_id: "".into(), execution_time_ms: None, action_trn: None, version: None, warnings: Some(vec!["streaming-disabled".into()]) }
+    };
+    Ok(Json(response))
+}
+
 /// GET /api/v1/actions/{action}/schema
 pub async fn get_action_schema(
     State((app_state, governance)): State<(AppState, GovernanceConfig)>,
