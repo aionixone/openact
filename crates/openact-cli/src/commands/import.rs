@@ -131,24 +131,16 @@ mod tests {
         let config_file = NamedTempFile::with_suffix(".yaml").unwrap();
         let config_content = r#"
 version: "1.0"
-metadata:
-  name: "test-config"
-  description: "Test configuration"
-connectors:
-  http:
-    connections:
-      test-api:
-        base_url: "https://api.example.com"
-        authorization: "api_key"
-        auth_parameters:
-          api_key_auth_parameters: null
-          basic_auth_parameters: null
-          oauth_parameters: null
-    actions:
-      get-user:
-        connection: "test-api"
-        method: "GET"
-        path: "/users/{id}"
+connections:
+  test-api:
+    kind: http
+    base_url: "https://api.example.com"
+actions:
+  get-user:
+    connection: "test-api"
+    kind: http
+    method: "GET"
+    path: "/users/{id}"
 "#;
         fs::write(&config_file.path(), config_content).unwrap();
 
@@ -162,6 +154,7 @@ connectors:
             config_file.path().to_str().unwrap(),
             ConflictResolution::Abort,
             false,
+            crate::cli::VersioningArg::AlwaysBump,
         )
         .await;
 
@@ -178,15 +171,10 @@ connectors:
         let config_file = NamedTempFile::with_suffix(".json").unwrap();
         let config_content = json!({
             "version": "1.0",
-            "metadata": {
-                "name": "test-config"
+            "connections": {
+                "api": { "kind": "http", "base_url": "https://example.com" }
             },
-            "connectors": {
-                "http": {
-                    "connections": {},
-                    "actions": {}
-                }
-            }
+            "actions": {}
         });
         fs::write(&config_file.path(), serde_json::to_string_pretty(&config_content).unwrap())
             .unwrap();
@@ -201,6 +189,7 @@ connectors:
             config_file.path().to_str().unwrap(),
             ConflictResolution::Abort,
             true,
+            crate::cli::VersioningArg::AlwaysBump,
         )
         .await;
 
