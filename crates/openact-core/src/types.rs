@@ -3,6 +3,46 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::fmt;
 
+/// A simple representation of a tool name (connector + action)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolName {
+    pub connector: String,
+    pub action: String,
+}
+
+impl ToolName {
+    pub fn new(connector: impl Into<String>, action: impl Into<String>) -> Self {
+        Self { connector: connector.into(), action: action.into() }
+    }
+
+    pub fn as_str_tuple(&self) -> (&str, &str) {
+        (&self.connector, &self.action)
+    }
+
+    pub fn to_dot_string(&self) -> String {
+        format!("{}.{}", self.connector, self.action)
+    }
+
+    /// Parse tool name from either "connector.action" or "connector/action" forms
+    pub fn parse_human(input: &str) -> Option<Self> {
+        if input.contains('.') {
+            let mut it = input.splitn(2, '.');
+            let c = it.next()?.trim();
+            let a = it.next()?.trim();
+            if !c.is_empty() && !a.is_empty() { return Some(Self::new(c, a)); }
+            return None;
+        }
+        if input.contains('/') {
+            let mut it = input.splitn(2, '/');
+            let c = it.next()?.trim();
+            let a = it.next()?.trim();
+            if !c.is_empty() && !a.is_empty() { return Some(Self::new(c, a)); }
+            return None;
+        }
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Trn(pub String);
@@ -95,6 +135,11 @@ impl Trn {
         }
         None
     }
+
+    /// When pointing to an action, convert to ToolName
+    pub fn to_tool_name(&self) -> Option<ToolName> {
+        self.parse_action().map(|c| ToolName::new(c.connector, c.name))
+    }
 }
 
 impl fmt::Display for Trn {
@@ -137,6 +182,40 @@ pub struct ActionTrnComponents {
     pub connector: String,
     pub name: String,
     pub version: i64,
+}
+
+/// Strongly typed newtype for an action TRN
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ActionTrn(pub Trn);
+
+impl ActionTrn {
+    pub fn parse_components(&self) -> Option<ActionTrnComponents> { self.0.parse_action() }
+    pub fn as_str(&self) -> &str { self.0.as_str() }
+    pub fn into_inner(self) -> Trn { self.0 }
+}
+
+impl TryFrom<Trn> for ActionTrn {
+    type Error = &'static str;
+    fn try_from(value: Trn) -> Result<Self, Self::Error> {
+        if value.parse_action().is_some() { Ok(ActionTrn(value)) } else { Err("Not an action TRN") }
+    }
+}
+
+/// Strongly typed newtype for a connection TRN
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ConnectionTrn(pub Trn);
+
+impl ConnectionTrn {
+    pub fn parse_components(&self) -> Option<ConnectionTrnComponents> { self.0.parse_connection() }
+    pub fn as_str(&self) -> &str { self.0.as_str() }
+    pub fn into_inner(self) -> Trn { self.0 }
+}
+
+impl TryFrom<Trn> for ConnectionTrn {
+    type Error = &'static str;
+    fn try_from(value: Trn) -> Result<Self, Self::Error> {
+        if value.parse_connection().is_some() { Ok(ConnectionTrn(value)) } else { Err("Not a connection TRN") }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -216,6 +295,18 @@ pub struct ConnectorMetadata {
     pub example_config: Option<JsonValue>,
     /// Version of the connector implementation
     pub version: String,
+}
+
+/// Utilities for tool name normalization
+impl ToolName {
+    /// Normalize an action reference (TRN, connector.action, connector/action) into a ToolName
+    pub fn normalize_action_ref(input: &str) -> Option<Self> {
+        if input.starts_with("trn:openact:") {
+            let trn = Trn::new(input.to_string());
+            return trn.to_tool_name();
+        }
+        ToolName::parse_human(input)
+    }
 }
 
 /// Connection record storing connector-specific configuration

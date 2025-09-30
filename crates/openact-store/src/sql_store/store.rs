@@ -4,7 +4,7 @@ use crate::error::{StoreError, StoreResult};
 use crate::sql_store::migrations::MigrationRunner;
 use async_trait::async_trait;
 use openact_core::{
-    store::{ActionRepository, AuthConnectionStore, ConnectionStore, RunStore},
+    store::{ActionListFilter, ActionListOptions, ActionListResult, ActionRepository, ActionSortField, AuthConnectionStore, ConnectionStore, RunStore},
     ActionRecord, AuthConnection, Checkpoint, ConnectionRecord, CoreResult, Trn,
 };
 use serde_json::Value as JsonValue;
@@ -392,6 +392,357 @@ impl ActionRepository for SqlStore {
 
         Ok(records)
     }
+
+    async fn list_filtered(&self, filter: ActionListFilter, opts: Option<ActionListOptions>) -> CoreResult<Vec<ActionRecord>> {
+        // Build dynamic SQL with parameters
+        let mut sql = String::from(
+            "SELECT trn, connector, name, connection_trn, config_json, mcp_enabled, mcp_overrides_json, created_at, updated_at, version FROM actions",
+        );
+        let mut conds: Vec<String> = Vec::new();
+        enum Bind { S(String), B(bool), T(chrono::DateTime<chrono::Utc>) }
+        let mut binds: Vec<Bind> = Vec::new();
+
+        if let Some(ref t) = filter.tenant {
+            conds.push("trn LIKE ?".to_string());
+            let like = format!("trn:openact:{}:%", t);
+            binds.push(Bind::S(like));
+        }
+        if let Some(ref k) = filter.connector {
+            conds.push("connector = ?".to_string());
+            binds.push(Bind::S(k.as_str().to_string()));
+        }
+        if let Some(ref trn) = filter.connection_trn {
+            conds.push("connection_trn = ?".to_string());
+            binds.push(Bind::S(trn.as_str().to_string()));
+        }
+        if let Some(flag) = filter.mcp_enabled {
+            conds.push("mcp_enabled = ?".to_string());
+            binds.push(Bind::B(flag));
+        }
+        if let Some(ref prefix) = filter.name_prefix {
+            conds.push("name LIKE ?".to_string());
+            binds.push(Bind::S(format!("{}%", prefix)));
+        }
+        if let Some(ts) = filter.created_after {
+            conds.push("created_at >= ?".to_string());
+            binds.push(Bind::T(ts));
+        }
+        if let Some(ts) = filter.created_before {
+            conds.push("created_at <= ?".to_string());
+            binds.push(Bind::T(ts));
+        }
+        if let Some(ref q) = filter.q {
+            conds.push("(LOWER(name) LIKE LOWER(?) OR LOWER(trn) LIKE LOWER(?))".to_string());
+            let like = format!("%{}%", q);
+            binds.push(Bind::S(like.clone()));
+            binds.push(Bind::S(like));
+        }
+
+        // Governance allow/deny patterns -> SQL
+        // allow_patterns: if specified and non-empty, tool (connector.name) must match at least one
+        if let Some(ref allows) = filter.allow_patterns {
+            if !allows.is_empty() {
+                // If any allow is "*", skip adding constraint (allow all)
+                if !allows.iter().any(|p| p == "*") {
+                    let mut or_conds: Vec<String> = Vec::new();
+                    for pat in allows {
+                        if pat == "*" { continue; }
+                        if let Some(prefix) = pat.strip_suffix(".*") {
+                            or_conds.push("(connector = ?)".to_string());
+                            binds.push(Bind::S(prefix.to_string()));
+                        } else if let Some(suffix) = pat.strip_prefix("*.") {
+                            or_conds.push("(name = ?)".to_string());
+                            binds.push(Bind::S(suffix.to_string()));
+                        } else if let Some((conn, name)) = pat.split_once('.') {
+                            or_conds.push("(connector = ? AND name = ?)".to_string());
+                            binds.push(Bind::S(conn.to_string()));
+                            binds.push(Bind::S(name.to_string()));
+                        } else {
+                            or_conds.push("(connector = ?)".to_string());
+                            binds.push(Bind::S(pat.to_string()));
+                        }
+                    }
+                    if !or_conds.is_empty() {
+                        conds.push(format!("({})", or_conds.join(" OR ")));
+                    }
+                }
+            }
+        }
+        // deny_patterns: if specified, must not match any
+        if let Some(ref denies) = filter.deny_patterns {
+            if !denies.is_empty() {
+                let mut or_conds: Vec<String> = Vec::new();
+                for pat in denies {
+                    if pat == "*" {
+                        // Deny all
+                        or_conds.clear();
+                        or_conds.push("1=1".to_string());
+                        break;
+                    }
+                    if let Some(prefix) = pat.strip_suffix(".*") {
+                        or_conds.push("(connector = ?)".to_string());
+                        binds.push(Bind::S(prefix.to_string()));
+                    } else if let Some(suffix) = pat.strip_prefix("*.") {
+                        or_conds.push("(name = ?)".to_string());
+                        binds.push(Bind::S(suffix.to_string()));
+                    } else if let Some((conn, name)) = pat.split_once('.') {
+                        or_conds.push("(connector = ? AND name = ?)".to_string());
+                        binds.push(Bind::S(conn.to_string()));
+                        binds.push(Bind::S(name.to_string()));
+                    } else {
+                        or_conds.push("(connector = ?)".to_string());
+                        binds.push(Bind::S(pat.to_string()));
+                    }
+                }
+                if !or_conds.is_empty() {
+                    conds.push(format!("NOT ({})", or_conds.join(" OR ")));
+                }
+            }
+        }
+
+        if !conds.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conds.join(" AND "));
+        }
+
+        // Sorting
+        let opts = opts.unwrap_or_default();
+        sql.push_str(" ORDER BY ");
+        match opts.sort_field.unwrap_or(ActionSortField::CreatedAt) {
+            ActionSortField::CreatedAt => sql.push_str("created_at"),
+            ActionSortField::Name => sql.push_str("name"),
+            ActionSortField::Version => sql.push_str("version"),
+        }
+        if !opts.ascending { sql.push_str(" DESC"); }
+
+        // Pagination
+        if let (Some(page), Some(page_size)) = (opts.page, opts.page_size) {
+            let page = page.max(1);
+            let page_size = page_size.max(1);
+            let _offset = (page - 1) * page_size;
+            sql.push_str(" LIMIT ? OFFSET ?");
+            // We'll bind these as integers at the end
+            // Using -1 placeholders is not necessary; we append binds later in order
+        }
+
+        let mut query = sqlx::query(&sql);
+        for b in binds {
+            match b {
+                Bind::S(s) => { query = query.bind(s); },
+                Bind::B(v) => { query = query.bind(v); },
+                Bind::T(ts) => { query = query.bind(ts); },
+            }
+        }
+        if let (Some(page), Some(page_size)) = (opts.page, opts.page_size) {
+            let page = page.max(1);
+            let page_size = page_size.max(1);
+            let offset = (page - 1) * page_size;
+            query = query.bind(page_size as i64).bind(offset as i64);
+        }
+
+        let rows = query.fetch_all(&self.pool).await.map_err(StoreError::Database)?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            let config_json_str: String = row.get("config_json");
+            let config_json: JsonValue = serde_json::from_str(&config_json_str).map_err(StoreError::Serialization)?;
+
+            let mcp_overrides_json: Option<String> = row.get("mcp_overrides_json");
+            let mcp_overrides = if let Some(json_str) = mcp_overrides_json {
+                Some(serde_json::from_str(&json_str).map_err(StoreError::Serialization)?)
+            } else { None };
+
+            records.push(ActionRecord {
+                trn: Trn::new(row.get::<String, _>("trn")),
+                connector: openact_core::ConnectorKind::new(row.get::<String, _>("connector")),
+                name: row.get("name"),
+                connection_trn: Trn::new(row.get::<String, _>("connection_trn")),
+                config_json,
+                mcp_enabled: row.get("mcp_enabled"),
+                mcp_overrides,
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                version: row.get("version"),
+            });
+        }
+
+        Ok(records)
+    }
+
+    async fn list_filtered_paged(
+        &self,
+        filter: ActionListFilter,
+        opts: ActionListOptions,
+    ) -> CoreResult<ActionListResult> {
+        // Build WHERE and binds once
+        let mut where_sql = String::new();
+        let mut conds: Vec<String> = Vec::new();
+        enum Bind { S(String), B(bool), T(chrono::DateTime<chrono::Utc>) }
+        let mut binds: Vec<Bind> = Vec::new();
+
+        if let Some(ref t) = filter.tenant {
+            conds.push("trn LIKE ?".to_string());
+            let like = format!("trn:openact:{}:%", t);
+            binds.push(Bind::S(like));
+        }
+        if let Some(ref k) = filter.connector {
+            conds.push("connector = ?".to_string());
+            binds.push(Bind::S(k.as_str().to_string()));
+        }
+        if let Some(ref trn) = filter.connection_trn {
+            conds.push("connection_trn = ?".to_string());
+            binds.push(Bind::S(trn.as_str().to_string()));
+        }
+        if let Some(flag) = filter.mcp_enabled {
+            conds.push("mcp_enabled = ?".to_string());
+            binds.push(Bind::B(flag));
+        }
+        if let Some(ref prefix) = filter.name_prefix {
+            conds.push("name LIKE ?".to_string());
+            binds.push(Bind::S(format!("{}%", prefix)));
+        }
+        if let Some(ts) = filter.created_after {
+            conds.push("created_at >= ?".to_string());
+            binds.push(Bind::T(ts));
+        }
+        if let Some(ts) = filter.created_before {
+            conds.push("created_at <= ?".to_string());
+            binds.push(Bind::T(ts));
+        }
+        if let Some(ref q) = filter.q {
+            conds.push("(LOWER(name) LIKE LOWER(?) OR LOWER(trn) LIKE LOWER(?))".to_string());
+            let like = format!("%{}%", q);
+            binds.push(Bind::S(like.clone()));
+            binds.push(Bind::S(like));
+        }
+        // Governance patterns for COUNT/SELECT
+        if let Some(ref allows) = filter.allow_patterns {
+            if !allows.is_empty() {
+                if !allows.iter().any(|p| p == "*") {
+                    let mut or_conds: Vec<String> = Vec::new();
+                    for pat in allows {
+                        if pat == "*" { continue; }
+                        if let Some(prefix) = pat.strip_suffix(".*") {
+                            or_conds.push("(connector = ?)".to_string());
+                            binds.push(Bind::S(prefix.to_string()));
+                        } else if let Some(suffix) = pat.strip_prefix("*.") {
+                            or_conds.push("(name = ?)".to_string());
+                            binds.push(Bind::S(suffix.to_string()));
+                        } else if let Some((conn, name)) = pat.split_once('.') {
+                            or_conds.push("(connector = ? AND name = ?)".to_string());
+                            binds.push(Bind::S(conn.to_string()));
+                            binds.push(Bind::S(name.to_string()));
+                        } else {
+                            or_conds.push("(connector = ?)".to_string());
+                            binds.push(Bind::S(pat.to_string()));
+                        }
+                    }
+                    if !or_conds.is_empty() {
+                        conds.push(format!("({})", or_conds.join(" OR ")));
+                    }
+                }
+            }
+        }
+        if let Some(ref denies) = filter.deny_patterns {
+            if !denies.is_empty() {
+                let mut or_conds: Vec<String> = Vec::new();
+                for pat in denies {
+                    if pat == "*" {
+                        or_conds.clear();
+                        or_conds.push("1=1".to_string());
+                        break;
+                    }
+                    if let Some(prefix) = pat.strip_suffix(".*") {
+                        or_conds.push("(connector = ?)".to_string());
+                        binds.push(Bind::S(prefix.to_string()));
+                    } else if let Some(suffix) = pat.strip_prefix("*.") {
+                        or_conds.push("(name = ?)".to_string());
+                        binds.push(Bind::S(suffix.to_string()));
+                    } else if let Some((conn, name)) = pat.split_once('.') {
+                        or_conds.push("(connector = ? AND name = ?)".to_string());
+                        binds.push(Bind::S(conn.to_string()));
+                        binds.push(Bind::S(name.to_string()));
+                    } else {
+                        or_conds.push("(connector = ?)".to_string());
+                        binds.push(Bind::S(pat.to_string()));
+                    }
+                }
+                if !or_conds.is_empty() {
+                    conds.push(format!("NOT ({})", or_conds.join(" OR ")));
+                }
+            }
+        }
+        if !conds.is_empty() {
+            where_sql.push_str(" WHERE ");
+            where_sql.push_str(&conds.join(" AND "));
+        }
+
+        // Count query
+        let count_sql = format!("SELECT COUNT(*) as cnt FROM actions{}", where_sql);
+        let mut count_query = sqlx::query(&count_sql);
+        for b in &binds {
+            match b {
+                Bind::S(s) => { count_query = count_query.bind(s.clone()); },
+                Bind::B(v) => { count_query = count_query.bind(*v); },
+                Bind::T(ts) => { count_query = count_query.bind(ts.clone()); },
+            }
+        }
+        let row = count_query.fetch_one(&self.pool).await.map_err(StoreError::Database)?;
+        let total: i64 = row.get("cnt");
+
+        // Records query with sort and pagination
+        let mut sql = format!("SELECT trn, connector, name, connection_trn, config_json, mcp_enabled, mcp_overrides_json, created_at, updated_at, version FROM actions{}", where_sql);
+        sql.push_str(" ORDER BY ");
+        match opts.sort_field.unwrap_or(ActionSortField::CreatedAt) {
+            ActionSortField::CreatedAt => sql.push_str("created_at"),
+            ActionSortField::Name => sql.push_str("name"),
+            ActionSortField::Version => sql.push_str("version"),
+        }
+        if !opts.ascending { sql.push_str(" DESC"); }
+        if let (Some(page), Some(page_size)) = (opts.page, opts.page_size) {
+            let page = page.max(1);
+            let page_size = page_size.max(1);
+            sql.push_str(" LIMIT ? OFFSET ?");
+            let offset = (page - 1) * page_size;
+            let mut query = sqlx::query(&sql);
+            for b in &binds {
+                match b {
+                    Bind::S(s) => { query = query.bind(s.clone()); },
+                    Bind::B(v) => { query = query.bind(*v); },
+                    Bind::T(ts) => { query = query.bind(ts.clone()); },
+                }
+            }
+            query = query.bind(page_size as i64).bind(offset as i64);
+            let rows = query.fetch_all(&self.pool).await.map_err(StoreError::Database)?;
+            let mut records = Vec::new();
+            for row in rows {
+                let config_json_str: String = row.get("config_json");
+                let config_json: JsonValue = serde_json::from_str(&config_json_str).map_err(StoreError::Serialization)?;
+                let mcp_overrides_json: Option<String> = row.get("mcp_overrides_json");
+                let mcp_overrides = if let Some(json_str) = mcp_overrides_json {
+                    Some(serde_json::from_str(&json_str).map_err(StoreError::Serialization)?)
+                } else { None };
+                records.push(ActionRecord {
+                    trn: Trn::new(row.get::<String, _>("trn")),
+                    connector: openact_core::ConnectorKind::new(row.get::<String, _>("connector")),
+                    name: row.get("name"),
+                    connection_trn: Trn::new(row.get::<String, _>("connection_trn")),
+                    config_json,
+                    mcp_enabled: row.get("mcp_enabled"),
+                    mcp_overrides,
+                    created_at: row.get("created_at"),
+                    updated_at: row.get("updated_at"),
+                    version: row.get("version"),
+                });
+            }
+            return Ok(ActionListResult { records, total: total as u64 });
+        }
+
+        // No pagination: reuse existing list_filtered path
+        let records = self.list_filtered(filter, Some(opts)).await?;
+        Ok(ActionListResult { records, total: total as u64 })
+    }
+    
 }
 
 #[async_trait]

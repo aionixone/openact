@@ -75,6 +75,7 @@ impl ServerError {
             error: ErrorDetails { code: code.to_string(), message, details: None },
             metadata: super::dto::ResponseMeta {
                 request_id,
+                tenant: None,
                 execution_time_ms: None,
                 action_trn: None,
                 version: None,

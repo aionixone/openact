@@ -20,8 +20,8 @@ use crate::{
     },
     AppState, GovernanceConfig, McpError, McpResult,
 };
-use openact_core::store::{ActionRepository, ConnectionStore};
-use openact_core::{ConnectorKind, Trn};
+use openact_core::store::ActionRepository;
+use openact_core::{types::ToolName, ConnectorKind, Trn};
 use openact_plugins as plugins;
 use openact_registry::{ConnectorRegistry, ExecutionContext};
 
@@ -143,11 +143,18 @@ impl McpServer {
 
     /// Handle tools/list method
     async fn handle_tools_list(&self, request: &JsonRpcRequest) -> McpResult<JsonRpcResponse> {
-        let _params: ToolsListRequest = if let Some(params) = &request.params {
+        let raw_params = request.params.clone();
+        let _params: ToolsListRequest = if let Some(params) = &raw_params {
             serde_json::from_value(params.clone())?
         } else {
             ToolsListRequest { cursor: None }
         };
+        // Optional tenant context (future-friendly): try to read unknown field `tenant`
+        let tenant_ctx: Option<String> = raw_params
+            .as_ref()
+            .and_then(|v| v.get("tenant"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         // Dynamic tools from store (mcp_enabled)
         let mut tools: Vec<Tool> = Vec::new();
 
@@ -184,7 +191,7 @@ impl McpServer {
         }
 
         // Optimize: Get all MCP-enabled actions in one query to avoid N+1
-        let all_actions = self.get_all_mcp_enabled_actions().await?;
+        let all_actions = self.get_all_mcp_enabled_actions(tenant_ctx.as_deref()).await?;
         let mut tool_names_seen = HashSet::new();
         let mut alias_conflicts = Vec::new();
 
@@ -361,8 +368,22 @@ impl McpServer {
         };
 
         // Apply timeout
+        let start_time = std::time::Instant::now();
         match timeout(self.governance.timeout, execution_future).await {
-            Ok(result) => result,
+            Ok(result) => {
+                let elapsed_ms = start_time.elapsed().as_millis() as u64;
+                let tenant_log = call_request
+                    .arguments
+                    .as_ref()
+                    .and_then(|a| a.get("tenant"))
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string());
+                match tenant_log {
+                    Some(t) => info!(tool=%call_request.name, tenant=%t, elapsed_ms=%elapsed_ms, "MCP tools/call done"),
+                    None => info!(tool=%call_request.name, elapsed_ms=%elapsed_ms, "MCP tools/call done"),
+                }
+                result
+            }
             Err(_) => {
                 warn!("Tool '{}' timed out after {:?}", call_request.name, self.governance.timeout);
                 Err(McpError::Timeout)
@@ -373,74 +394,54 @@ impl McpServer {
     /// Get all MCP-enabled actions in a single query to avoid N+1 problem
     async fn get_all_mcp_enabled_actions(
         &self,
+        tenant: Option<&str>,
     ) -> McpResult<Vec<openact_core::types::ActionRecord>> {
-        let connectors = ConnectionStore::list_distinct_connectors(self.app_state.store.as_ref())
-            .await
-            .map_err(|e| McpError::Internal(format!("Failed to list connectors: {}", e)))?;
+        let mut filter = openact_core::store::ActionListFilter { mcp_enabled: Some(true), ..Default::default() };
+        if let Some(t) = tenant { filter.tenant = Some(t.to_string()); }
+        // Push governance to DB layer when listing actions
+        filter.allow_patterns = Some(self.governance.allow_patterns.clone());
+        filter.deny_patterns = Some(self.governance.deny_patterns.clone());
+        let actions = ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
+        .await
+        .map_err(|e| McpError::Internal(format!("Failed to list MCP-enabled actions: {}", e)))?;
 
-        let mut all_actions = Vec::new();
-        for kind in connectors {
-            let actions = ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
-                .await
-                .map_err(|e| {
-                    McpError::Internal(format!(
-                        "Failed to list actions for {}: {}",
-                        kind.as_str(),
-                        e
-                    ))
-                })?;
-
-            for action in actions {
-                if action.mcp_enabled {
-                    all_actions.push(action);
-                }
-            }
-        }
-
-        Ok(all_actions)
+        Ok(actions)
     }
 
     /// Resolve tool name to (connector, action) pair
     async fn resolve_tool_to_action(&self, tool_name: &str) -> McpResult<(String, String)> {
-        // First try to find it as an alias in mcp_overrides.tool_name
-        let connectors = ConnectionStore::list_distinct_connectors(self.app_state.store.as_ref())
-            .await
-            .map_err(|e| McpError::Internal(format!("Failed to list connectors: {}", e)))?;
+        // First try to find it as an alias in mcp_overrides.tool_name using a filtered list
+        let filter = openact_core::store::ActionListFilter { mcp_enabled: Some(true), ..Default::default() };
+        let actions = ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
+        .await
+        .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
 
-        for kind in connectors {
-            let actions = ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
-                .await
-                .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
-
-            for a in actions {
-                if !a.mcp_enabled {
-                    continue;
-                }
-
-                // Check if this action has the tool name as an alias
-                if let Some(ref overrides) = a.mcp_overrides {
-                    if let Some(ref alias) = overrides.tool_name {
-                        if alias == tool_name {
-                            debug!(
-                                "Resolved alias '{}' to {}.{}",
-                                tool_name,
-                                a.connector.as_str(),
-                                a.name
-                            );
-                            return Ok((a.connector.as_str().to_string(), a.name));
-                        }
+        for a in actions {
+            if let Some(ref overrides) = a.mcp_overrides {
+                if let Some(ref alias) = overrides.tool_name {
+                    if alias == tool_name {
+                        debug!(
+                            "Resolved alias '{}' to {}.{}",
+                            tool_name,
+                            a.connector.as_str(),
+                            a.name
+                        );
+                        return Ok((a.connector.as_str().to_string(), a.name));
                     }
                 }
             }
         }
 
         // If not found as alias, try direct connector.action format
-        if let Ok(parsed) = openact_core::policy::tools::parse_tool_name(tool_name) {
+        if let Some(parsed) = ToolName::parse_human(tool_name) {
             let kind = ConnectorKind::new(parsed.connector.clone()).canonical();
-            let actions = ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
-                .await
-                .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
-            if actions.iter().any(|a| a.name == parsed.action && a.mcp_enabled) {
+            let mut filter = openact_core::store::ActionListFilter { connector: Some(kind), mcp_enabled: Some(true), ..Default::default() };
+            filter.allow_patterns = Some(self.governance.allow_patterns.clone());
+            filter.deny_patterns = Some(self.governance.deny_patterns.clone());
+            let actions = ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
+            .await
+            .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
+            if actions.iter().any(|a| a.name == parsed.action) {
                 debug!(
                     "Resolved direct tool '{}' to {}.{}",
                     tool_name, parsed.connector, parsed.action
@@ -470,8 +471,11 @@ impl McpServer {
         // Check if explicit action_trn is provided
         let action_trn = if let Some(trn_str) = arguments.get("action_trn").and_then(|v| v.as_str())
         {
-            // Use explicit TRN - validate it exists in the database
+            // Use explicit TRN - validate format and existence
             let trn = Trn::new(trn_str.to_string());
+            let _atrn = openact_core::types::ActionTrn::try_from(trn.clone()).map_err(|_| {
+                McpError::InvalidArguments("Invalid action TRN".to_string())
+            })?;
             let action_record = ActionRepository::get(self.app_state.store.as_ref(), &trn)
                 .await
                 .map_err(|e| McpError::Internal(format!("Failed to lookup action TRN: {}", e)))?
@@ -544,11 +548,14 @@ impl McpServer {
             trn
         };
         let ctx = ExecutionContext::new();
+        let start_time = std::time::Instant::now();
         let exec = self
             .registry
             .execute(&action_trn, input.clone(), Some(ctx))
             .await
             .map_err(|e| McpError::Internal(e.to_string()))?;
+        let elapsed_ms = start_time.elapsed().as_millis() as u64;
+        info!(action_trn=%action_trn.as_str(), elapsed_ms=%elapsed_ms, "MCP openact.execute finished");
 
         // The action has already had a chance to wrap/normalize its output via
         // Action::mcp_wrap_output (applied in the registry). MCP server should
@@ -579,219 +586,6 @@ impl McpServer {
     }
 }
 
-/// Build a JSON Schema for a tool's input from the action's declared parameters (if available).
-// Deprecated: input schema derivation moved into Action::mcp_input_schema
-
-/// Best-effort annotations from action config (e.g., read-only for SELECT)
-// Note: tool annotations are intentionally not derived here to avoid connector-specific
-// logic at the server layer. Prefer adding optional hooks on connector actions to supply
-// annotations, or defining generic policy-driven hints in the future.
-
-/*
-/// Derive HTTP tool input schema based on action config (path variables, query/headers/body)
-// Deprecated: HTTP input schema derivation moved into HttpActionWrapper::mcp_input_schema
-    use serde_json::{Map, Value};
-
-    let mut properties: Map<String, Value> = Map::new();
-    let mut required: Vec<String> = Vec::new();
-
-    // Path variables from config_json.path
-    if let Some(path) = action
-        .config_json
-        .get("path")
-        .and_then(|v| v.as_str())
-    {
-        for var in extract_path_variables(path) {
-            properties.insert(var.clone(), json!({"type": "string", "description": "Path parameter"}));
-            required.push(var);
-        }
-    }
-
-    // If query_params present, expose detailed 'query' object
-    if let Some(Value::Object(q)) = action.config_json.get("query_params") {
-        let mut qprops = Map::new();
-        for (k, v) in q {
-            // Values can be arrays (MultiValue) or strings; infer basic type
-            let schema = match v {
-                Value::Array(_) => json!({"type": "array", "items": {"type": "string"}}),
-                Value::String(_) => json!({"type": "string"}),
-                _ => json!({"type": "string"}),
-            };
-            qprops.insert(k.clone(), schema);
-        }
-        properties.insert(
-            "query".into(),
-            json!({"type": "object", "description": "Query parameters", "properties": Value::Object(qprops)}),
-        );
-    } else if action.config_json.get("query_params").is_some() {
-        properties.insert("query".into(), json!({"type": "object", "description": "Query parameters"}));
-    }
-
-    // If headers present, expose detailed 'headers' object
-    if let Some(Value::Object(h)) = action.config_json.get("headers") {
-        let mut hprops = Map::new();
-        for (k, v) in h {
-            let schema = match v {
-                Value::Array(_) => json!({"type": "array", "items": {"type": "string"}}),
-                Value::String(_) => json!({"type": "string"}),
-                _ => json!({"type": "string"}),
-            };
-            hprops.insert(k.clone(), schema);
-        }
-        properties.insert(
-            "headers".into(),
-            json!({"type": "object", "description": "Additional headers", "properties": Value::Object(hprops)}),
-        );
-    } else if action.config_json.get("headers").is_some() {
-        properties.insert("headers".into(), json!({"type": "object", "description": "Additional headers"}));
-    }
-
-    // If method implies body, expose 'body' object
-    if let Some(method) = action.config_json.get("method").and_then(|v| v.as_str()) {
-        let mu = method.to_uppercase();
-        if matches!(mu.as_str(), "POST" | "PUT" | "PATCH") {
-            // Try to infer body schema from 'body' or legacy 'request_body'
-            if let Some(b) = action.config_json.get("body") {
-                if let Some(schema) = infer_body_schema(b) {
-                    properties.insert("body".into(), schema);
-                } else {
-                    properties.insert("body".into(), json!({"type": "object", "description": "Request body"}));
-                }
-            } else {
-                properties.insert("body".into(), json!({"type": "object", "description": "Request body"}));
-            }
-        }
-    }
-
-    openact_mcp_types::ToolInputSchema {
-        r#type: "object".into(),
-        properties: if properties.is_empty() { None } else { Some(Value::Object(properties)) },
-        required: if required.is_empty() { None } else { Some(required) },
-    }
-}
-
-/// Infer a JSON Schema (partial) for HTTP body based on RequestBodyType sample in config_json
-// Deprecated helper
-    // Expect shape: { "type": "json"|"form"|"multipart"|"raw"|"text", ... }
-    if let Value::Object(obj) = body_val {
-        if let Some(Value::String(kind)) = obj.get("type") {
-            match kind.as_str() {
-                "json" => {
-                    if let Some(data) = obj.get("data") {
-                        return Some(infer_objectish_schema(data).unwrap_or(json!({"type": "object"})));
-                    }
-                    return Some(json!({"type": "object"}));
-                }
-                "form" => {
-                    return Some(json!({"type": "object", "additionalProperties": {"type": "string"}}));
-                }
-                "multipart" => {
-                    return Some(json!({"type": "object"}));
-                }
-                "raw" => {
-                    return Some(json!({"type": "string", "description": "base64-encoded"}));
-                }
-                "text" => {
-                    return Some(json!({"type": "string"}));
-                }
-                _ => {}
-            }
-        }
-    }
-    None
-}
-
-/// Best-effort schema inference for JSON objects
-// Deprecated helper
-    match value {
-        Value::Object(map) => {
-            let mut props = serde_json::Map::new();
-            for (k, v) in map.iter() {
-                let t = match v {
-                    Value::Null => json!({"type": ["null", "string"]}),
-                    Value::Bool(_) => json!({"type": "boolean"}),
-                    Value::Number(n) => {
-                        if n.is_i64() || n.is_u64() { json!({"type": "integer"}) } else { json!({"type": "number"}) }
-                    }
-                    Value::String(_) => json!({"type": "string"}),
-                    Value::Array(_) => json!({"type": "array"}),
-                    Value::Object(_) => json!({"type": "object"}),
-                };
-                props.insert(k.clone(), t);
-            }
-            Some(json!({"type": "object", "properties": props}))
-        }
-        Value::Array(items) => {
-            if let Some(first) = items.first() {
-                let it = infer_objectish_schema(first).unwrap_or(json!({"type": "string"}));
-                Some(json!({"type": "array", "items": it}))
-            } else {
-                Some(json!({"type": "array"}))
-            }
-        }
-        _ => None,
-    }
-}
-
-// Deprecated helper
-    let mut res = Vec::new();
-    let mut chars = path.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '{' {
-            let mut name = String::new();
-            while let Some(c) = chars.next() {
-                if c == '}' { break; }
-                name.push(c);
-            }
-            if !name.is_empty() { res.push(name); }
-        }
-    }
-    res
-}
-
-/// Derive output schema for tools where we can predict object shape (e.g., Postgres write operations)
-// Deprecated: output schema derivation moved into Action::mcp_output_schema
-    if action.connector.as_str() == "postgres" {
-        if let Some(stmt) = action.config_json.get("statement").and_then(|v| v.as_str()) {
-            let s = stmt.to_lowercase();
-            let returns_rows = s.starts_with("select") || s.starts_with("with") || s.starts_with("show") || s.contains(" returning ");
-            if !returns_rows {
-                // rows_affected object
-                return Some(openact_mcp_types::ToolOutputSchema {
-                    r#type: "object".into(),
-                    properties: Some(json!({
-                        "rows_affected": {"type": "integer"}
-                    })),
-                    required: Some(vec!["rows_affected".into()]),
-                });
-            } else {
-                // rows array wrapper
-                return Some(openact_mcp_types::ToolOutputSchema {
-                    r#type: "object".into(),
-                    properties: Some(json!({
-                        "rows": { "type": "array", "items": { "type": "object" } }
-                    })),
-                    required: Some(vec!["rows".into()]),
-                });
-            }
-        }
-    }
-
-    // HTTP: default to data wrapper (object); if method looks like list (GET), still use data as generic default
-    if action.connector.as_str() == "http" {
-        // Optional: choose items vs data based on path ending with 's' or '/list', but keep stable default
-        return Some(openact_mcp_types::ToolOutputSchema {
-            r#type: "object".into(),
-            properties: Some(json!({
-                "data": { "type": ["object", "array", "string", "number", "boolean", "null"] }
-            })),
-            required: None,
-        });
-    }
-    None
-}
-
-*/
 /// Serve MCP over stdio (following Go's stdio pattern)
 pub async fn serve_stdio(app_state: AppState, governance: GovernanceConfig) -> McpResult<()> {
     info!("Starting OpenAct MCP server (stdio mode)");
@@ -806,7 +600,7 @@ pub async fn serve_stdio(app_state: AppState, governance: GovernanceConfig) -> M
         info!("Deny patterns: {:?}", governance.deny_patterns);
     }
 
-    let server = McpServer::new(app_state, governance);
+    let server = McpServer::new(app_state, governance.clone());
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
 
@@ -834,8 +628,104 @@ pub async fn serve_stdio(app_state: AppState, governance: GovernanceConfig) -> M
             continue;
         }
 
+        // Enforce tenant requirement for stdio if configured and optionally inject default when not required
+        let require_tenant = std::env::var("OPENACT_REQUIRE_TENANT")
+            .map(|v| { let v = v.to_ascii_lowercase(); v == "1" || v == "true" || v == "yes" })
+            .unwrap_or(false);
+        let mut maybe_patched: Option<Vec<u8>> = None;
+        if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&line) {
+            if let Some(method) = v.get("method").and_then(|m| m.as_str()) {
+                // Log method/id/tenant for stdio
+                let id_str = v.get("id").map(|id| id.to_string()).unwrap_or_else(|| "null".to_string());
+                let tenant_log = match method {
+                    crate::mcp::METHOD_TOOLS_LIST => v.get("params").and_then(|p| p.get("tenant")).and_then(|t| t.as_str()).map(|s| s.to_string()),
+                    crate::mcp::METHOD_TOOLS_CALL => v.get("params").and_then(|p| p.get("arguments")).and_then(|a| a.get("tenant")).and_then(|t| t.as_str()).map(|s| s.to_string()),
+                    _ => None,
+                };
+                match tenant_log {
+                    Some(t) => info!(method=%method, request_id=%id_str, tenant=%t, "MCP stdio request"),
+                    None => info!(method=%method, request_id=%id_str, "MCP stdio request"),
+                }
+
+                let missing = match method {
+                    crate::mcp::METHOD_TOOLS_LIST => {
+                        v.get("params").and_then(|p| p.get("tenant")).and_then(|t| t.as_str()).is_none()
+                    }
+                    crate::mcp::METHOD_TOOLS_CALL => {
+                        v.get("params").and_then(|p| p.get("arguments")).and_then(|a| a.get("tenant")).and_then(|t| t.as_str()).is_none()
+                    }
+                    _ => false,
+                };
+
+                if missing && require_tenant {
+                    let error_response = error_response(
+                        Some(RequestId::new_uuid()),
+                        crate::jsonrpc::JsonRpcError::invalid_request().with_data(serde_json::json!({
+                            "code": "INVALID_INPUT",
+                            "message": "Missing tenant (provide params.tenant or arguments.tenant)",
+                        })),
+                    );
+                    let response_json = serde_json::to_string(&error_response)?;
+                    writeln!(stdout, "{}", response_json)?;
+                    stdout.flush()?;
+                    continue;
+                }
+
+                // If not required, inject default tenant when missing
+                if missing {
+                    let default_tenant = std::env::var("OPENACT_DEFAULT_TENANT")
+                        .unwrap_or_else(|_| "default".to_string());
+                    match method {
+                        crate::mcp::METHOD_TOOLS_LIST => {
+                            match v.get_mut("params") {
+                                Some(p) if p.is_object() => {
+                                    p.as_object_mut().unwrap().insert(
+                                        "tenant".to_string(),
+                                        serde_json::Value::String(default_tenant.clone()),
+                                    );
+                                }
+                                _ => {
+                                    let mut obj = serde_json::Map::new();
+                                    obj.insert("tenant".to_string(), serde_json::Value::String(default_tenant.clone()));
+                                    v["params"] = serde_json::Value::Object(obj);
+                                }
+                            }
+                        }
+                        crate::mcp::METHOD_TOOLS_CALL => {
+                            match v.get_mut("params") {
+                                Some(p) if p.is_object() => {
+                                    let pobj = p.as_object_mut().unwrap();
+                                    match pobj.get_mut("arguments") {
+                                        Some(args) if args.is_object() => {
+                                            args.as_object_mut().unwrap().insert(
+                                                "tenant".to_string(),
+                                                serde_json::Value::String(default_tenant.clone()),
+                                            );
+                                        }
+                                        _ => {
+                                            pobj.insert(
+                                                "arguments".to_string(),
+                                                serde_json::json!({"tenant": default_tenant.clone()}),
+                                            );
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                    // Serialize patched request
+                    if let Ok(bytes) = serde_json::to_vec(&v) {
+                        maybe_patched = Some(bytes);
+                    }
+                }
+            }
+        }
+
         // Process the message
-        match server.process_message(line.as_bytes()).await {
+        let body_ref: &[u8] = if let Some(ref bytes) = maybe_patched { bytes.as_slice() } else { line.as_bytes() };
+        match server.process_message(body_ref).await {
             Ok(Some(response)) => {
                 // Send response
                 let response_json = serde_json::to_string(&response)?;
@@ -874,6 +764,7 @@ pub async fn serve_http(
         routing::post,
         Router,
     };
+    use axum::extract::DefaultBodyLimit;
     use serde_json::Value;
     use uuid::Uuid;
 
@@ -896,6 +787,27 @@ pub async fn serve_http(
         headers: HeaderMap,
         body: axum::body::Bytes,
     ) -> Result<(HeaderMap, Json<Value>), (StatusCode, Json<Value>)> {
+        // Require JSON content type
+        if let Some(ct) = headers.get("content-type") {
+            let ct_str = ct.to_str().unwrap_or("").to_ascii_lowercase();
+            if !ct_str.starts_with("application/json") {
+                return Err((
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    Json(serde_json::json!({
+                        "error": "Unsupported Media Type",
+                        "expected": "application/json"
+                    })),
+                ));
+            }
+        } else {
+            return Err((
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                Json(serde_json::json!({
+                    "error": "Missing Content-Type",
+                    "expected": "application/json"
+                })),
+            ));
+        }
         // Validate MCP protocol version
         if let Some(protocol_version) = headers.get("mcp-protocol-version") {
             let version_str = protocol_version.to_str().unwrap_or("");
@@ -911,8 +823,157 @@ pub async fn serve_http(
             }
         }
 
+        // Inject tenant from header if present and enforce requirement if configured
+        let header_tenant = headers
+            .get("x-tenant")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let require_tenant = std::env::var("OPENACT_REQUIRE_TENANT")
+            .map(|v| {
+                let v = v.to_ascii_lowercase();
+                v == "1" || v == "true" || v == "yes"
+            })
+            .unwrap_or(false);
+
+        // Try to parse the JSON-RPC request so we can inject tenant where appropriate
+        let mut patched_body: Option<Vec<u8>> = None;
+        if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&body[..]) {
+            let method_opt = v.get("method").and_then(|m| m.as_str().map(|s| s.to_string()));
+            if let Some(method) = method_opt {
+                // Log method, jsonrpc id and tenant context (from params or header)
+                let tenant_from_params = match method.as_str() {
+                    crate::mcp::METHOD_TOOLS_LIST => v
+                        .get("params")
+                        .and_then(|p| p.get("tenant"))
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string()),
+                    crate::mcp::METHOD_TOOLS_CALL => v
+                        .get("params")
+                        .and_then(|p| p.get("arguments"))
+                        .and_then(|a| a.get("tenant"))
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string()),
+                    _ => None,
+                };
+                let tenant_log = tenant_from_params.or(header_tenant.clone());
+                let id_str = v
+                    .get("id")
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "null".to_string());
+                match tenant_log {
+                    Some(t) => info!(method=%method, request_id=%id_str, tenant=%t, "MCP HTTP request"),
+                    None => info!(method=%method, request_id=%id_str, "MCP HTTP request"),
+                }
+                match method.as_str() {
+                    // For tools/list: place `tenant` at top-level params
+                    crate::mcp::METHOD_TOOLS_LIST => {
+                        let mut has_tenant = v
+                            .get("params")
+                            .and_then(|p| p.get("tenant"))
+                            .and_then(|t| t.as_str())
+                            .is_some();
+                        if !has_tenant {
+                            if let Some(t) = &header_tenant {
+                                // create or insert tenant into params
+                                match v.get_mut("params") {
+                                    Some(p) if p.is_object() => {
+                                        p.as_object_mut().unwrap().insert(
+                                            "tenant".to_string(),
+                                            serde_json::Value::String(t.clone()),
+                                        );
+                                    }
+                                    _ => {
+                                        let mut obj = serde_json::Map::new();
+                                        obj.insert("tenant".to_string(), serde_json::Value::String(t.clone()));
+                                        v["params"] = serde_json::Value::Object(obj);
+                                    }
+                                }
+                                has_tenant = true;
+                            }
+                        }
+                        if require_tenant && !has_tenant {
+                            return Err((
+                                StatusCode::BAD_REQUEST,
+                                Json(serde_json::json!({
+                                    "error": {
+                                        "code": "INVALID_INPUT",
+                                        "message": "Missing tenant (provide X-Tenant header or params.tenant)",
+                                    }
+                                })),
+                            ));
+                        }
+                    }
+                    // For tools/call: place `tenant` under params.arguments
+                    crate::mcp::METHOD_TOOLS_CALL => {
+                        // Determine if a tenant exists already
+                        let mut has_tenant = v
+                            .get("params")
+                            .and_then(|p| p.get("arguments"))
+                            .and_then(|a| a.get("tenant"))
+                            .and_then(|t| t.as_str())
+                            .is_some();
+                        if !has_tenant {
+                            if let Some(t) = &header_tenant {
+                                // ensure arguments is an object then insert tenant
+                                match v.get_mut("params") {
+                                    Some(p) if p.is_object() => {
+                                        let pobj = p.as_object_mut().unwrap();
+                                        match pobj.get_mut("arguments") {
+                                            Some(args) if args.is_object() => {
+                                                args.as_object_mut().unwrap().insert(
+                                                    "tenant".to_string(),
+                                                    serde_json::Value::String(t.clone()),
+                                                );
+                                            }
+                                            Some(_) => {
+                                                pobj.insert(
+                                                    "arguments".to_string(),
+                                                    serde_json::json!({"tenant": t.clone()}),
+                                                );
+                                            }
+                                            None => {
+                                                pobj.insert(
+                                                    "arguments".to_string(),
+                                                    serde_json::json!({"tenant": t.clone()}),
+                                                );
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        // If params is missing or not object, avoid restructuring; rely on client or require flag
+                                    }
+                                }
+                                has_tenant = true;
+                            }
+                        }
+                        if require_tenant && !has_tenant {
+                            return Err((
+                                StatusCode::BAD_REQUEST,
+                                Json(serde_json::json!({
+                                    "error": {
+                                        "code": "INVALID_INPUT",
+                                        "message": "Missing tenant (provide X-Tenant header or arguments.tenant)",
+                                    }
+                                })),
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+
+                // If we modified v, serialize back
+                if v != serde_json::from_slice::<serde_json::Value>(&body[..]).unwrap_or(serde_json::Value::Null) {
+                    if let Ok(bytes) = serde_json::to_vec(&v) {
+                        patched_body = Some(bytes);
+                    }
+                }
+            }
+        }
+
+        let body_ref: &[u8] = if let Some(ref b) = patched_body { b.as_slice() } else { &body[..] };
+
         // Process the MCP message
-        match server.process_message(&body[..]).await {
+        match server.process_message(body_ref).await {
             Ok(Some(response)) => {
                 let mut response_headers = HeaderMap::new();
                 response_headers.insert("content-type", "application/json".parse().unwrap());
@@ -956,7 +1017,11 @@ pub async fn serve_http(
         }
     }
 
-    let app = Router::new().route("/mcp", post(handle_mcp_request)).with_state(server);
+    // Limit request body size for safety (1 MiB default here)
+    let app = Router::new()
+        .route("/mcp", post(handle_mcp_request))
+        .layer(DefaultBodyLimit::max(1 * 1024 * 1024))
+        .with_state(server);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

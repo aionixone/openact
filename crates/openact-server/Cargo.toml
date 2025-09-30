@@ -10,6 +10,7 @@ openact-core = { path = "../openact-core" }
 openact-store = { path = "../openact-store" }
 openact-registry = { path = "../openact-registry" }
 openact-plugins = { path = "../openact-plugins" }
+openact-runtime = { path = "../openact-runtime" }
 openact-authflow = { path = "../openact-authflow", optional = true, features = ["server"] }
 anyhow = "1.0"
 axum = { version = "0.7", features = ["json"] }
@@ -24,6 +25,7 @@ uuid = { version = "1.0", features = ["v4"] }
 jsonschema = "0.17"
 sha2 = "0.10"
 async-stream = "0.3"
+chrono = { version = "0.4", features = ["serde", "clock"] }
 
 [features]
 default = []
@@ -31,4 +33,3 @@ authflow = ["dep:openact-authflow"]
 
 [dev-dependencies]
 async-trait = "0.1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }

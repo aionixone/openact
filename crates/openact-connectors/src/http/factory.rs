@@ -353,6 +353,26 @@ impl Action for HttpActionWrapper {
         // Wrap the HTTP execution details as data for a stable shape
         serde_json::json!({ "data": output })
     }
+
+    fn mcp_annotations(&self, _record: &openact_core::ActionRecord) -> Option<JsonValue> {
+        use serde_json::json;
+        let method = self.action.method.to_uppercase();
+        let title = format!("{} {}", method, self.action.path);
+        let (read_only, destructive, idempotent) = match method.as_str() {
+            "GET" | "HEAD" => (Some(true), Some(false), Some(true)),
+            "PUT" => (Some(false), None, Some(true)),
+            "PATCH" => (Some(false), None, None),
+            "POST" => (Some(false), None, Some(false)),
+            "DELETE" => (Some(false), Some(true), Some(false)),
+            _ => (None, None, None),
+        };
+        let mut obj = serde_json::Map::new();
+        obj.insert("title".to_string(), json!(title));
+        if let Some(v) = read_only { obj.insert("readOnlyHint".to_string(), json!(v)); }
+        if let Some(v) = destructive { obj.insert("destructiveHint".to_string(), json!(v)); }
+        if let Some(v) = idempotent { obj.insert("idempotentHint".to_string(), json!(v)); }
+        Some(JsonValue::Object(obj))
+    }
 }
 
 // --------- helpers (HTTP schema inference) ---------

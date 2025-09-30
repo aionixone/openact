@@ -2,7 +2,7 @@
 
 use crate::{
     dto::{ResponseEnvelope, ResponseMeta},
-    middleware::request_id::RequestId,
+    middleware::{request_id::RequestId, tenant::Tenant},
     AppState,
 };
 use axum::{
@@ -16,6 +16,7 @@ use serde_json::json;
 pub async fn health_check(
     State((_app_state, _governance)): State<(AppState, GovernanceConfig)>,
     Extension(request_id): Extension<RequestId>,
+    Extension(tenant): Extension<Tenant>,
 ) -> Json<ResponseEnvelope<serde_json::Value>> {
     let response = ResponseEnvelope {
         success: true,
@@ -26,6 +27,7 @@ pub async fn health_check(
         }),
         metadata: ResponseMeta {
             request_id: request_id.0,
+            tenant: Some(tenant.as_str().to_string()),
             execution_time_ms: None,
             action_trn: None,
             version: None,

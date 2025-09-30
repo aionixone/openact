@@ -22,6 +22,10 @@ pub fn create_router(app_state: AppState, governance: GovernanceConfig) -> Route
             "/api/v1/actions/:action/execute/stream",
             axum::routing::post(super::handlers::actions::execute_action_stream),
         )
+        .route(
+            "/api/v1/execute-inline",
+            axum::routing::post(super::handlers::actions::execute_inline),
+        )
         .route("/api/v1/execute", axum::routing::post(super::handlers::actions::execute_by_trn))
         .route("/api/v1/health", get(super::handlers::health::health_check))
         .layer(ServiceBuilder::new().layer(TenantLayer).layer(RequestIdLayer))

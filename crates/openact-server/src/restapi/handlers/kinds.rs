@@ -2,7 +2,7 @@
 
 use crate::{
     dto::{KindSummary, ResponseEnvelope, ResponseMeta},
-    middleware::request_id::RequestId,
+    middleware::{request_id::RequestId, tenant::Tenant},
     AppState,
 };
 use axum::{
@@ -16,6 +16,7 @@ use serde_json::json;
 pub async fn get_kinds(
     State((app_state, _governance)): State<(AppState, GovernanceConfig)>,
     Extension(request_id): Extension<RequestId>,
+    Extension(tenant): Extension<Tenant>,
 ) -> Result<
     Json<ResponseEnvelope<serde_json::Value>>,
     (axum::http::StatusCode, Json<crate::error::ErrorResponse>),
@@ -38,6 +39,7 @@ pub async fn get_kinds(
         data: json!({ "kinds": kinds }),
         metadata: ResponseMeta {
             request_id: request_id.0,
+            tenant: Some(tenant.as_str().to_string()),
             execution_time_ms: None,
             action_trn: None,
             version: None,

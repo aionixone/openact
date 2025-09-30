@@ -13,8 +13,8 @@ use axum::{
     extract::{Extension, Path, Query, State},
     response::Json,
 };
-use openact_core::store::{ActionRepository, ConnectionStore};
-use openact_core::types::Trn;
+use openact_core::store::{ActionRepository, ActionListFilter};
+use openact_core::types::{Trn, ToolName, ActionTrn};
 use openact_core::ConnectorKind;
 use openact_mcp::GovernanceConfig;
 use openact_registry::{ExecutionContext, RegistryError};
@@ -22,6 +22,8 @@ use serde_json::{json, Value};
 use std::convert::TryFrom;
 use std::time::Duration;
 use tokio::time::timeout;
+use openact_runtime::{records_from_inline_config, registry_from_records_ext};
+use chrono::{DateTime, Utc};
 
 /// GET /api/v1/actions
 pub async fn get_actions(
@@ -34,82 +36,102 @@ pub async fn get_actions(
     (axum::http::StatusCode, Json<crate::error::ErrorResponse>),
 > {
     let req_id = request_id.0.clone();
+    let tenant_str = tenant.as_str();
+    tracing::info!(request_id=%req_id, tenant=%tenant_str, "REST get_actions");
 
-    // Gather action records according to filters
-    let mut records = Vec::new();
+    // Helper: parse RFC3339 timestamps to Utc
+    fn parse_ts(s: &Option<String>) -> Option<DateTime<Utc>> {
+        s.as_ref().and_then(|v| DateTime::parse_from_rfc3339(v).ok()).map(|dt| dt.with_timezone(&Utc))
+    }
 
-    if let Some(conn_str) = &query.connection {
+    // Gather action records according to filters (DB-side pagination + total)
+    let (records, total_db) = if let Some(conn_str) = &query.connection {
         // Filter by specific connection TRN
         if !conn_str.starts_with("trn:openact:") {
             let err = ServerError::InvalidInput("connection must be a TRN".to_string());
             return Err(err.to_http_response(req_id));
         }
         let conn_trn = Trn::new(conn_str.clone());
-        records = app_state
-            .store
-            .as_ref()
-            .list_by_connection(&conn_trn)
+        let mut filter = ActionListFilter::default();
+        filter.connection_trn = Some(conn_trn);
+        // tenant scope is redundant here but harmless
+        filter.tenant = Some(tenant_str.to_string());
+        filter.q = query.q.clone();
+        // Optional extra filters
+        filter.name_prefix = query.name_prefix.clone();
+        filter.created_after = parse_ts(&query.created_after);
+        filter.created_before = parse_ts(&query.created_before);
+
+        let opts = openact_core::store::ActionListOptions {
+            sort_field: Some(openact_core::store::ActionSortField::CreatedAt),
+            ascending: true,
+            page: Some(query.page as u64),
+            page_size: Some(query.page_size as u64),
+        };
+        // Apply governance patterns at DB layer
+        filter.allow_patterns = Some(governance.allow_patterns.clone());
+        filter.deny_patterns = Some(governance.deny_patterns.clone());
+        let res = ActionRepository::list_filtered_paged(app_state.store.as_ref(), filter, opts)
             .await
             .map_err(|e| ServerError::Internal(e.to_string()))
             .map_err(|e| e.to_http_response(request_id.0.clone()))?;
+        (res.records, res.total)
     } else if let Some(kind) = &query.kind {
-        // Filter by connector kind
-        records = ActionRepository::list_by_connector(
-            app_state.store.as_ref(),
-            &ConnectorKind::new(kind.clone()),
-        )
-        .await
-        .map_err(|e| ServerError::Internal(e.to_string()))
-        .map_err(|e| e.to_http_response(request_id.0.clone()))?;
-    } else {
-        // List all: iterate connector kinds from connections (best-effort)
-        let kinds = app_state
-            .store
-            .as_ref()
-            .list_distinct_connectors()
+        // Store-level filter: tenant + connector + optional q downpush
+        let mut filter = ActionListFilter::default();
+        filter.tenant = Some(tenant_str.to_string());
+        filter.connector = Some(ConnectorKind::new(kind.clone()));
+        filter.q = query.q.clone();
+        filter.name_prefix = query.name_prefix.clone();
+        filter.created_after = parse_ts(&query.created_after);
+        filter.created_before = parse_ts(&query.created_before);
+        let opts = openact_core::store::ActionListOptions {
+            sort_field: Some(openact_core::store::ActionSortField::CreatedAt),
+            ascending: true,
+            page: Some(query.page as u64),
+            page_size: Some(query.page_size as u64),
+        };
+        filter.allow_patterns = Some(governance.allow_patterns.clone());
+        filter.deny_patterns = Some(governance.deny_patterns.clone());
+        let res = ActionRepository::list_filtered_paged(app_state.store.as_ref(), filter, opts)
             .await
             .map_err(|e| ServerError::Internal(e.to_string()))
             .map_err(|e| e.to_http_response(request_id.0.clone()))?;
-        for k in kinds {
-            let mut v = ActionRepository::list_by_connector(app_state.store.as_ref(), &k)
-                .await
-                .map_err(|e| ServerError::Internal(e.to_string()))
-                .map_err(|e| e.to_http_response(request_id.0.clone()))?;
-            records.append(&mut v);
-        }
-    }
+        (res.records, res.total)
+    } else {
+        // Store-level filter: tenant + optional q downpush
+        let mut filter = ActionListFilter::default();
+        filter.tenant = Some(tenant_str.to_string());
+        filter.q = query.q.clone();
+        filter.name_prefix = query.name_prefix.clone();
+        filter.created_after = parse_ts(&query.created_after);
+        filter.created_before = parse_ts(&query.created_before);
+        let opts = openact_core::store::ActionListOptions {
+            sort_field: Some(openact_core::store::ActionSortField::CreatedAt),
+            ascending: true,
+            page: Some(query.page as u64),
+            page_size: Some(query.page_size as u64),
+        };
+        filter.allow_patterns = Some(governance.allow_patterns.clone());
+        filter.deny_patterns = Some(governance.deny_patterns.clone());
+        let res = ActionRepository::list_filtered_paged(app_state.store.as_ref(), filter, opts)
+            .await
+            .map_err(|e| ServerError::Internal(e.to_string()))
+            .map_err(|e| e.to_http_response(request_id.0.clone()))?;
+        (res.records, res.total)
+    };
 
-    // Tenant-scope filtering
-    records
-        .retain(|r| parse_action_trn(&r.trn).map(|c| c.tenant == tenant.as_str()).unwrap_or(false));
+    // Store-level filter already scoped by tenant; text query was pushed down.
 
-    // Text query filter
-    if let Some(q) = &query.q {
-        let ql = q.to_lowercase();
-        records.retain(|r| {
-            r.name.to_lowercase().contains(&ql) || r.trn.as_str().to_lowercase().contains(&ql)
-        });
-    }
+    // Governance filtering already handled at DB layer via patterns
 
-    // Governance filter (tool allow/deny)
-    records.retain(|r| {
-        let tool_name = format!("{}.{}", r.connector.as_str(), r.name);
-        governance.is_tool_allowed(&tool_name)
-    });
-
-    // Sort by TRN/name to have stable ordering
-    records.sort_by(|a, b| a.trn.as_str().cmp(b.trn.as_str()));
-
-    // Pagination
-    let total = records.len() as u64;
+    // Pagination is already applied at DB level. We maintain original total from DB,
+    // but governance filter may reduce visible count; we include a warning for transparency.
     let page = query.page.max(1);
     let page_size = query.page_size.max(1);
-    let start = ((page - 1) as usize) * (page_size as usize);
-    let end = (start + page_size as usize).min(records.len());
-    let page_slice = if start < records.len() { &records[start..end] } else { &[] };
 
     // Map to summaries
-    let actions: Vec<ActionSummary> = page_slice
+    let actions: Vec<ActionSummary> = records
         .iter()
         .map(|r| {
             let digest = r.config_json.get("input_schema").and_then(|schema| {
@@ -140,10 +162,11 @@ pub async fn get_actions(
             "actions": actions,
             "page": page,
             "page_size": page_size,
-            "total": total
+            "total": total_db
         }),
         metadata: ResponseMeta {
             request_id: request_id.0,
+            tenant: Some(tenant_str.to_string()),
             execution_time_ms: None,
             action_trn: None,
             version: None,
@@ -166,7 +189,10 @@ pub async fn execute_action_stream(
 {
     use axum::response::sse::{Event, KeepAlive, Sse};
     let req_id = request_id.0.clone();
-    let tool_name = normalize_action_to_tool_name(&action);
+    tracing::info!(request_id=%req_id, tenant=%tenant.as_str(), action=%action, "REST execute_action_stream");
+    let tool_name = ToolName::normalize_action_ref(&action)
+        .map(|t| t.to_dot_string())
+        .unwrap_or_else(|| action.replace('/', "."));
     if !governance.is_tool_allowed(&tool_name) {
         let err = ServerError::Forbidden(format!("Action not allowed: {}", tool_name));
         return Err(err.to_http_response(req_id));
@@ -183,18 +209,24 @@ pub async fn execute_action_stream(
 
     // Resolve TRN (by TRN or name+version)
     let action_trn = if action.starts_with("trn:openact:") {
-        Trn::new(action.clone())
-    } else {
-        let parsed = openact_core::policy::tools::parse_tool_name(&tool_name)
-            .map_err(|msg| ServerError::InvalidInput(msg))
-            .map_err(|e| e.to_http_response(req_id.clone()))?;
-        let version_sel = match query.get("version").map(|s| s.as_str()) {
-            None => {
-                let err = ServerError::InvalidInput(
-                    openact_core::policy::messages::version_required_message().to_string(),
-                );
+        let action_trn = Trn::new(action.clone());
+        // Validate TRN format and tenant
+        if let Ok(atrn) = ActionTrn::try_from(action_trn.clone()) {
+            if atrn.parse_components().map(|c| c.tenant) != Some(tenant.as_str().to_string()) {
+                let err = ServerError::NotFound("Action not found".to_string());
                 return Err(err.to_http_response(req_id.clone()));
             }
+        } else {
+            let err = ServerError::InvalidInput("Invalid action TRN".to_string());
+            return Err(err.to_http_response(req_id.clone()));
+        }
+        action_trn
+    } else {
+        let parsed = ToolName::parse_human(&tool_name)
+            .ok_or_else(|| ServerError::InvalidInput("Invalid action format".to_string()))
+            .map_err(|e| e.to_http_response(req_id.clone()))?;
+        let version_sel = match query.get("version").map(|s| s.as_str()) {
+            None => None,
             Some("latest") | Some("") => None,
             Some(vs) => vs.parse::<i64>().ok(),
         };
@@ -229,6 +261,7 @@ pub async fn execute_action_stream(
         match result {
             Ok(Ok(exec)) => {
                 let (text, usage, elapsed) = assembler.finish();
+                tracing::info!(request_id=%req_id, tenant=%tenant.as_str(), action_trn=%action_trn.as_str(), elapsed_ms=%(elapsed.as_millis() as u64), "REST execute_action_stream_done");
                 let final_obj = json!({
                     "event": "done",
                     "result": exec.output,
@@ -265,8 +298,11 @@ pub async fn get_action_schema(
     (axum::http::StatusCode, Json<crate::error::ErrorResponse>),
 > {
     let req_id = request_id.0.clone();
+    tracing::info!(request_id=%req_id, tenant=%tenant.as_str(), action=%action, "REST get_action_schema");
     // Governance allow/deny check
-    let tool_name = normalize_action_to_tool_name(&action);
+    let tool_name = ToolName::normalize_action_ref(&action)
+        .map(|t| t.to_dot_string())
+        .unwrap_or_else(|| action.replace('/', "."));
     if !governance.is_tool_allowed(&tool_name) {
         tracing::warn!(
             request_id = %req_id,
@@ -281,8 +317,8 @@ pub async fn get_action_schema(
     // Resolve action to TRN
     let action_trn = if action.starts_with("trn:openact:") {
         let action_trn = Trn::new(action.clone());
-        let parsed = parse_action_trn(&action_trn)
-            .ok_or_else(|| {
+        let parsed = ActionTrn::try_from(action_trn.clone())
+            .map_err(|_| {
                 tracing::warn!(
                     request_id = %request_id.0,
                     tenant = %tenant.as_str(),
@@ -292,7 +328,7 @@ pub async fn get_action_schema(
                 ServerError::InvalidInput("Invalid action TRN".to_string())
             })
             .map_err(|e| e.to_http_response(request_id.0.clone()))?;
-        if parsed.tenant != tenant.as_str() {
+        if parsed.parse_components().map(|c| c.tenant) != Some(tenant.as_str().to_string()) {
             tracing::warn!(
                 request_id = %request_id.0,
                 expected_tenant = %tenant.as_str(),
@@ -312,18 +348,15 @@ pub async fn get_action_schema(
             let err = ServerError::InvalidInput("Invalid action format".to_string());
             return Err(err.to_http_response(request_id.0));
         }
-        // Find latest version for tenant
-        let mut records = ActionRepository::list_by_connector(
-            app_state.store.as_ref(),
-            &ConnectorKind::new(connector),
-        )
-        .await
-        .map_err(|e| ServerError::Internal(e.to_string()))
-        .map_err(|e| e.to_http_response(request_id.0.clone()))?;
+        // Find latest version for tenant (store-level filtering)
+        let mut filter = ActionListFilter::default();
+        filter.tenant = Some(tenant.as_str().to_string());
+        filter.connector = Some(ConnectorKind::new(connector));
+        let mut records = ActionRepository::list_filtered(app_state.store.as_ref(), filter, None)
+            .await
+            .map_err(|e| ServerError::Internal(e.to_string()))
+            .map_err(|e| e.to_http_response(request_id.0.clone()))?;
         records.retain(|r| r.name == name);
-        records.retain(|r| {
-            parse_action_trn(&r.trn).map(|c| c.tenant == tenant.as_str()).unwrap_or(false)
-        });
         if records.is_empty() {
             let err = ServerError::NotFound(format!(
                 "Action not found: {}.{} (tenant: {})",
@@ -374,6 +407,7 @@ pub async fn get_action_schema(
         data: schema_response,
         metadata: ResponseMeta {
             request_id: request_id.0,
+            tenant: Some(tenant.as_str().to_string()),
             execution_time_ms: None,
             action_trn: None,
             version: None,
@@ -447,8 +481,11 @@ pub async fn execute_action(
     (axum::http::StatusCode, Json<crate::error::ErrorResponse>),
 > {
     let req_id = request_id.0.clone();
+    tracing::info!(request_id=%req_id, tenant=%tenant.as_str(), action=%action, "REST execute_action");
     // Governance: allow/deny
-    let tool_name = normalize_action_to_tool_name(&action);
+    let tool_name = ToolName::normalize_action_ref(&action)
+        .map(|t| t.to_dot_string())
+        .unwrap_or_else(|| action.replace('/', "."));
     if !governance.is_tool_allowed(&tool_name) {
         tracing::warn!(
             request_id = %req_id,
@@ -472,8 +509,8 @@ pub async fn execute_action(
     // Resolve action to TRN if not given in TRN form
     let action_trn = if action.starts_with("trn:openact:") {
         let action_trn = Trn::new(action.clone());
-        let parsed = parse_action_trn(&action_trn)
-            .ok_or_else(|| {
+        let parsed = ActionTrn::try_from(action_trn.clone())
+            .map_err(|_| {
                 tracing::warn!(
                     request_id = %req_id,
                     tenant = %tenant.as_str(),
@@ -483,7 +520,7 @@ pub async fn execute_action(
                 ServerError::InvalidInput("Invalid action TRN".to_string())
             })
             .map_err(|e| e.to_http_response(req_id.clone()))?;
-        if parsed.tenant != tenant.as_str() {
+        if parsed.parse_components().map(|c| c.tenant) != Some(tenant.as_str().to_string()) {
             tracing::warn!(
                 request_id = %req_id,
                 expected_tenant = %tenant.as_str(),
@@ -496,22 +533,17 @@ pub async fn execute_action(
         action_trn
     } else {
         // Expect formats like "connector.action" or "connector/action"
-        let parsed = match openact_core::policy::tools::parse_tool_name(&tool_name) {
-            Ok(p) => p,
-            Err(msg) => {
-                let err = ServerError::InvalidInput(msg);
+        let parsed = match ToolName::parse_human(&tool_name) {
+            Some(p) => p,
+            None => {
+                let err = ServerError::InvalidInput("Invalid action format".to_string());
                 return Err(err.to_http_response(req_id.clone()));
             }
         };
 
-        // Require explicit version selection for name-based execution
+        // Version selection for name-based execution (default to latest when absent)
         let version_sel = match query.get("version").map(|s| s.as_str()) {
-            None => {
-                let err = ServerError::InvalidInput(
-                    openact_core::policy::messages::version_required_message().to_string(),
-                );
-                return Err(err.to_http_response(req_id.clone()));
-            }
+            None => None, // treat missing as latest
             Some("latest") | Some("") => None,
             Some(vs) => match vs.parse::<i64>() {
                 Ok(v) => Some(v),
@@ -609,6 +641,7 @@ pub async fn execute_action(
             },
             metadata: ResponseMeta {
                 request_id: req_id,
+                tenant: Some(tenant.as_str().to_string()),
                 execution_time_ms: None,
                 action_trn: Some(action_trn.as_str().to_string()),
                 version: version_meta,
@@ -620,6 +653,7 @@ pub async fn execute_action(
     }
 
     drop(action_record_for_validation);
+    let action_trn_str = action_trn.as_str().to_string();
     let fut = async move {
         let ctx = openact_registry::ExecutionContext::new();
         let exec =
@@ -627,6 +661,7 @@ pub async fn execute_action(
         Ok::<_, ServerError>(ExecuteResponse { result: exec.output })
     };
 
+    let start_time = std::time::Instant::now();
     let exec_response = match timeout(effective_timeout, fut).await {
         Ok(res) => res.map_err(|e| e.to_http_response(req_id.clone()))?,
         Err(_) => {
@@ -640,10 +675,153 @@ pub async fn execute_action(
         data: exec_response,
         metadata: ResponseMeta {
             request_id: req_id,
-            execution_time_ms: None,
-            action_trn: None,
+            tenant: Some(tenant.as_str().to_string()),
+            execution_time_ms: Some(start_time.elapsed().as_millis() as u64),
+            action_trn: Some(action_trn_str),
             version: None,
             warnings: None,
+        },
+    };
+
+    Ok(Json(response))
+}
+
+/// POST /api/v1/execute-inline
+/// Execute an action using inline configuration without persisting to the database.
+pub async fn execute_inline(
+    State((_app_state, governance)): State<(AppState, GovernanceConfig)>,
+    Extension(request_id): Extension<RequestId>,
+    Extension(tenant_hdr): Extension<Tenant>,
+    Json(req): Json<crate::dto::ExecuteInlineRequest>,
+) -> Result<
+    Json<ResponseEnvelope<ExecuteResponse>>,
+    (axum::http::StatusCode, Json<crate::error::ErrorResponse>),
+> {
+    let req_id = request_id.0.clone();
+    // logging moved after effective tenant resolution
+    // Determine effective tenant for metadata (request field overrides header)
+    let effective_tenant = req
+        .tenant
+        .clone()
+        .unwrap_or_else(|| tenant_hdr.as_str().to_string());
+
+    // Convert inline config to records
+    let (conn_records, action_records) = records_from_inline_config(req.connections.clone(), req.actions.clone())
+        .map_err(|e| ServerError::InvalidInput(e.to_string()))
+        .map_err(|e| e.to_http_response(req_id.clone()))?;
+
+    // Resolve action by name from provided action records
+    let action_record = action_records
+        .iter()
+        .find(|r| r.name == req.action)
+        .ok_or_else(|| ServerError::NotFound(format!("Action '{}' not found in inline config", req.action)))
+        .map_err(|e| e.to_http_response(req_id.clone()))?;
+
+    // Governance check for tool name
+    let tool_name = format!("{}.{}", action_record.connector.as_str(), action_record.name);
+    if !governance.is_tool_allowed(&tool_name) {
+        let err = ServerError::Forbidden(format!("Action not allowed: {}", tool_name));
+        return Err(err.to_http_response(req_id.clone()));
+    }
+
+    // Build ephemeral registry from records using plugin registrars
+    let registry = registry_from_records_ext(
+        conn_records,
+        action_records.clone(),
+        &[],
+        &openact_plugins::registrars(),
+    )
+    .await
+    .map_err(|e| ServerError::Internal(e.to_string()))
+    .map_err(|e| e.to_http_response(req_id.clone()))?;
+
+    // Options
+    let dry_run = req.options.as_ref().and_then(|o| o.dry_run).unwrap_or(false);
+    let do_validate = req.options.as_ref().and_then(|o| o.validate).unwrap_or(false);
+    let timeout_ms = req.options.as_ref().and_then(|o| o.timeout_ms).unwrap_or(0);
+    let effective_timeout = if timeout_ms > 0 {
+        std::cmp::min(timeout_ms as u64, governance.timeout.as_millis() as u64)
+    } else {
+        governance.timeout.as_millis() as u64
+    };
+
+    let action_trn = action_record.trn.clone();
+    let input = req.input.clone();
+
+    // Compute input_schema digest for metadata (if present)
+    let schema_digest = {
+        use sha2::{Digest, Sha256};
+        action_record
+            .config_json
+            .get("input_schema")
+            .and_then(|schema| serde_json::to_vec(schema).ok())
+            .map(|bytes| {
+                let mut hasher = Sha256::new();
+                hasher.update(bytes);
+                let out = hasher.finalize();
+                format!("input_schema_digest=sha256:{:x}", out)
+            })
+    };
+
+    // Optional input schema validation
+    let mut validation_flag: Option<String> = None;
+    if do_validate {
+        if let Some(schema) = action_record.config_json.get("input_schema") {
+            if let Ok(compiled) = jsonschema::JSONSchema::compile(schema) {
+                if let Err(errors) = compiled.validate(&input) {
+                    let first = errors.into_iter().next();
+                    let msg = first
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|| "Input does not match schema".to_string());
+                    let err = ServerError::InvalidInput(msg);
+                    return Err(err.to_http_response(req_id.clone()));
+                } else {
+                    validation_flag = Some("validated=true".to_string());
+                }
+            }
+        } else {
+            validation_flag = Some("validated=skipped_no_schema".to_string());
+        }
+    }
+    tracing::info!(request_id=%req_id, tenant=%effective_tenant, action_trn=%action_record.trn.as_str(), "REST execute_inline");
+    let action_trn_str = action_trn.as_str().to_string();
+    let fut = async move {
+        let ctx = ExecutionContext::new();
+        if dry_run {
+            return Ok::<_, ServerError>(ExecuteResponse { result: json!({"dry_run": true, "input": input}) });
+        }
+        let exec = registry
+            .execute(&action_trn, input, Some(ctx))
+            .await
+            .map_err(map_registry_error)?;
+        Ok::<_, ServerError>(ExecuteResponse { result: exec.output })
+    };
+
+    let start_time = std::time::Instant::now();
+    let exec_response = match timeout(Duration::from_millis(effective_timeout), fut).await {
+        Ok(res) => res.map_err(|e| e.to_http_response(req_id.clone()))?,
+        Err(_) => {
+            let err = ServerError::Timeout;
+            return Err(err.to_http_response(req_id.clone()));
+        }
+    };
+
+    // Build warnings combining schema digest and validation flag
+    let mut warnings_vec: Vec<String> = Vec::new();
+    if let Some(d) = schema_digest.clone() { warnings_vec.push(d); }
+    if let Some(vf) = validation_flag { warnings_vec.push(vf); }
+    let warnings = if warnings_vec.is_empty() { None } else { Some(warnings_vec) };
+
+    let response = ResponseEnvelope {
+        success: true,
+        data: exec_response,
+        metadata: ResponseMeta {
+            request_id: req_id,
+            tenant: Some(effective_tenant),
+            execution_time_ms: Some(start_time.elapsed().as_millis() as u64),
+            action_trn: Some(action_trn_str),
+            version: None,
+            warnings,
         },
     };
 
@@ -666,7 +844,7 @@ pub async fn execute_by_trn(
     let tool_name = req
         .get("action_trn")
         .and_then(|v| v.as_str())
-        .map(|s| trn_to_tool_name(s))
+        .and_then(|s| ToolName::normalize_action_ref(s).map(|t| t.to_dot_string()))
         .unwrap_or_else(|| "unknown.unknown".to_string());
 
     if !governance.is_tool_allowed(&tool_name) {
@@ -696,8 +874,8 @@ pub async fn execute_by_trn(
         .ok_or_else(|| ServerError::InvalidInput("Missing field: action_trn".to_string()))
         .map_err(|e| e.to_http_response(req_id.clone()))?;
     let action_trn = Trn::new(trn_str.to_string());
-    let parsed = parse_action_trn(&action_trn)
-        .ok_or_else(|| {
+    let parsed = ActionTrn::try_from(action_trn.clone())
+        .map_err(|_| {
             tracing::warn!(
                 request_id = %req_id,
                 tenant = %tenant.as_str(),
@@ -707,7 +885,7 @@ pub async fn execute_by_trn(
             ServerError::InvalidInput("Invalid action TRN".to_string())
         })
         .map_err(|e| e.to_http_response(req_id.clone()))?;
-    if parsed.tenant != tenant.as_str() {
+    if parsed.parse_components().map(|c| c.tenant) != Some(tenant.as_str().to_string()) {
         tracing::warn!(
             request_id = %req_id,
             expected_tenant = %tenant.as_str(),
@@ -778,6 +956,7 @@ pub async fn execute_by_trn(
                 },
                 metadata: ResponseMeta {
                     request_id: req_id,
+                    tenant: Some(tenant.as_str().to_string()),
                     execution_time_ms: None,
                     action_trn: Some(action_trn.as_str().to_string()),
                     version: Some(u32::try_from(action_record.version).unwrap_or_default()),
@@ -789,6 +968,7 @@ pub async fn execute_by_trn(
         }
     }
 
+    let action_trn_str = action_trn.as_str().to_string();
     let fut = async move {
         let ctx = ExecutionContext::new();
         let exec =
@@ -796,6 +976,7 @@ pub async fn execute_by_trn(
         Ok::<_, ServerError>(ExecuteResponse { result: exec.output })
     };
 
+    let start_time = std::time::Instant::now();
     let exec_response = match timeout(effective_timeout, fut).await {
         Ok(res) => res.map_err(|e| e.to_http_response(req_id.clone()))?,
         Err(_) => {
@@ -809,8 +990,9 @@ pub async fn execute_by_trn(
         data: exec_response,
         metadata: ResponseMeta {
             request_id: req_id,
-            execution_time_ms: None,
-            action_trn: None,
+            tenant: Some(tenant.as_str().to_string()),
+            execution_time_ms: Some(start_time.elapsed().as_millis() as u64),
+            action_trn: Some(action_trn_str),
             version: None,
             warnings: None,
         },
@@ -830,59 +1012,4 @@ fn map_registry_error(err: openact_registry::RegistryError) -> ServerError {
         RegistryError::InvalidInput(msg) => ServerError::InvalidInput(msg),
         _ => ServerError::Internal(err.to_string()),
     }
-}
-
-/// Normalize action segment to tool name like "connector.action"
-fn normalize_action_to_tool_name(action: &str) -> String {
-    if action.starts_with("trn:openact:") {
-        return trn_to_tool_name(action);
-    }
-    if action.contains('.') {
-        return action.to_string();
-    }
-    if action.contains('/') {
-        return action.replace('/', ".");
-    }
-    action.to_string()
-}
-
-/// Convert TRN to tool name "connector.action"
-fn trn_to_tool_name(trn_str: &str) -> String {
-    let trn = Trn::new(trn_str.to_string());
-    if let Some(comp) = parse_action_trn(&trn) {
-        return format!("{}.{}", comp.connector, comp.name);
-    }
-    "unknown.unknown".to_string()
-}
-
-struct ParsedActionTrn<'a> {
-    tenant: &'a str,
-    connector: &'a str,
-    name: &'a str,
-    _version: i64,
-}
-
-fn parse_action_trn(trn: &Trn) -> Option<ParsedActionTrn<'_>> {
-    let mut parts = trn.as_str().splitn(4, ':');
-    if parts.next()? != "trn" {
-        return None;
-    }
-    if parts.next()? != "openact" {
-        return None;
-    }
-    let tenant = parts.next()?;
-    let resource_part = parts.next()?;
-    let (resource, version_part) = resource_part.split_once('@')?;
-    let version = version_part.strip_prefix('v')?.parse().ok()?;
-    if !resource.starts_with("action/") {
-        return None;
-    }
-    let remainder = &resource["action/".len()..];
-    let mut segments = remainder.split('/');
-    let connector = segments.next()?;
-    let name = segments.next()?;
-    if segments.next().is_some() {
-        return None;
-    }
-    Some(ParsedActionTrn { tenant, connector, name, _version: version })
 }

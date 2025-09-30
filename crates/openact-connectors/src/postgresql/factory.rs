@@ -338,6 +338,42 @@ impl Action for PostgresActionWrapper {
             other => other,
         }
     }
+
+    fn mcp_annotations(&self, _record: &openact_core::ActionRecord) -> Option<JsonValue> {
+        use serde_json::json;
+        let stmt = self.action.statement.trim_start().to_lowercase();
+        let read_only = if stmt.starts_with("select") || stmt.starts_with("with") || stmt.starts_with("show") {
+            Some(true)
+        } else {
+            Some(false)
+        };
+        let destructive = if stmt.starts_with("insert")
+            || stmt.starts_with("update")
+            || stmt.starts_with("delete")
+            || stmt.starts_with("alter")
+            || stmt.starts_with("drop")
+            || stmt.starts_with("create")
+        {
+            Some(true)
+        } else {
+            Some(false)
+        };
+        let idempotent = if stmt.starts_with("select") || stmt.starts_with("with") || stmt.starts_with("show") {
+            Some(true)
+        } else {
+            None
+        };
+        let title = {
+            let first = stmt.split_whitespace().next().unwrap_or("").to_uppercase();
+            format!("{} statement", first)
+        };
+        let mut obj = serde_json::Map::new();
+        obj.insert("title".to_string(), json!(title));
+        if let Some(v) = read_only { obj.insert("readOnlyHint".to_string(), json!(v)); }
+        if let Some(v) = destructive { obj.insert("destructiveHint".to_string(), json!(v)); }
+        if let Some(v) = idempotent { obj.insert("idempotentHint".to_string(), json!(v)); }
+        Some(JsonValue::Object(obj))
+    }
 }
 
 #[cfg(test)]

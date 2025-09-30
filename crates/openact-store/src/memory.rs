@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use openact_core::{
-    store::{ActionRepository, AuthConnectionStore, ConnectionStore, RunStore},
+    store::{ActionListFilter, ActionListOptions, ActionListResult, ActionRepository, ActionSortField, AuthConnectionStore, ConnectionStore, RunStore},
     ActionRecord, AuthConnection, Checkpoint, ConnectionRecord, ConnectorKind, CoreResult, Trn,
 };
 use std::collections::HashMap;
@@ -115,6 +115,157 @@ impl ActionRepository for MemoryActionRepository {
             data.values().filter(|record| record.connector == *connector).cloned().collect();
         Ok(results)
     }
+
+    async fn list_filtered(&self, filter: ActionListFilter, opts: Option<ActionListOptions>) -> CoreResult<Vec<ActionRecord>> {
+        let data = self.data.read().await;
+        let mut v: Vec<ActionRecord> = data.values().cloned().collect();
+        if let Some(t) = filter.tenant.as_deref() {
+            let prefix = format!("trn:openact:{}:", t);
+            v.retain(|r| r.trn.as_str().starts_with(&prefix));
+        }
+        if let Some(ref k) = filter.connector {
+            v.retain(|r| &r.connector == k);
+        }
+        if let Some(flag) = filter.mcp_enabled {
+            v.retain(|r| r.mcp_enabled == flag);
+        }
+        if let Some(ref p) = filter.name_prefix {
+            v.retain(|r| r.name.starts_with(p));
+        }
+        if let Some(after) = filter.created_after {
+            v.retain(|r| r.created_at >= after);
+        }
+        if let Some(before) = filter.created_before {
+            v.retain(|r| r.created_at <= before);
+        }
+        if let Some(ref q) = filter.q {
+            let ql = q.to_lowercase();
+            v.retain(|r| r.name.to_lowercase().contains(&ql) || r.trn.as_str().to_lowercase().contains(&ql));
+        }
+
+        // Governance allow/deny
+        if let Some(ref allows) = filter.allow_patterns {
+            if !allows.is_empty() && !allows.iter().any(|p| p == "*") {
+                v.retain(|r| pattern_matches_any(allows, r));
+            }
+        }
+        if let Some(ref denies) = filter.deny_patterns {
+            if !denies.is_empty() {
+                v.retain(|r| !pattern_matches_any(denies, r));
+            }
+        }
+
+        // Sort
+        let opts = opts.unwrap_or_default();
+        match opts.sort_field.unwrap_or(ActionSortField::CreatedAt) {
+            ActionSortField::CreatedAt => {
+                if opts.ascending { v.sort_by_key(|r| r.created_at); } else { v.sort_by_key(|r| std::cmp::Reverse(r.created_at)); }
+            }
+            ActionSortField::Name => {
+                if opts.ascending { v.sort_by(|a,b| a.name.cmp(&b.name)); } else { v.sort_by(|a,b| b.name.cmp(&a.name)); }
+            }
+            ActionSortField::Version => {
+                if opts.ascending { v.sort_by_key(|r| r.version); } else { v.sort_by_key(|r| std::cmp::Reverse(r.version)); }
+            }
+        }
+
+        // Pagination
+        let (page, page_size) = (opts.page.unwrap_or(0), opts.page_size.unwrap_or(0));
+        if page > 0 && page_size > 0 {
+            let start = ((page - 1) * page_size) as usize;
+            let end = (start + page_size as usize).min(v.len());
+            if start < v.len() { v = v[start..end].to_vec(); } else { v.clear(); }
+        }
+
+        Ok(v)
+    }
+
+    async fn list_filtered_paged(&self, filter: ActionListFilter, opts: ActionListOptions) -> CoreResult<ActionListResult> {
+        // Reuse list_filtered logic to get total and slicing
+        let data = self.data.read().await;
+        let mut v: Vec<ActionRecord> = data.values().cloned().collect();
+        if let Some(t) = filter.tenant.as_deref() {
+            let prefix = format!("trn:openact:{}:", t);
+            v.retain(|r| r.trn.as_str().starts_with(&prefix));
+        }
+        if let Some(ref k) = filter.connector {
+            v.retain(|r| &r.connector == k);
+        }
+        if let Some(ref trn) = filter.connection_trn {
+            v.retain(|r| r.connection_trn.as_str() == trn.as_str());
+        }
+        if let Some(flag) = filter.mcp_enabled {
+            v.retain(|r| r.mcp_enabled == flag);
+        }
+        if let Some(ref p) = filter.name_prefix {
+            v.retain(|r| r.name.starts_with(p));
+        }
+        if let Some(after) = filter.created_after {
+            v.retain(|r| r.created_at >= after);
+        }
+        if let Some(before) = filter.created_before {
+            v.retain(|r| r.created_at <= before);
+        }
+        if let Some(ref q) = filter.q {
+            let ql = q.to_lowercase();
+            v.retain(|r| r.name.to_lowercase().contains(&ql) || r.trn.as_str().to_lowercase().contains(&ql));
+        }
+
+        if let Some(ref allows) = filter.allow_patterns {
+            if !allows.is_empty() && !allows.iter().any(|p| p == "*") {
+                v.retain(|r| pattern_matches_any(allows, r));
+            }
+        }
+        if let Some(ref denies) = filter.deny_patterns {
+            if !denies.is_empty() {
+                v.retain(|r| !pattern_matches_any(denies, r));
+            }
+        }
+
+        let total = v.len() as u64;
+
+        // Sort
+        match opts.sort_field.unwrap_or(ActionSortField::CreatedAt) {
+            ActionSortField::CreatedAt => {
+                if opts.ascending { v.sort_by_key(|r| r.created_at); } else { v.sort_by_key(|r| std::cmp::Reverse(r.created_at)); }
+            }
+            ActionSortField::Name => {
+                if opts.ascending { v.sort_by(|a,b| a.name.cmp(&b.name)); } else { v.sort_by(|a,b| b.name.cmp(&a.name)); }
+            }
+            ActionSortField::Version => {
+                if opts.ascending { v.sort_by_key(|r| r.version); } else { v.sort_by_key(|r| std::cmp::Reverse(r.version)); }
+            }
+        }
+
+        // Pagination
+        if let (Some(page), Some(page_size)) = (opts.page, opts.page_size) {
+            let page = page.max(1);
+            let page_size = page_size.max(1);
+            let start = ((page - 1) * page_size) as usize;
+            let end = (start + page_size as usize).min(v.len());
+            if start < v.len() { v = v[start..end].to_vec(); } else { v.clear(); }
+        }
+
+        Ok(ActionListResult { records: v, total })
+    }
+}
+
+fn pattern_matches_any(patterns: &Vec<String>, r: &ActionRecord) -> bool {
+    let _tool = format!("{}.{}", r.connector.as_str(), r.name);
+    for p in patterns {
+        if p == "*" { return true; }
+        if let Some(prefix) = p.strip_suffix(".*") {
+            if r.connector.as_str() == prefix { return true; }
+        } else if let Some(suffix) = p.strip_prefix("*.") {
+            if r.name == suffix { return true; }
+        } else if let Some((c, a)) = p.split_once('.') {
+            if r.connector.as_str() == c && r.name == a { return true; }
+        } else if r.connector.as_str() == p {
+            return true;
+        }
+        // Unrecognized patterns ignored
+    }
+    false
 }
 
 /// In-memory implementation of RunStore for testing

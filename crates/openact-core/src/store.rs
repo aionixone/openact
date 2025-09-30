@@ -1,6 +1,55 @@
 use crate::error::CoreResult;
-use crate::types::{ActionRecord, AuthConnection, Checkpoint, ConnectionRecord, Trn};
+use crate::types::{ActionRecord, AuthConnection, Checkpoint, ConnectionRecord, ConnectorKind, Trn};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+
+/// Filter for listing actions
+#[derive(Debug, Clone, Default)]
+pub struct ActionListFilter {
+    pub tenant: Option<String>,
+    pub connector: Option<ConnectorKind>,
+    pub mcp_enabled: Option<bool>,
+    pub name_prefix: Option<String>,
+    pub created_after: Option<DateTime<Utc>>,
+    pub created_before: Option<DateTime<Utc>>,
+    /// Text query applied to name or TRN (implementation-defined)
+    pub q: Option<String>,
+    /// Exact connection TRN filter
+    pub connection_trn: Option<Trn>,
+    /// Governance allow patterns (e.g., ["http.*", "postgres.query"]) — optional
+    pub allow_patterns: Option<Vec<String>>,
+    /// Governance deny patterns (e.g., ["*.delete"]) — optional
+    pub deny_patterns: Option<Vec<String>>,
+}
+
+/// Sorting options for listing actions
+#[derive(Debug, Clone, Copy)]
+pub enum ActionSortField {
+    CreatedAt,
+    Name,
+    Version,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ActionListOptions {
+    pub sort_field: Option<ActionSortField>,
+    pub ascending: bool,
+    pub page: Option<u64>,
+    pub page_size: Option<u64>,
+}
+
+impl Default for ActionListOptions {
+    fn default() -> Self {
+        Self { sort_field: Some(ActionSortField::CreatedAt), ascending: true, page: None, page_size: None }
+    }
+}
+
+/// Paged list result with total count (pre-pagination)
+#[derive(Debug, Clone)]
+pub struct ActionListResult {
+    pub records: Vec<ActionRecord>,
+    pub total: u64,
+}
 
 /// Async trait for storing and retrieving connection records
 #[async_trait]
@@ -29,10 +78,21 @@ pub trait ActionRepository: Send + Sync {
     /// List all actions for a specific connection
     async fn list_by_connection(&self, connection_trn: &Trn) -> CoreResult<Vec<ActionRecord>>;
     /// List all actions for a specific connector type
-    async fn list_by_connector(
+    async fn list_by_connector(&self, connector: &ConnectorKind) -> CoreResult<Vec<ActionRecord>>;
+
+    /// List actions with optional filters, sort and pagination.
+    async fn list_filtered(
         &self,
-        connector: &crate::ConnectorKind,
+        filter: ActionListFilter,
+        opts: Option<ActionListOptions>,
     ) -> CoreResult<Vec<ActionRecord>>;
+
+    /// Same as list_filtered but returns total count as well.
+    async fn list_filtered_paged(
+        &self,
+        filter: ActionListFilter,
+        opts: ActionListOptions,
+    ) -> CoreResult<ActionListResult>;
 }
 
 /// Async trait for storing and retrieving execution checkpoints

@@ -37,4 +37,4 @@ coverage/
 *.swo
 
 # Vendored references – keep locally, don’t track in git
-rf/
+ref/

@@ -16,6 +16,8 @@ pub struct ResponseEnvelope<T> {
 pub struct ResponseMeta {
     pub request_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub execution_time_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_trn: Option<String>,
@@ -34,6 +36,13 @@ pub struct ListQuery {
     pub kind: Option<String>,
     #[serde(default)]
     pub connection: Option<String>,
+    #[serde(default)]
+    pub name_prefix: Option<String>,
+    // RFC3339 timestamps
+    #[serde(default)]
+    pub created_after: Option<String>,
+    #[serde(default)]
+    pub created_before: Option<String>,
     #[serde(default = "default_page")]
     pub page: u32,
     #[serde(default = "default_page_size")]
@@ -105,10 +114,32 @@ pub struct ExecuteRequest {
 pub struct ExecuteOptions {
     pub timeout_ms: Option<u64>,
     pub dry_run: Option<bool>,
+    pub validate: Option<bool>,
 }
 
 /// Execute response
 #[derive(Serialize)]
 pub struct ExecuteResponse {
     pub result: Value,
+}
+
+// Inline execution DTOs
+#[derive(Deserialize)]
+pub struct ExecuteInlineRequest {
+    /// Action name to execute (must exist in provided actions list)
+    pub action: String,
+    /// Optional tenant context for this inline execution (overrides header)
+    #[serde(default)]
+    pub tenant: Option<String>,
+    /// Inline connection definitions (JSON array of objects)
+    #[serde(default)]
+    pub connections: Option<Vec<Value>>,
+    /// Inline action definitions (JSON array of objects)
+    #[serde(default)]
+    pub actions: Option<Vec<Value>>,
+    /// Input payload for the action
+    pub input: Value,
+    /// Optional options: timeout_ms, dry_run
+    #[serde(default)]
+    pub options: Option<ExecuteOptions>,
 }

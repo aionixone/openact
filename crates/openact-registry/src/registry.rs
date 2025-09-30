@@ -13,6 +13,7 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use std::time::{Duration, Instant};
 
 /// Execution context containing runtime information
 #[derive(Debug, Clone)]
@@ -83,6 +84,8 @@ pub struct ConnectorRegistry {
     action_repository: Arc<dyn ActionRepository>,
     /// Connection cache to avoid repeated creation
     connection_cache: Arc<RwLock<HashMap<Trn, Arc<dyn Connection>>>>,
+    /// Cache for derived MCP schemas/annotations to avoid repeated instantiation
+    mcp_derive_cache: Arc<RwLock<HashMap<ActionCacheKey, McpDeriveCacheEntry>>>,
 }
 
 impl ConnectorRegistry {
@@ -98,6 +101,7 @@ impl ConnectorRegistry {
             connection_store: Arc::new(connection_store),
             action_repository: Arc::new(action_repository),
             connection_cache: Arc::new(RwLock::new(HashMap::new())),
+            mcp_derive_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -324,9 +328,18 @@ impl ConnectorRegistry {
         &self,
         action_record: &ActionRecord,
     ) -> RegistryResult<(JsonValue, Option<JsonValue>)> {
+        // Try cache first
+        let key = ActionCacheKey(action_record.trn.clone(), action_record.version);
+        if let Some((input, output)) = self.try_get_cached_schemas(&key).await {
+            return Ok((input, output));
+        }
+
+        // Derive by instantiating the action, then cache
         let action = self.instantiate_action_for_record(action_record).await?;
         let input = action.mcp_input_schema(action_record);
         let output = action.mcp_output_schema(action_record);
+
+        self.cache_schemas(&key, input.clone(), output.clone()).await;
         Ok((input, output))
     }
 
@@ -336,8 +349,99 @@ impl ConnectorRegistry {
         &self,
         action_record: &ActionRecord,
     ) -> RegistryResult<Option<JsonValue>> {
+        // Try cache first
+        let key = ActionCacheKey(action_record.trn.clone(), action_record.version);
+        if let Some(anno) = self.try_get_cached_annotations(&key).await {
+            return Ok(anno);
+        }
+
+        // Derive by instantiating the action, then cache (merging with any existing schema cache)
         let action = self.instantiate_action_for_record(action_record).await?;
-        Ok(action.mcp_annotations(action_record))
+        let anno = action.mcp_annotations(action_record);
+        self.cache_annotations(&key, anno.clone()).await;
+        Ok(anno)
+    }
+}
+
+/// TTL for derived MCP schemas/annotations cache
+const MCP_DERIVE_TTL: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ActionCacheKey(Trn, i64);
+
+#[derive(Debug, Clone)]
+struct McpDeriveCacheEntry {
+    input_schema: Option<JsonValue>,
+    output_schema: Option<JsonValue>,
+    annotations: Option<JsonValue>,
+    inserted_at: Instant,
+}
+
+impl ConnectorRegistry {
+    fn cache_entry_fresh(entry: &McpDeriveCacheEntry) -> bool {
+        entry.inserted_at.elapsed() < MCP_DERIVE_TTL
+    }
+
+    fn clone_cached_schemas(entry: &McpDeriveCacheEntry) -> Option<(JsonValue, Option<JsonValue>)> {
+        match &entry.input_schema {
+            Some(input) if Self::cache_entry_fresh(entry) => {
+                Some((input.clone(), entry.output_schema.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    async fn try_get_cached_schemas(
+        &self,
+        key: &ActionCacheKey,
+    ) -> Option<(JsonValue, Option<JsonValue>)> {
+        let cache = self.mcp_derive_cache.read().await;
+        cache.get(key).and_then(Self::clone_cached_schemas)
+    }
+
+    async fn cache_schemas(
+        &self,
+        key: &ActionCacheKey,
+        input: JsonValue,
+        output: Option<JsonValue>,
+    ) {
+        let mut cache = self.mcp_derive_cache.write().await;
+        let existing = cache.get(key).cloned();
+        let annotations = existing.and_then(|e| e.annotations);
+        cache.insert(
+            key.clone(),
+            McpDeriveCacheEntry {
+                input_schema: Some(input),
+                output_schema: output,
+                annotations,
+                inserted_at: Instant::now(),
+            },
+        );
+    }
+
+    async fn try_get_cached_annotations(&self, key: &ActionCacheKey) -> Option<Option<JsonValue>> {
+        let cache = self.mcp_derive_cache.read().await;
+        cache
+            .get(key)
+            .and_then(|e| if Self::cache_entry_fresh(e) { Some(e.annotations.clone()) } else { None })
+    }
+
+    async fn cache_annotations(&self, key: &ActionCacheKey, annotations: Option<JsonValue>) {
+        let mut cache = self.mcp_derive_cache.write().await;
+        let existing = cache.get(key).cloned();
+        let (input_schema, output_schema) = match existing {
+            Some(e) if Self::cache_entry_fresh(&e) => (e.input_schema, e.output_schema),
+            _ => (None, None),
+        };
+        cache.insert(
+            key.clone(),
+            McpDeriveCacheEntry {
+                input_schema,
+                output_schema,
+                annotations,
+                inserted_at: Instant::now(),
+            },
+        );
     }
 }
 
