@@ -409,7 +409,7 @@ pub async fn execute_action(
         let version_sel = match query.get("version").map(|s| s.as_str()) {
             None => {
                 let err = ServerError::InvalidInput(
-                    "When specifying action by name, you must provide ?version=latest or ?version=<integer>, or use action_trn with @vN".to_string(),
+                    openact_core::policy::messages::version_required_message().to_string(),
                 );
                 return Err(err.to_http_response(req_id.clone()));
             }

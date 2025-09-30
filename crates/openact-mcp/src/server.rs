@@ -520,7 +520,7 @@ impl McpServer {
             // Enforce explicit version when resolving by name (not TRN)
             if !has_version_param {
                 return Err(McpError::InvalidArguments(
-                    "When specifying an action by name, include 'version' (integer) or set it to 'latest'; alternatively, use 'action_trn' with explicit @vN".to_string(),
+                    openact_core::policy::messages::version_required_message().to_string(),
                 ));
             }
 
