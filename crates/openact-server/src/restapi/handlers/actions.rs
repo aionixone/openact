@@ -396,14 +396,13 @@ pub async fn execute_action(
         action_trn
     } else {
         // Expect formats like "connector.action" or "connector/action"
-        let tool = tool_name; // already normalized to connector.action
-        let mut parts = tool.splitn(2, '.');
-        let connector = parts.next().unwrap_or("");
-        let name = parts.next().unwrap_or("");
-        if connector.is_empty() || name.is_empty() {
-            let err = ServerError::InvalidInput("Invalid action format".to_string());
-            return Err(err.to_http_response(req_id.clone()));
-        }
+        let parsed = match openact_core::policy::tools::parse_tool_name(&tool_name) {
+            Ok(p) => p,
+            Err(msg) => {
+                let err = ServerError::InvalidInput(msg);
+                return Err(err.to_http_response(req_id.clone()));
+            }
+        };
 
         // Require explicit version selection for name-based execution
         let version_sel = match query.get("version").map(|s| s.as_str()) {
@@ -425,12 +424,12 @@ pub async fn execute_action(
             },
         };
 
-        let kind = ConnectorKind::new(connector).canonical();
+        let kind = ConnectorKind::new(&parsed.connector).canonical();
         let trn = openact_core::resolve::resolve_action_trn_by_name(
             app_state.store.as_ref(),
             tenant.as_str(),
             &kind,
-            name,
+            &parsed.action,
             version_sel,
         )
         .await
