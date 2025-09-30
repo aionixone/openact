@@ -2510,6 +2510,8 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "once_cell",
+ "regex",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

@@ -432,23 +432,17 @@ impl McpServer {
         }
 
         // If not found as alias, try direct connector.action format
-        if tool_name.contains('.') {
-            let mut parts = tool_name.splitn(2, '.');
-            let connector = parts.next().unwrap_or("");
-            let action = parts.next().unwrap_or("");
-            if !connector.is_empty() && !action.is_empty() {
-                // Verify this action exists (using canonical connector)
-                let kind = ConnectorKind::new(connector.to_string()).canonical();
-                let actions =
-                    ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
-                        .await
-                        .map_err(|e| {
-                            McpError::Internal(format!("Failed to list actions: {}", e))
-                        })?;
-                if actions.iter().any(|a| a.name == action && a.mcp_enabled) {
-                    debug!("Resolved direct tool '{}' to {}.{}", tool_name, connector, action);
-                    return Ok((connector.to_string(), action.to_string()));
-                }
+        if let Ok(parsed) = openact_core::policy::tools::parse_tool_name(tool_name) {
+            let kind = ConnectorKind::new(parsed.connector.clone()).canonical();
+            let actions = ActionRepository::list_by_connector(self.app_state.store.as_ref(), &kind)
+                .await
+                .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
+            if actions.iter().any(|a| a.name == parsed.action && a.mcp_enabled) {
+                debug!(
+                    "Resolved direct tool '{}' to {}.{}",
+                    tool_name, parsed.connector, parsed.action
+                );
+                return Ok((parsed.connector, parsed.action));
             }
         }
 

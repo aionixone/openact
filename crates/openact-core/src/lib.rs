@@ -4,6 +4,7 @@ pub mod store;
 pub mod types;
 pub mod resolve;
 pub mod policy;
+pub mod stream;
 
 // Re-export commonly used types
 pub use error::{CoreError, CoreResult};
