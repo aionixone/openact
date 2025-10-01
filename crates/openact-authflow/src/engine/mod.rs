@@ -4,9 +4,33 @@ use serde_json::{json, Value};
 use stepflow_dsl::command::{step_once, Command};
 use stepflow_dsl::jsonada::WorkflowContext;
 use stepflow_dsl::{MappingFacade, State, WorkflowDSL};
+
+// Reserved top-level keys in execution context; mapped parameters must not overwrite these
+const RESERVED_CONTEXT_KEYS: &[&str] = &["input", "global", "vars", "states"];
 pub trait TaskHandler: Send + Sync {
     fn execute(&self, resource: &str, state_name: &str, ctx: &Value) -> Result<Value>;
 }
+
+// Structured pause signal to avoid string-based matching
+#[derive(Debug, Clone)]
+pub struct PauseFor {
+    pub reason: String,
+    pub meta: Value,
+}
+
+impl PauseFor {
+    pub fn new<S: ToString>(reason: S, meta: Value) -> Self {
+        Self { reason: reason.to_string(), meta }
+    }
+}
+
+impl std::fmt::Display for PauseFor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PAUSE: {}", self.reason)
+    }
+}
+
+impl std::error::Error for PauseFor {}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PendingInfo {
@@ -64,16 +88,7 @@ pub fn run_flow(
                         vars.insert(k.clone(), val.clone());
                     }
                 }
-                if let Some(conn) = context.get("connection") {
-                    vars.insert("connection".into(), conn.clone());
-                }
-                if let Some(secrets) = context.get("secrets") {
-                    vars.insert("secrets".into(), secrets.clone());
-                }
-                if let Some(provider) = context.get("provider") {
-                    // Keep full provider under an explicit namespace; do not implicitly flatten config
-                    vars.insert("provider".into(), provider.clone());
-                }
+                // Do not implicitly inject additional namespaces; keep mapping context lean
 
                 // Read current state definition to get parameters/assign/output
                 let state_def = dsl
@@ -103,6 +118,10 @@ pub fn run_flow(
                     let mut merged = context.clone();
                     if let (Some(mobj), Some(cobj)) = (mi.as_object(), merged.as_object_mut()) {
                         for (k, v) in mobj.iter() {
+                            if RESERVED_CONTEXT_KEYS.iter().any(|rk| rk == &k.as_str()) {
+                                // Skip attempts to overwrite reserved namespaces
+                                continue;
+                            }
                             cobj.insert(k.clone(), v.clone());
                         }
                     }
@@ -204,15 +223,7 @@ pub fn run_flow(
                         vars.insert(k.clone(), val.clone());
                     }
                 }
-                if let Some(conn) = context.get("connection") {
-                    vars.insert("connection".into(), conn.clone());
-                }
-                if let Some(secrets) = context.get("secrets") {
-                    vars.insert("secrets".into(), secrets.clone());
-                }
-                if let Some(provider) = context.get("provider") {
-                    vars.insert("provider".into(), provider.clone());
-                }
+                // Do not implicitly inject additional namespaces
                 // Lookup Pass state's assign mapping
                 if let Some(State::Pass(p)) = dsl.states.get(&state_name) {
                     if p.assign.is_some() {
@@ -312,23 +323,21 @@ pub fn run_until_pause_or_end(
                             return Err(anyhow!("task state {state_name} has no next and not end"));
                         }
                     }
-                    Err(e) if e.to_string().contains("PAUSE_FOR_CALLBACK") => {
-                        println!("[engine] state {} paused for callback (await)", state_name);
-                        let run_id = uuid::Uuid::new_v4().to_string();
-                        let await_meta = json!({
-                            "expected_state": context.pointer("/vars/auth/state"),
-                            "reason": "oauth_callback"
-                        });
-                        return Ok(RunOutcome::Pending(PendingInfo {
-                            run_id,
-                            next_state: state_name.clone(),
-                            context,
-                            await_meta,
-                        }));
-                    }
-                    Err(e) => {
-                        println!("[engine] state {} error: {}", state_name, e);
-                        return Err(e);
+                    Err(e) => match e.downcast::<PauseFor>() {
+                        Ok(pause) => {
+                            println!("[engine] state {} paused: {}", state_name, pause.reason);
+                            let run_id = uuid::Uuid::new_v4().to_string();
+                            return Ok(RunOutcome::Pending(PendingInfo {
+                                run_id,
+                                next_state: state_name.clone(),
+                                context,
+                                await_meta: pause.meta,
+                            }));
+                        }
+                        Err(e) => {
+                            println!("[engine] state {} error: {}", state_name, e);
+                            return Err(e);
+                        }
                     }
                 }
             }

@@ -1,31 +1,26 @@
 use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
+// serde derive not needed after removing legacy wrappers
 use serde_json::{json, Value};
 use stepflow_dsl::WorkflowDSL;
 
-use crate::engine::{run_until_pause_or_end, RunOutcome, TaskHandler};
+use crate::engine::{run_until_pause_or_end, PendingInfo, RunOutcome, TaskHandler};
 use openact_core::{store::RunStore, Checkpoint};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StartObtainResult {
-    pub run_id: String,
-    pub authorize_url: String,
-    pub state: String,
-    #[serde(default)]
-    pub code_verifier: Option<String>,
-}
+ 
 
-pub async fn start_obtain(
+/// Start a workflow until the first pause (generic, no DSL assumptions).
+/// Stores a checkpoint and returns the pending info.
+pub async fn start_until_pause(
     dsl: &WorkflowDSL,
     handler: &dyn TaskHandler,
     run_store: &impl RunStore,
     mut context: Value,
-) -> Result<StartObtainResult> {
+) -> Result<PendingInfo> {
     // Run until pause point (oauth2.await_callback)
     let outcome = run_until_pause_or_end(dsl, &dsl.start_at, context.take(), handler, 100)?;
     let pending = match outcome {
         RunOutcome::Pending(p) => p,
-        _ => return Err(anyhow!("obtain did not pause at await_callback")),
+        _ => return Err(anyhow!("workflow did not pause")),
     };
     // Store checkpoint
     run_store
@@ -36,64 +31,44 @@ pub async fn start_obtain(
             await_meta_json: Some(pending.await_meta.clone()),
         })
         .await?;
-
-    // Extract authorization parameters from context
-    let auth = pending
-        .context
-        .pointer("/states/Auth/result")
-        .ok_or_else(|| anyhow!("states.Auth.result missing"))?;
-    let authorize_url = auth
-        .get("authorize_url")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow!("authorize_url missing"))?
-        .to_string();
-    let state = auth
-        .get("state")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow!("state missing"))?
-        .to_string();
-    let code_verifier = auth.get("code_verifier").and_then(|v| v.as_str()).map(|s| s.to_string());
-    Ok(StartObtainResult { run_id: pending.run_id, authorize_url, state, code_verifier })
+    Ok(pending)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResumeObtainArgs {
-    pub run_id: String,
-    pub code: String,
-    pub state: String,
-}
+ 
 
-pub async fn resume_obtain(
+/// Resume a workflow from a stored pause, applying an input patch under `input`.
+/// Returns the final context or a pending outcome depending on the flow.
+pub async fn resume_from_pause(
     dsl: &WorkflowDSL,
     handler: &dyn TaskHandler,
     run_store: &impl RunStore,
-    args: ResumeObtainArgs,
-) -> Result<Value> {
-    let cp = run_store.get(&args.run_id).await?.ok_or_else(|| anyhow!("run_id not found"))?;
-    // Inject code/state into context.input for Await mapping (external mode can use input)
+    run_id: &str,
+    input_patch: Value,
+) -> Result<RunOutcome> {
+    let cp = run_store.get(run_id).await?.ok_or_else(|| anyhow!("run_id not found"))?;
+    // Merge input_patch into context.input (object-merge)
     let mut ctx = cp.context_json.clone();
-    let input = ctx.get_mut("input").and_then(|v| v.as_object_mut());
-    if let Some(obj) = input {
-        obj.insert("code".into(), Value::String(args.code.clone()));
-        obj.insert("state".into(), Value::String(args.state.clone()));
-        obj.insert("returned_state".into(), Value::String(args.state.clone()));
-    } else {
-        ctx.as_object_mut().unwrap().insert(
-            "input".into(),
-            json!({"code": args.code, "state": args.state, "returned_state": args.state}),
-        );
+    match (ctx.get_mut("input"), input_patch) {
+        (Some(Value::Object(existing)), Value::Object(patch)) => {
+            for (k, v) in patch.into_iter() {
+                existing.insert(k, v);
+            }
+        }
+        (_, Value::Object(patch)) => {
+            ctx.as_object_mut().unwrap().insert("input".into(), Value::Object(patch));
+        }
+        // Non-object patch: set as a single field under `input.value`
+        (Some(Value::Object(existing)), other) => {
+            existing.insert("value".into(), other);
+        }
+        (_, other) => {
+            ctx.as_object_mut().unwrap().insert("input".into(), json!({"value": other}));
+        }
     }
 
     // Continue execution from next_state until end
     let outcome = run_until_pause_or_end(dsl, &cp.paused_state, ctx, handler, 100)?;
-    match outcome {
-        RunOutcome::Finished(final_ctx) => {
-            // Delete checkpoint after completion
-            run_store.delete(&args.run_id).await?;
-            Ok(final_ctx)
-        }
-        RunOutcome::Pending(_) => Err(anyhow!("unexpected pending when resuming obtain")),
-    }
+    Ok(outcome)
 }
 
 #[cfg(test)]
@@ -122,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn start_and_resume_obtain_external_callback() {
+    fn start_and_resume_external_pause_resume() {
         let server = MockServer::start();
         let m_token = server.mock(|when, then| {
             when.method(POST).path("/token");
@@ -146,18 +121,20 @@ states:
       scope: "read"
       usePKCE: true
     assign:
-      auth_state: "{{% result.state %}}"
-      auth_code_verifier: "{{% result.code_verifier %}}"
+      auth:
+        authorize_url: "{{% result.authorize_url %}}"
+        state: "{{% result.state %}}"
+        code_verifier: "{{% result.code_verifier %}}"
     next: "Await"
   Await:
     type: task
     resource: "oauth2.await_callback"
     parameters:
       state: "{{% input.state %}}"
-      expected_state: "{{% $auth_state %}}"
+      expected_state: "{{% $auth.state %}}"
       code: "{{% input.code %}}"
       expected_pkce:
-        code_verifier: "{{% $auth_code_verifier %}}"
+        code_verifier: "{{% $auth.code_verifier %}}"
     next: "Exchange"
   Exchange:
     type: task
@@ -171,8 +148,8 @@ states:
         grant_type: "authorization_code"
         client_id: "cid"
         redirect_uri: "https://app/cb"
-        code: "{{% vars.cb.code %}}"
-        code_verifier: "{{% vars.cb.code_verifier %}}"
+        code: "{{% $auth.code %}}"
+        code_verifier: "{{% $auth.code_verifier %}}"
     output: "{{% result.body.access_token %}}"
     end: true
 "#,
@@ -182,18 +159,25 @@ states:
 
         let dsl: WorkflowDSL = serde_yaml::from_str(&yaml).unwrap();
         let run_store = MemoryRunStore::default();
-        let start = futures::executor::block_on(start_obtain(&dsl, &Router, &run_store, json!({})))
+        // Start until pause
+        let pending = futures::executor::block_on(start_until_pause(&dsl, &Router, &run_store, json!({})))
             .unwrap();
-        assert!(start.authorize_url.contains("response_type=code"));
-        // simulate UI callback
-        let final_ctx = futures::executor::block_on(resume_obtain(
+        // Simulate callback: read state from vars.auth in pending context and apply input patch
+        let state = pending.context.pointer("/vars/auth/state").and_then(|v| v.as_str()).unwrap();
+        let outcome = futures::executor::block_on(resume_from_pause(
             &dsl,
             &Router,
             &run_store,
-            ResumeObtainArgs { run_id: start.run_id, code: "thecode".into(), state: start.state },
+            &pending.run_id,
+            json!({"code": "thecode", "state": state}),
         ))
         .unwrap();
-        m_token.assert();
-        assert_eq!(final_ctx.pointer("/states/Exchange/result").unwrap(), &json!("tok"));
+        match outcome {
+            RunOutcome::Finished(final_ctx) => {
+                m_token.assert();
+                assert_eq!(final_ctx.pointer("/states/Exchange/result").unwrap(), &json!("tok"));
+            }
+            RunOutcome::Pending(_) => panic!("unexpected pending after resume"),
+        }
     }
 }

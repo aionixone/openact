@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 use crate::engine::TaskHandler;
+use openact_core::sanitization::{sanitize_json_value, sanitize_string};
 
 #[derive(Default)]
 pub struct HttpTaskHandler;
@@ -34,13 +35,6 @@ impl HttpTaskHandler {
                 headers.insert(name, val);
             }
         }
-        // Default User-Agent, compatible with services like GitHub
-        if !headers.contains_key("user-agent") {
-            headers.insert(
-                HeaderName::from_static("user-agent"),
-                HeaderValue::from_static("openact/0.1"),
-            );
-        }
         Ok(headers)
     }
 
@@ -55,6 +49,19 @@ impl HttpTaskHandler {
         let method = ctx.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
         let url = ctx.get("url").and_then(|v| v.as_str()).context("http.request requires url")?;
         let mut headers = Self::build_headers(ctx.get("headers"))?;
+        // Default User-Agent selection: parameters.headers overrides, otherwise global/input fallback, else hardcoded
+        if !headers.contains_key("user-agent") {
+            let ua = ctx
+                .pointer("/global/http/userAgent")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| ctx.get("userAgent").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                .unwrap_or_else(|| "openact/0.1".to_string());
+            headers.insert(
+                HeaderName::from_static("user-agent"),
+                HeaderValue::from_str(&ua).unwrap_or_else(|_| HeaderValue::from_static("openact/0.1")),
+            );
+        }
         let timeout_ms = ctx.get("timeoutMs").and_then(|v| v.as_u64());
         let want_trace = ctx.get("trace").and_then(|v| v.as_bool()).unwrap_or(false);
         if want_trace {
@@ -156,7 +163,8 @@ impl HttpTaskHandler {
         }
         let resp = req.send().map_err(|e| {
             if want_trace {
-                println!("[http] send error: {}", e);
+                // Sanitize error string just in case
+                println!("[http] send error: {}", sanitize_string(&e.to_string()));
             }
             anyhow::anyhow!("http request failed: {}", e)
         })?;
@@ -183,13 +191,15 @@ impl HttpTaskHandler {
                 "request": { "method": method, "url": url, "headers": sent_headers, "body": request_body_repr.unwrap_or(Value::Null) }
             });
             let detail = json!({ "status": status, "kind": kind, "headers": hdrs_out, "body": body_json, "trace": trace });
+            let sanitized_detail = sanitize_json_value(&detail);
             if want_trace {
-                println!("[http] error status={} detail={}", status, detail);
+                println!("[http] error status={} detail={}", status, sanitized_detail);
             }
             println!(
                 "[http] HTTP error {}: {}",
                 status,
-                serde_json::to_string(&detail).unwrap_or_else(|_| "invalid json".to_string())
+                serde_json::to_string(&sanitized_detail)
+                    .unwrap_or_else(|_| "invalid json".to_string())
             );
             anyhow::bail!("{} {}", kind, detail);
         }
@@ -200,10 +210,17 @@ impl HttpTaskHandler {
             for (k, v) in headers.iter() {
                 sent_headers.insert(k.to_string(), json!(v.to_str().unwrap_or("")));
             }
-            let trace = json!({ "request": { "method": method, "url": url, "headers": sent_headers, "body": request_body_repr.unwrap_or(Value::Null) } });
+            let trace = json!({ "request": { "method": method, "url": url, "headers": sent_headers, "body": request_body_repr.clone().unwrap_or(Value::Null) } });
             println!("[http] success status={} url={}", status, url);
             if let Value::Object(ref mut map) = out {
-                map.insert("trace".into(), trace);
+                // Store unsanitized trace in result (caller responsibility), but keep prints sanitized
+                map.insert("trace".into(), trace.clone());
+                let sanitized_trace = sanitize_json_value(&trace);
+                println!(
+                    "[http] trace: {}",
+                    serde_json::to_string(&sanitized_trace)
+                        .unwrap_or_else(|_| "invalid json".to_string())
+                );
             }
         }
         Ok(out)

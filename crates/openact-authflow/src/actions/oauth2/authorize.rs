@@ -76,11 +76,7 @@ pub struct OAuth2AwaitCallbackHandler;
 
 impl TaskHandler for OAuth2AwaitCallbackHandler {
     fn execute(&self, _resource: &str, _state_name: &str, ctx: &Value) -> Result<Value> {
-        // Log the context for debugging
-        println!(
-            "OAuth2AwaitCallbackHandler::execute called with context: {}",
-            serde_json::to_string(ctx).unwrap_or_else(|_| "invalid json".to_string())
-        );
+        // Avoid dumping full context to logs to prevent leaking secrets
 
         // Recursively find the code in the context
         fn find_code_recursive(ctx: &Value) -> Option<&str> {
@@ -103,8 +99,9 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
         let code = find_code_recursive(ctx);
         println!("[await_cb] found code: {:?}", code);
         if code.is_none() {
-            println!("[await_cb] no code found, returning PAUSE_FOR_CALLBACK");
-            return Err(anyhow::anyhow!("PAUSE_FOR_CALLBACK"));
+            println!("[await_cb] no code found, pausing for callback");
+            let meta = json!({ "want": "code" });
+            return Err(crate::engine::PauseFor::new("oauth2.await_callback", meta).into());
         }
         let code = code.unwrap();
         println!("[await_cb] using code: {}", code);
@@ -112,9 +109,6 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
         // Recursively find the state in the context
         fn find_state_recursive(ctx: &Value) -> Option<&str> {
             if let Some(state) = ctx.get("state").and_then(|v| v.as_str()) {
-                return Some(state);
-            }
-            if let Some(state) = ctx.get("returned_state").and_then(|v| v.as_str()) {
                 return Some(state);
             }
             if let Some(input) = ctx.get("input") {
@@ -132,37 +126,9 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
 
         let returned = find_state_recursive(ctx);
 
-        // Find the expected state, prioritizing the result from StartAuth
+        // Find the expected state only from explicit parameter expected_state
         fn find_expected_state(ctx: &Value) -> Option<&str> {
-            // First, look for an explicit expected_state
-            if let Some(state) = ctx.get("expected_state").and_then(|v| v.as_str()) {
-                return Some(state);
-            }
-
-            // Then, look for the state in the StartAuth result
-            fn find_start_auth_state(ctx: &Value) -> Option<&str> {
-                if let Some(states) = ctx.get("states") {
-                    if let Some(start_auth) = states.get("StartAuth") {
-                        if let Some(result) = start_auth.get("result") {
-                            if let Some(state) = result.get("state").and_then(|v| v.as_str()) {
-                                return Some(state);
-                            }
-                        }
-                    }
-                }
-
-                // Recursively search
-                if let Some(obj) = ctx.as_object() {
-                    for value in obj.values() {
-                        if let Some(state) = find_start_auth_state(value) {
-                            return Some(state);
-                        }
-                    }
-                }
-                None
-            }
-
-            find_start_auth_state(ctx)
+            ctx.get("expected_state").and_then(|v| v.as_str())
         }
 
         let expected = find_expected_state(ctx);
@@ -186,10 +152,8 @@ impl TaskHandler for OAuth2AwaitCallbackHandler {
         {
             out["code_verifier"] = Value::String(v.to_string());
         }
-        println!(
-            "[await_cb] returning: {}",
-            serde_json::to_string(&out).unwrap_or_else(|_| "invalid json".to_string())
-        );
+        // Minimal log (no sensitive fields)
+        println!("[await_cb] returning code + optional verifier");
         Ok(out)
     }
 }
