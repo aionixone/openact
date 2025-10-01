@@ -2570,14 +2570,17 @@ name = "openact-mcp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "chrono",
  "openact-config",
  "openact-core",
  "openact-mcp-types",
  "openact-plugins",
+ "openact-protocol-adapter",
  "openact-registry",
  "openact-store",
+ "rmcp",
  "serde",
  "serde_json",
  "tempfile",
@@ -3337,6 +3340,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.16",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tracing",
 ]

@@ -1,16 +1,17 @@
-use async_trait::async_trait;
-
 use crate::dto::{InvokeRequest, InvokeResult, ProtocolError, ToolSpec};
 
 /// List available tools for a given tenant (or global)
-#[async_trait]
 pub trait ToolCatalog: Send + Sync {
-    async fn list_tools(&self, tenant: Option<&str>) -> Result<Vec<ToolSpec>, ProtocolError>;
+    fn list_tools<'a>(
+        &'a self,
+        tenant: Option<&'a str>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<ToolSpec>, ProtocolError>> + Send + 'a>>;
 }
 
 /// Invoke a tool with structured arguments
-#[async_trait]
 pub trait ToolInvoker: Send + Sync {
-    async fn invoke(&self, req: InvokeRequest) -> Result<InvokeResult, ProtocolError>;
+    fn invoke<'a>(
+        &'a self,
+        req: InvokeRequest,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<InvokeResult, ProtocolError>> + Send + 'a>>;
 }
-

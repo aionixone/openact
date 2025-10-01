@@ -12,6 +12,9 @@ openact-registry = { path = "../openact-registry", default-features = false }
 openact-store = { path = "../openact-store" }
 openact-plugins = { path = "../openact-plugins" }
 openact-mcp-types = { path = "../openact-mcp-types" }
+openact-protocol-adapter = { path = "../openact-protocol-adapter" }
+rmcp = { version = "0.7", features = ["server", "client", "transport-io"] }
+async-trait = "0.1"
 
 # Web server (for HTTP MCP)
 axum = { version = "0.7", features = ["json"] }

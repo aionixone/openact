@@ -30,6 +30,8 @@ chrono = { version = "0.4", features = ["serde", "clock"] }
 [features]
 default = []
 authflow = ["dep:openact-authflow"]
+# Toggle to use official rmcp stdio server instead of legacy implementation
+mcp-rmcp = []
 
 [dev-dependencies]
 async-trait = "0.1"

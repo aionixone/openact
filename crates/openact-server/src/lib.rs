@@ -19,7 +19,14 @@ pub async fn serve_mcp_stdio(
     app_state: AppState,
     governance: GovernanceConfig,
 ) -> ServerResult<()> {
-    mcp::serve_stdio(app_state, governance).await
+    #[cfg(feature = "mcp-rmcp")]
+    {
+        mcp::serve_stdio_rmcp(app_state, governance).await
+    }
+    #[cfg(not(feature = "mcp-rmcp"))]
+    {
+        mcp::serve_stdio(app_state, governance).await
+    }
 }
 
 pub async fn serve_mcp_http(
@@ -65,7 +72,16 @@ pub async fn serve_unified(
     if cfg.mcp_stdio {
         let st = app_state.clone();
         let gv = governance.clone();
-        tasks.push(tokio::spawn(async move { mcp::serve_stdio(st, gv).await }));
+        tasks.push(tokio::spawn(async move {
+            #[cfg(feature = "mcp-rmcp")]
+            {
+                mcp::serve_stdio_rmcp(st, gv).await
+            }
+            #[cfg(not(feature = "mcp-rmcp"))]
+            {
+                mcp::serve_stdio(st, gv).await
+            }
+        }));
     }
 
     // If no services configured, return error
