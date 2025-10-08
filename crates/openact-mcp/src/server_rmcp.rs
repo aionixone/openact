@@ -1,11 +1,11 @@
 use crate::{adapter::McpAdapter, AppState, GovernanceConfig, McpResult};
-use openact_protocol_adapter::{dto::InvokeRequest, mcp as adapter_mcp};
 use openact_protocol_adapter::traits::{ToolCatalog, ToolInvoker};
+use openact_protocol_adapter::{dto::InvokeRequest, mcp as adapter_mcp};
 use rmcp::{
-    model as m,
-    service::{serve_server, RoleServer},
     handler::server::ServerHandler,
+    model as m,
     service::RequestContext,
+    service::{serve_server, RoleServer},
 };
 
 pub struct RmcpOpenActServer {
@@ -13,17 +13,22 @@ pub struct RmcpOpenActServer {
 }
 
 impl RmcpOpenActServer {
-    pub fn new(adapter: McpAdapter) -> Self { Self { adapter } }
+    pub fn new(adapter: McpAdapter) -> Self {
+        Self { adapter }
+    }
 }
 
 impl ServerHandler for RmcpOpenActServer {
-    fn get_info(&self) -> m::ServerInfo { m::ServerInfo::default() }
+    fn get_info(&self) -> m::ServerInfo {
+        m::ServerInfo::default()
+    }
 
     fn list_tools(
         &self,
         _request: Option<m::PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<m::ListToolsResult, rmcp::ErrorData>> + Send + '_ {
+    ) -> impl std::future::Future<Output = Result<m::ListToolsResult, rmcp::ErrorData>> + Send + '_
+    {
         async move {
             let specs = self
                 .adapter
@@ -39,7 +44,8 @@ impl ServerHandler for RmcpOpenActServer {
         &self,
         request: m::CallToolRequestParam,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<m::CallToolResult, rmcp::ErrorData>> + Send + '_ {
+    ) -> impl std::future::Future<Output = Result<m::CallToolResult, rmcp::ErrorData>> + Send + '_
+    {
         async move {
             let args = request
                 .arguments

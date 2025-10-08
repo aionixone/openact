@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use openact_core::{types::ConnectorMetadata, ActionRecord, ConnectionRecord, ConnectorKind};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Trait to enable downcasting for trait objects
 pub trait AsAny {
@@ -24,7 +25,7 @@ pub trait ConnectionFactory: Send + Sync {
     async fn create_connection(
         &self,
         record: &ConnectionRecord,
-    ) -> RegistryResult<Box<dyn Connection>>;
+    ) -> RegistryResult<Arc<dyn Connection>>;
 }
 
 /// Factory for creating action instances
@@ -40,7 +41,7 @@ pub trait ActionFactory: Send + Sync {
     async fn create_action(
         &self,
         action_record: &ActionRecord,
-        connection: Box<dyn Connection>,
+        connection: Arc<dyn Connection>,
     ) -> RegistryResult<Box<dyn Action>>;
 }
 

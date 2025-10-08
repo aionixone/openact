@@ -16,6 +16,8 @@ openact-runtime = { path = "../openact-runtime" }
 openact-mcp = { path = "../openact-mcp" }
 openact-server = { path = "../openact-server" }
 openact-plugins = { path = "../openact-plugins" }
+openact-authflow = { path = "../openact-authflow", features = ["callback"] }
+stepflow-dsl = { path = "../../../stepflow-dsl" }
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs"] }
 anyhow = "1"
@@ -36,4 +38,3 @@ default = []
 
 # Pass-through feature for server authflow only
 authflow = ["openact-server/authflow"]
-

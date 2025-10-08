@@ -59,7 +59,8 @@ impl HttpTaskHandler {
                 .unwrap_or_else(|| "openact/0.1".to_string());
             headers.insert(
                 HeaderName::from_static("user-agent"),
-                HeaderValue::from_str(&ua).unwrap_or_else(|_| HeaderValue::from_static("openact/0.1")),
+                HeaderValue::from_str(&ua)
+                    .unwrap_or_else(|_| HeaderValue::from_static("openact/0.1")),
             );
         }
         let timeout_ms = ctx.get("timeoutMs").and_then(|v| v.as_u64());

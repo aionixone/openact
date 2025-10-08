@@ -29,14 +29,18 @@ impl ToolName {
             let mut it = input.splitn(2, '.');
             let c = it.next()?.trim();
             let a = it.next()?.trim();
-            if !c.is_empty() && !a.is_empty() { return Some(Self::new(c, a)); }
+            if !c.is_empty() && !a.is_empty() {
+                return Some(Self::new(c, a));
+            }
             return None;
         }
         if input.contains('/') {
             let mut it = input.splitn(2, '/');
             let c = it.next()?.trim();
             let a = it.next()?.trim();
-            if !c.is_empty() && !a.is_empty() { return Some(Self::new(c, a)); }
+            if !c.is_empty() && !a.is_empty() {
+                return Some(Self::new(c, a));
+            }
             return None;
         }
         None
@@ -189,15 +193,25 @@ pub struct ActionTrnComponents {
 pub struct ActionTrn(pub Trn);
 
 impl ActionTrn {
-    pub fn parse_components(&self) -> Option<ActionTrnComponents> { self.0.parse_action() }
-    pub fn as_str(&self) -> &str { self.0.as_str() }
-    pub fn into_inner(self) -> Trn { self.0 }
+    pub fn parse_components(&self) -> Option<ActionTrnComponents> {
+        self.0.parse_action()
+    }
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+    pub fn into_inner(self) -> Trn {
+        self.0
+    }
 }
 
 impl TryFrom<Trn> for ActionTrn {
     type Error = &'static str;
     fn try_from(value: Trn) -> Result<Self, Self::Error> {
-        if value.parse_action().is_some() { Ok(ActionTrn(value)) } else { Err("Not an action TRN") }
+        if value.parse_action().is_some() {
+            Ok(ActionTrn(value))
+        } else {
+            Err("Not an action TRN")
+        }
     }
 }
 
@@ -206,15 +220,25 @@ impl TryFrom<Trn> for ActionTrn {
 pub struct ConnectionTrn(pub Trn);
 
 impl ConnectionTrn {
-    pub fn parse_components(&self) -> Option<ConnectionTrnComponents> { self.0.parse_connection() }
-    pub fn as_str(&self) -> &str { self.0.as_str() }
-    pub fn into_inner(self) -> Trn { self.0 }
+    pub fn parse_components(&self) -> Option<ConnectionTrnComponents> {
+        self.0.parse_connection()
+    }
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+    pub fn into_inner(self) -> Trn {
+        self.0
+    }
 }
 
 impl TryFrom<Trn> for ConnectionTrn {
     type Error = &'static str;
     fn try_from(value: Trn) -> Result<Self, Self::Error> {
-        if value.parse_connection().is_some() { Ok(ConnectionTrn(value)) } else { Err("Not a connection TRN") }
+        if value.parse_connection().is_some() {
+            Ok(ConnectionTrn(value))
+        } else {
+            Err("Not a connection TRN")
+        }
     }
 }
 

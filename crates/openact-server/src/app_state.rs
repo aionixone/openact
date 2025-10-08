@@ -5,11 +5,16 @@ use openact_registry::ConnectorRegistry;
 use openact_store::SqlStore;
 use std::sync::Arc;
 
+#[cfg(feature = "authflow")]
+use crate::flow_runner::FlowRunManager;
+
 /// Shared application state
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<SqlStore>,
     pub registry: Arc<ConnectorRegistry>,
+    #[cfg(feature = "authflow")]
+    pub flow_manager: Arc<FlowRunManager>,
 }
 
 impl AppState {
@@ -27,6 +32,14 @@ impl AppState {
             registrar(&mut registry);
         }
 
-        Ok(Self { store, registry: Arc::new(registry) })
+        #[cfg(feature = "authflow")]
+        let flow_manager = Arc::new(FlowRunManager::new(store.clone()));
+
+        Ok(Self {
+            store,
+            registry: Arc::new(registry),
+            #[cfg(feature = "authflow")]
+            flow_manager,
+        })
     }
 }

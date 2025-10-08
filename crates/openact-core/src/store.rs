@@ -1,5 +1,7 @@
 use crate::error::CoreResult;
-use crate::types::{ActionRecord, AuthConnection, Checkpoint, ConnectionRecord, ConnectorKind, Trn};
+use crate::types::{
+    ActionRecord, AuthConnection, Checkpoint, ConnectionRecord, ConnectorKind, Trn,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
@@ -40,7 +42,12 @@ pub struct ActionListOptions {
 
 impl Default for ActionListOptions {
     fn default() -> Self {
-        Self { sort_field: Some(ActionSortField::CreatedAt), ascending: true, page: None, page_size: None }
+        Self {
+            sort_field: Some(ActionSortField::CreatedAt),
+            ascending: true,
+            page: None,
+            page_size: None,
+        }
     }
 }
 

@@ -379,8 +379,12 @@ impl McpServer {
                     .and_then(|t| t.as_str())
                     .map(|s| s.to_string());
                 match tenant_log {
-                    Some(t) => info!(tool=%call_request.name, tenant=%t, elapsed_ms=%elapsed_ms, "MCP tools/call done"),
-                    None => info!(tool=%call_request.name, elapsed_ms=%elapsed_ms, "MCP tools/call done"),
+                    Some(t) => {
+                        info!(tool=%call_request.name, tenant=%t, elapsed_ms=%elapsed_ms, "MCP tools/call done")
+                    }
+                    None => {
+                        info!(tool=%call_request.name, elapsed_ms=%elapsed_ms, "MCP tools/call done")
+                    }
                 }
                 result
             }
@@ -396,14 +400,19 @@ impl McpServer {
         &self,
         tenant: Option<&str>,
     ) -> McpResult<Vec<openact_core::types::ActionRecord>> {
-        let mut filter = openact_core::store::ActionListFilter { mcp_enabled: Some(true), ..Default::default() };
-        if let Some(t) = tenant { filter.tenant = Some(t.to_string()); }
+        let mut filter =
+            openact_core::store::ActionListFilter { mcp_enabled: Some(true), ..Default::default() };
+        if let Some(t) = tenant {
+            filter.tenant = Some(t.to_string());
+        }
         // Push governance to DB layer when listing actions
         filter.allow_patterns = Some(self.governance.allow_patterns.clone());
         filter.deny_patterns = Some(self.governance.deny_patterns.clone());
         let actions = ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
-        .await
-        .map_err(|e| McpError::Internal(format!("Failed to list MCP-enabled actions: {}", e)))?;
+            .await
+            .map_err(|e| {
+                McpError::Internal(format!("Failed to list MCP-enabled actions: {}", e))
+            })?;
 
         Ok(actions)
     }
@@ -411,10 +420,11 @@ impl McpServer {
     /// Resolve tool name to (connector, action) pair
     async fn resolve_tool_to_action(&self, tool_name: &str) -> McpResult<(String, String)> {
         // First try to find it as an alias in mcp_overrides.tool_name using a filtered list
-        let filter = openact_core::store::ActionListFilter { mcp_enabled: Some(true), ..Default::default() };
+        let filter =
+            openact_core::store::ActionListFilter { mcp_enabled: Some(true), ..Default::default() };
         let actions = ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
-        .await
-        .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
+            .await
+            .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
 
         for a in actions {
             if let Some(ref overrides) = a.mcp_overrides {
@@ -435,12 +445,17 @@ impl McpServer {
         // If not found as alias, try direct connector.action format
         if let Some(parsed) = ToolName::parse_human(tool_name) {
             let kind = ConnectorKind::new(parsed.connector.clone()).canonical();
-            let mut filter = openact_core::store::ActionListFilter { connector: Some(kind), mcp_enabled: Some(true), ..Default::default() };
+            let mut filter = openact_core::store::ActionListFilter {
+                connector: Some(kind),
+                mcp_enabled: Some(true),
+                ..Default::default()
+            };
             filter.allow_patterns = Some(self.governance.allow_patterns.clone());
             filter.deny_patterns = Some(self.governance.deny_patterns.clone());
-            let actions = ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
-            .await
-            .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
+            let actions =
+                ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
+                    .await
+                    .map_err(|e| McpError::Internal(format!("Failed to list actions: {}", e)))?;
             if actions.iter().any(|a| a.name == parsed.action) {
                 debug!(
                     "Resolved direct tool '{}' to {}.{}",
@@ -463,19 +478,15 @@ impl McpServer {
         let input = arguments
             .get("input")
             .ok_or_else(|| McpError::InvalidArguments("Missing 'input' field".to_string()))?;
-        let stream_requested = arguments
-            .get("stream")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let stream_requested = arguments.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
 
         // Check if explicit action_trn is provided
         let action_trn = if let Some(trn_str) = arguments.get("action_trn").and_then(|v| v.as_str())
         {
             // Use explicit TRN - validate format and existence
             let trn = Trn::new(trn_str.to_string());
-            let _atrn = openact_core::types::ActionTrn::try_from(trn.clone()).map_err(|_| {
-                McpError::InvalidArguments("Invalid action TRN".to_string())
-            })?;
+            let _atrn = openact_core::types::ActionTrn::try_from(trn.clone())
+                .map_err(|_| McpError::InvalidArguments("Invalid action TRN".to_string()))?;
             let action_record = ActionRepository::get(self.app_state.store.as_ref(), &trn)
                 .await
                 .map_err(|e| McpError::Internal(format!("Failed to lookup action TRN: {}", e)))?
@@ -630,30 +641,50 @@ pub async fn serve_stdio(app_state: AppState, governance: GovernanceConfig) -> M
 
         // Enforce tenant requirement for stdio if configured and optionally inject default when not required
         let require_tenant = std::env::var("OPENACT_REQUIRE_TENANT")
-            .map(|v| { let v = v.to_ascii_lowercase(); v == "1" || v == "true" || v == "yes" })
+            .map(|v| {
+                let v = v.to_ascii_lowercase();
+                v == "1" || v == "true" || v == "yes"
+            })
             .unwrap_or(false);
         let mut maybe_patched: Option<Vec<u8>> = None;
         if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&line) {
             if let Some(method) = v.get("method").and_then(|m| m.as_str()) {
                 // Log method/id/tenant for stdio
-                let id_str = v.get("id").map(|id| id.to_string()).unwrap_or_else(|| "null".to_string());
+                let id_str =
+                    v.get("id").map(|id| id.to_string()).unwrap_or_else(|| "null".to_string());
                 let tenant_log = match method {
-                    crate::mcp::METHOD_TOOLS_LIST => v.get("params").and_then(|p| p.get("tenant")).and_then(|t| t.as_str()).map(|s| s.to_string()),
-                    crate::mcp::METHOD_TOOLS_CALL => v.get("params").and_then(|p| p.get("arguments")).and_then(|a| a.get("tenant")).and_then(|t| t.as_str()).map(|s| s.to_string()),
+                    crate::mcp::METHOD_TOOLS_LIST => v
+                        .get("params")
+                        .and_then(|p| p.get("tenant"))
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string()),
+                    crate::mcp::METHOD_TOOLS_CALL => v
+                        .get("params")
+                        .and_then(|p| p.get("arguments"))
+                        .and_then(|a| a.get("tenant"))
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string()),
                     _ => None,
                 };
                 match tenant_log {
-                    Some(t) => info!(method=%method, request_id=%id_str, tenant=%t, "MCP stdio request"),
+                    Some(t) => {
+                        info!(method=%method, request_id=%id_str, tenant=%t, "MCP stdio request")
+                    }
                     None => info!(method=%method, request_id=%id_str, "MCP stdio request"),
                 }
 
                 let missing = match method {
-                    crate::mcp::METHOD_TOOLS_LIST => {
-                        v.get("params").and_then(|p| p.get("tenant")).and_then(|t| t.as_str()).is_none()
-                    }
-                    crate::mcp::METHOD_TOOLS_CALL => {
-                        v.get("params").and_then(|p| p.get("arguments")).and_then(|a| a.get("tenant")).and_then(|t| t.as_str()).is_none()
-                    }
+                    crate::mcp::METHOD_TOOLS_LIST => v
+                        .get("params")
+                        .and_then(|p| p.get("tenant"))
+                        .and_then(|t| t.as_str())
+                        .is_none(),
+                    crate::mcp::METHOD_TOOLS_CALL => v
+                        .get("params")
+                        .and_then(|p| p.get("arguments"))
+                        .and_then(|a| a.get("tenant"))
+                        .and_then(|t| t.as_str())
+                        .is_none(),
                     _ => false,
                 };
 
@@ -676,43 +707,42 @@ pub async fn serve_stdio(app_state: AppState, governance: GovernanceConfig) -> M
                     let default_tenant = std::env::var("OPENACT_DEFAULT_TENANT")
                         .unwrap_or_else(|_| "default".to_string());
                     match method {
-                        crate::mcp::METHOD_TOOLS_LIST => {
-                            match v.get_mut("params") {
-                                Some(p) if p.is_object() => {
-                                    p.as_object_mut().unwrap().insert(
-                                        "tenant".to_string(),
-                                        serde_json::Value::String(default_tenant.clone()),
-                                    );
-                                }
-                                _ => {
-                                    let mut obj = serde_json::Map::new();
-                                    obj.insert("tenant".to_string(), serde_json::Value::String(default_tenant.clone()));
-                                    v["params"] = serde_json::Value::Object(obj);
-                                }
+                        crate::mcp::METHOD_TOOLS_LIST => match v.get_mut("params") {
+                            Some(p) if p.is_object() => {
+                                p.as_object_mut().unwrap().insert(
+                                    "tenant".to_string(),
+                                    serde_json::Value::String(default_tenant.clone()),
+                                );
                             }
-                        }
-                        crate::mcp::METHOD_TOOLS_CALL => {
-                            match v.get_mut("params") {
-                                Some(p) if p.is_object() => {
-                                    let pobj = p.as_object_mut().unwrap();
-                                    match pobj.get_mut("arguments") {
-                                        Some(args) if args.is_object() => {
-                                            args.as_object_mut().unwrap().insert(
-                                                "tenant".to_string(),
-                                                serde_json::Value::String(default_tenant.clone()),
-                                            );
-                                        }
-                                        _ => {
-                                            pobj.insert(
-                                                "arguments".to_string(),
-                                                serde_json::json!({"tenant": default_tenant.clone()}),
-                                            );
-                                        }
+                            _ => {
+                                let mut obj = serde_json::Map::new();
+                                obj.insert(
+                                    "tenant".to_string(),
+                                    serde_json::Value::String(default_tenant.clone()),
+                                );
+                                v["params"] = serde_json::Value::Object(obj);
+                            }
+                        },
+                        crate::mcp::METHOD_TOOLS_CALL => match v.get_mut("params") {
+                            Some(p) if p.is_object() => {
+                                let pobj = p.as_object_mut().unwrap();
+                                match pobj.get_mut("arguments") {
+                                    Some(args) if args.is_object() => {
+                                        args.as_object_mut().unwrap().insert(
+                                            "tenant".to_string(),
+                                            serde_json::Value::String(default_tenant.clone()),
+                                        );
+                                    }
+                                    _ => {
+                                        pobj.insert(
+                                            "arguments".to_string(),
+                                            serde_json::json!({"tenant": default_tenant.clone()}),
+                                        );
                                     }
                                 }
-                                _ => {}
                             }
-                        }
+                            _ => {}
+                        },
                         _ => {}
                     }
                     // Serialize patched request
@@ -724,7 +754,8 @@ pub async fn serve_stdio(app_state: AppState, governance: GovernanceConfig) -> M
         }
 
         // Process the message
-        let body_ref: &[u8] = if let Some(ref bytes) = maybe_patched { bytes.as_slice() } else { line.as_bytes() };
+        let body_ref: &[u8] =
+            if let Some(ref bytes) = maybe_patched { bytes.as_slice() } else { line.as_bytes() };
         match server.process_message(body_ref).await {
             Ok(Some(response)) => {
                 // Send response
@@ -757,6 +788,7 @@ pub async fn serve_http(
     governance: GovernanceConfig,
     addr: &str,
 ) -> McpResult<()> {
+    use axum::extract::DefaultBodyLimit;
     use axum::{
         extract::State,
         http::{HeaderMap, StatusCode},
@@ -764,7 +796,6 @@ pub async fn serve_http(
         routing::post,
         Router,
     };
-    use axum::extract::DefaultBodyLimit;
     use serde_json::Value;
     use uuid::Uuid;
 
@@ -824,10 +855,8 @@ pub async fn serve_http(
         }
 
         // Inject tenant from header if present and enforce requirement if configured
-        let header_tenant = headers
-            .get("x-tenant")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
+        let header_tenant =
+            headers.get("x-tenant").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
         let require_tenant = std::env::var("OPENACT_REQUIRE_TENANT")
             .map(|v| {
                 let v = v.to_ascii_lowercase();
@@ -856,12 +885,12 @@ pub async fn serve_http(
                     _ => None,
                 };
                 let tenant_log = tenant_from_params.or(header_tenant.clone());
-                let id_str = v
-                    .get("id")
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| "null".to_string());
+                let id_str =
+                    v.get("id").map(|id| id.to_string()).unwrap_or_else(|| "null".to_string());
                 match tenant_log {
-                    Some(t) => info!(method=%method, request_id=%id_str, tenant=%t, "MCP HTTP request"),
+                    Some(t) => {
+                        info!(method=%method, request_id=%id_str, tenant=%t, "MCP HTTP request")
+                    }
                     None => info!(method=%method, request_id=%id_str, "MCP HTTP request"),
                 }
                 match method.as_str() {
@@ -884,7 +913,10 @@ pub async fn serve_http(
                                     }
                                     _ => {
                                         let mut obj = serde_json::Map::new();
-                                        obj.insert("tenant".to_string(), serde_json::Value::String(t.clone()));
+                                        obj.insert(
+                                            "tenant".to_string(),
+                                            serde_json::Value::String(t.clone()),
+                                        );
                                         v["params"] = serde_json::Value::Object(obj);
                                     }
                                 }
@@ -962,7 +994,9 @@ pub async fn serve_http(
                 }
 
                 // If we modified v, serialize back
-                if v != serde_json::from_slice::<serde_json::Value>(&body[..]).unwrap_or(serde_json::Value::Null) {
+                if v != serde_json::from_slice::<serde_json::Value>(&body[..])
+                    .unwrap_or(serde_json::Value::Null)
+                {
                     if let Ok(bytes) = serde_json::to_vec(&v) {
                         patched_body = Some(bytes);
                     }

@@ -1,4 +1,8 @@
-use crate::{error::{CoreError, CoreResult}, store::ActionRepository, ConnectorKind, Trn};
+use crate::{
+    error::{CoreError, CoreResult},
+    store::ActionRepository,
+    ConnectorKind, Trn,
+};
 
 /// Resolve an action TRN by (tenant, connector, name) and an optional version.
 /// When `version` is None, selects the highest available version for the tuple.
@@ -13,10 +17,8 @@ where
     A: ActionRepository + ?Sized,
 {
     // List all actions for the connector (already canonicalized by caller)
-    let records = store
-        .list_by_connector(connector)
-        .await
-        .map_err(|e| CoreError::Db(e.to_string()))?;
+    let records =
+        store.list_by_connector(connector).await.map_err(|e| CoreError::Db(e.to_string()))?;
 
     // Filter by name and tenant (parsed from TRN)
     let mut candidates: Vec<_> = records
@@ -51,4 +53,3 @@ where
         Ok(candidates.pop().unwrap().trn)
     }
 }
-

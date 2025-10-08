@@ -1,8 +1,8 @@
 //! CLI argument definitions using clap
 
+use clap::ValueEnum;
 use clap::{Parser, Subcommand};
 use serde_json::Value as JsonValue;
-use clap::ValueEnum;
 
 #[derive(Parser)]
 #[command(
@@ -228,6 +228,12 @@ pub enum Commands {
         /// Timeout in seconds
         #[arg(long, default_value = "30", help = "Execution timeout in seconds")]
         timeout: u64,
+    },
+
+    /// Run a StepFlow DSL (e.g., OAuth flow) and return final context/auth_ref
+    FlowRun {
+        #[command(flatten)]
+        args: crate::commands::flow_run::FlowRunArgs,
     },
 }
 

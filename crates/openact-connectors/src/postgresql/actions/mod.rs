@@ -5,11 +5,17 @@ use serde_json::Value;
 /// Runtime representation of a PostgreSQL action.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostgresAction {
+    #[serde(default = "PostgresAction::current_version")]
+    pub config_version: u16,
     pub statement: String,
     pub parameters: Vec<ActionParameter>,
 }
 
 impl PostgresAction {
+    pub const fn current_version() -> u16 {
+        1
+    }
+
     /// Build an action configuration from raw JSON (stored in the ActionRecord).
     pub fn from_json(value: Value) -> ConnectorResult<Self> {
         let raw: RawPostgresAction = serde_json::from_value(value).map_err(|err| {
@@ -20,12 +26,10 @@ impl PostgresAction {
             ConnectorError::InvalidConfig("Missing 'statement' field".to_string())
         })?;
 
-        let parameters = extract_parameters(&raw)
-            .into_iter()
-            .map(ActionParameter::from)
-            .collect();
+        let parameters = extract_parameters(&raw).into_iter().map(ActionParameter::from).collect();
 
         Ok(Self {
+            config_version: raw.config_version.unwrap_or(Self::current_version()),
             statement,
             parameters,
         })
@@ -39,6 +43,8 @@ impl PostgresAction {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 struct RawPostgresAction {
+    #[serde(default)]
+    config_version: Option<u16>,
     statement: Option<String>,
     #[serde(default)]
     parameters: Option<Vec<RawActionParameter>>,
@@ -68,10 +74,7 @@ pub struct ActionParameter {
 
 impl From<RawActionParameter> for ActionParameter {
     fn from(raw: RawActionParameter) -> Self {
-        Self {
-            name: raw.name,
-            param_type: raw.param_type.map(|t| t.to_ascii_lowercase()),
-        }
+        Self { name: raw.name, param_type: raw.param_type.map(|t| t.to_ascii_lowercase()) }
     }
 }
 
@@ -80,8 +83,5 @@ fn extract_parameters(raw: &RawPostgresAction) -> Vec<RawActionParameter> {
         return params.clone();
     }
 
-    raw.metadata
-        .as_ref()
-        .map(|meta| meta.parameters.clone())
-        .unwrap_or_default()
+    raw.metadata.as_ref().map(|meta| meta.parameters.clone()).unwrap_or_default()
 }

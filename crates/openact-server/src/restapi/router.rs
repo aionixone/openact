@@ -9,7 +9,7 @@ use openact_mcp::GovernanceConfig;
 use tower::ServiceBuilder;
 
 /// Create REST API router
-pub fn create_router(app_state: AppState, governance: GovernanceConfig) -> Router {
+pub fn create_router() -> Router<(AppState, GovernanceConfig)> {
     let base = Router::new()
         .route("/api/v1/kinds", get(super::handlers::kinds::get_kinds))
         .route("/api/v1/actions", get(super::handlers::actions::get_actions))
@@ -28,8 +28,7 @@ pub fn create_router(app_state: AppState, governance: GovernanceConfig) -> Route
         )
         .route("/api/v1/execute", axum::routing::post(super::handlers::actions::execute_by_trn))
         .route("/api/v1/health", get(super::handlers::health::health_check))
-        .layer(ServiceBuilder::new().layer(TenantLayer).layer(RequestIdLayer))
-        .with_state((app_state.clone(), governance.clone()));
+        .layer(ServiceBuilder::new().layer(TenantLayer).layer(RequestIdLayer));
 
     // Optionally mount authflow router when feature enabled AND runtime flag set
     #[cfg(feature = "authflow")]
@@ -39,6 +38,16 @@ pub fn create_router(app_state: AppState, governance: GovernanceConfig) -> Route
             .unwrap_or(true); // Default to enabled when feature is compiled in
 
         if enable_authflow {
+            let base = base
+                .route(
+                    "/api/v1/authflow/runs",
+                    axum::routing::post(super::handlers::authflow::start_flow_run),
+                )
+                .route(
+                    "/api/v1/authflow/runs/:run_id",
+                    axum::routing::get(super::handlers::authflow::get_flow_run),
+                );
+
             // Build authflow router from the embedded server module (has its own state)
             let authflow_router = openact_authflow::server::router::create_router();
 

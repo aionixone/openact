@@ -5,18 +5,6 @@ use rmcp::model as m;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-fn to_json_object(val: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
-    match val {
-        serde_json::Value::Object(map) => map.clone(),
-        _ => {
-            // Wrap as minimal object schema if only properties were provided as non-object
-            let mut obj = serde_json::Map::new();
-            obj.insert("type".into(), serde_json::Value::String("object".into()));
-            obj
-        }
-    }
-}
-
 pub fn to_mcp_tool(spec: &ToolSpec) -> m::Tool {
     // Build input schema as a full JSON object schema with properties
     let input_obj = {

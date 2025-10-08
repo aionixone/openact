@@ -11,25 +11,26 @@ openact-store = { path = "../openact-store" }
 openact-registry = { path = "../openact-registry" }
 openact-plugins = { path = "../openact-plugins" }
 openact-runtime = { path = "../openact-runtime" }
-openact-authflow = { path = "../openact-authflow", optional = true, features = ["server"] }
+openact-authflow = { path = "../openact-authflow", optional = true, features = ["server", "callback"] }
 anyhow = "1.0"
-axum = { version = "0.7", features = ["json"] }
+axum = { version = "0.7", features = ["json", "tokio"] }
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 tracing = "0.1"
 thiserror = "1.0"
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "0.4", features = ["util", "make"] }
 uuid = { version = "1.0", features = ["v4"] }
 jsonschema = "0.17"
 sha2 = "0.10"
 async-stream = "0.3"
 chrono = { version = "0.4", features = ["serde", "clock"] }
+stepflow-dsl = { path = "../../../stepflow-dsl", optional = true }
 
 [features]
 default = []
-authflow = ["dep:openact-authflow"]
+authflow = ["dep:openact-authflow", "dep:stepflow-dsl"]
 # Toggle to use official rmcp stdio server instead of legacy implementation
 mcp-rmcp = []
 

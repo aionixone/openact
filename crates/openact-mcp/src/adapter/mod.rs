@@ -31,87 +31,140 @@ impl McpAdapter {
         Self { app_state, registry, governance }
     }
 
-    async fn resolve_alias_or_direct(
+    async fn load_actions(
         &self,
-        tool_name: &str,
         tenant: Option<&str>,
-    ) -> Result<(String, String), ProtocolError> {
-        // 1) Check alias via action.mcp_overrides.tool_name
+        connector: Option<ConnectorKind>,
+    ) -> Result<Vec<ActionRecord>, ProtocolError> {
         let mut filter = ActionListFilter { mcp_enabled: Some(true), ..Default::default() };
         if let Some(t) = tenant {
             filter.tenant = Some(t.to_string());
         }
-        // Apply governance patterns so we don't leak disallowed tools
+        if let Some(kind) = connector {
+            filter.connector = Some(kind);
+        }
         filter.allow_patterns = Some(self.governance.allow_patterns.clone());
         filter.deny_patterns = Some(self.governance.deny_patterns.clone());
-        let actions = ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
+        ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
             .await
-            .map_err(|e| {
-                ProtocolError::new("STORE_ERROR", format!("list_filtered: {}", e), None)
-            })?;
-        for a in &actions {
-            if let Some(ref ov) = a.mcp_overrides {
-                if let Some(ref alias) = ov.tool_name {
+            .map_err(|e| ProtocolError::new("STORE_ERROR", format!("list_filtered: {}", e), None))
+    }
+
+    fn resolve_alias_or_direct(
+        &self,
+        tool_name: &str,
+        actions: &[ActionRecord],
+    ) -> Result<(String, String), ProtocolError> {
+        for record in actions {
+            if let Some(ref overrides) = record.mcp_overrides {
+                if let Some(ref alias) = overrides.tool_name {
                     if alias == tool_name {
-                        return Ok((a.connector.as_str().to_string(), a.name.clone()));
+                        return Ok((record.connector.as_str().to_string(), record.name.clone()));
                     }
                 }
             }
         }
-        // 2) Direct connector.action
         if let Some(parsed) = openact_core::types::ToolName::parse_human(tool_name) {
             return Ok((parsed.connector.to_string(), parsed.action.to_string()));
         }
         Err(ProtocolError::new("TOOL_NOT_FOUND", format!("tool {} not found", tool_name), None))
     }
 
-    async fn find_action_record(
+    fn select_action_record(
         &self,
-        connector: &str,
+        actions: &[ActionRecord],
+        connector: &ConnectorKind,
         action: &str,
-        tenant: Option<&str>,
         version: Option<i64>,
+        tenant: Option<&str>,
     ) -> Result<ActionRecord, ProtocolError> {
-        let kind = ConnectorKind::new(connector).canonical();
-        let mut filter = ActionListFilter {
-            connector: Some(kind),
-            mcp_enabled: Some(true),
-            ..Default::default()
-        };
-        if let Some(t) = tenant {
-            filter.tenant = Some(t.to_string());
-        }
-        filter.allow_patterns = Some(self.governance.allow_patterns.clone());
-        filter.deny_patterns = Some(self.governance.deny_patterns.clone());
-        let actions = ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
-            .await
-            .map_err(|e| {
-                ProtocolError::new("STORE_ERROR", format!("list_filtered: {}", e), None)
-            })?;
-        let mut candidates: Vec<&ActionRecord> =
-            actions.iter().filter(|a| a.name == action).collect();
+        let target_connector = connector.as_str().to_string();
+        let mut candidates: Vec<&ActionRecord> = actions
+            .iter()
+            .filter(|record| {
+                record.connector.canonical().0 == target_connector && record.name == action
+            })
+            .collect();
         if candidates.is_empty() {
             return Err(ProtocolError::new(
                 "TOOL_NOT_FOUND",
-                format!("action {}.{} not found", connector, action),
+                format!("action {}.{} not found", connector.as_str(), action),
                 None,
             ));
         }
         if let Some(v) = version {
-            candidates.retain(|a| a.version == v);
+            candidates.retain(|record| record.version == v);
             if candidates.is_empty() {
                 return Err(ProtocolError::new(
                     "VERSION_NOT_FOUND",
-                    format!("version {} not found for {}.{}", v, connector, action),
+                    format!("version {} not found for {}.{}", v, connector.as_str(), action),
                     None,
                 ));
             }
         } else {
-            // pick highest version
-            let max_v = candidates.iter().map(|a| a.version).max().unwrap_or(0);
-            candidates.retain(|a| a.version == max_v);
+            let max_version = candidates.iter().map(|record| record.version).max().unwrap_or(0);
+            candidates.retain(|record| record.version == max_version);
         }
-        Ok((*candidates[0]).clone())
+        let picked = candidates[0];
+        self.ensure_action_access(picked, tenant)?;
+        Ok(picked.clone())
+    }
+
+    async fn action_by_trn(
+        &self,
+        trn: &Trn,
+        tenant: Option<&str>,
+    ) -> Result<ActionRecord, ProtocolError> {
+        let record = ActionRepository::get(self.app_state.store.as_ref(), trn)
+            .await
+            .map_err(|e| ProtocolError::new("STORE_ERROR", format!("get: {}", e), None))?
+            .ok_or_else(|| {
+                ProtocolError::new("TOOL_NOT_FOUND", format!("action {} not found", trn), None)
+            })?;
+        self.ensure_action_access(&record, tenant)?;
+        Ok(record)
+    }
+
+    fn ensure_action_access(
+        &self,
+        record: &ActionRecord,
+        tenant: Option<&str>,
+    ) -> Result<(), ProtocolError> {
+        if !record.mcp_enabled {
+            return Err(ProtocolError::new(
+                "FORBIDDEN",
+                format!("action {} is not enabled for MCP", record.trn),
+                None,
+            ));
+        }
+        if let Some(request_tenant) = tenant {
+            if let Some(components) = record.trn.parse_action() {
+                if components.tenant != request_tenant {
+                    return Err(ProtocolError::new(
+                        "FORBIDDEN",
+                        format!("action {} not visible for tenant {}", record.trn, request_tenant),
+                        None,
+                    ));
+                }
+            }
+        }
+        let tool_name = Self::tool_name_for_record(record);
+        if !self.governance.is_tool_allowed(&tool_name) {
+            return Err(ProtocolError::new(
+                "FORBIDDEN",
+                format!("tool {} is not allowed by governance", tool_name),
+                None,
+            ));
+        }
+        Ok(())
+    }
+
+    fn tool_name_for_record(record: &ActionRecord) -> String {
+        record
+            .mcp_overrides
+            .as_ref()
+            .and_then(|overrides| overrides.tool_name.clone())
+            .unwrap_or_else(|| format!("{}.{}", record.connector.as_str(), record.name))
     }
 }
 
@@ -123,20 +176,7 @@ impl ToolCatalog for McpAdapter {
         Box<dyn std::future::Future<Output = Result<Vec<ToolSpec>, ProtocolError>> + Send + 'a>,
     > {
         Box::pin(async move {
-            // Build filter
-            let mut filter = ActionListFilter { mcp_enabled: Some(true), ..Default::default() };
-            if let Some(t) = tenant {
-                filter.tenant = Some(t.to_string());
-            }
-            filter.allow_patterns = Some(self.governance.allow_patterns.clone());
-            filter.deny_patterns = Some(self.governance.deny_patterns.clone());
-            let actions =
-                ActionRepository::list_filtered(self.app_state.store.as_ref(), filter, None)
-                    .await
-                    .map_err(|e| {
-                        ProtocolError::new("STORE_ERROR", format!("list_filtered: {}", e), None)
-                    })?;
-
+            let actions = self.load_actions(tenant, None).await?;
             let mut seen: HashSet<String> = HashSet::new();
             let mut specs: Vec<ToolSpec> = Vec::new();
 
@@ -221,19 +261,18 @@ impl ToolInvoker for McpAdapter {
             let tenant_opt = req.tenant.as_deref();
             let args = req.args;
 
-            // openact.execute supports direct TRN or connector/action
             if req.tool == "openact.execute" {
-                // If action_trn present
                 if let Some(trn_str) = args.get("action_trn").and_then(|v| v.as_str()) {
                     let trn = Trn::new(trn_str.to_string());
+                    let record = self.action_by_trn(&trn, tenant_opt).await?;
                     let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
                     let exec =
-                        self.registry.execute(&trn, input, None).await.map_err(|e| {
+                        self.registry.execute(&record.trn, input, None).await.map_err(|e| {
                             ProtocolError::new("EXEC_ERROR", format!("{}", e), None)
                         })?;
                     return Ok(InvokeResult { structured: exec.output, text_fallback: None });
                 }
-                // Else connector+action
+
                 let connector =
                     args.get("connector").and_then(|v| v.as_str()).ok_or_else(|| {
                         ProtocolError::new("INVALID_INPUT", "missing connector", None)
@@ -244,27 +283,288 @@ impl ToolInvoker for McpAdapter {
                     .ok_or_else(|| ProtocolError::new("INVALID_INPUT", "missing action", None))?;
                 let version_opt = args.get("version").and_then(|v| v.as_i64());
                 let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
-                let rec =
-                    self.find_action_record(connector, action, tenant_opt, version_opt).await?;
+                let connector_kind = ConnectorKind::new(connector).canonical();
+                let actions = self.load_actions(tenant_opt, Some(connector_kind.clone())).await?;
+                let record = self.select_action_record(
+                    &actions,
+                    &connector_kind,
+                    action,
+                    version_opt,
+                    tenant_opt,
+                )?;
                 let exec = self
                     .registry
-                    .execute(&rec.trn, input, None)
+                    .execute(&record.trn, input, None)
                     .await
                     .map_err(|e| ProtocolError::new("EXEC_ERROR", format!("{}", e), None))?;
                 return Ok(InvokeResult { structured: exec.output, text_fallback: None });
             }
 
-            // Per-action tools: resolve alias or direct
-            let (connector, action) = self.resolve_alias_or_direct(&req.tool, tenant_opt).await?;
+            let actions = self.load_actions(tenant_opt, None).await?;
+            let (connector_name, action_name) =
+                self.resolve_alias_or_direct(&req.tool, &actions)?;
             let version_opt = args.get("version").and_then(|v| v.as_i64());
             let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
-            let rec = self.find_action_record(&connector, &action, tenant_opt, version_opt).await?;
+            let connector_kind = ConnectorKind::new(&connector_name).canonical();
+            let record = self.select_action_record(
+                &actions,
+                &connector_kind,
+                &action_name,
+                version_opt,
+                tenant_opt,
+            )?;
             let exec = self
                 .registry
-                .execute(&rec.trn, input, None)
+                .execute(&record.trn, input, None)
                 .await
                 .map_err(|e| ProtocolError::new("EXEC_ERROR", format!("{}", e), None))?;
             Ok(InvokeResult { structured: exec.output, text_fallback: None })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use openact_core::store::{ActionRepository, ConnectionStore};
+    use openact_core::types::ConnectorMetadata;
+    use openact_core::types::McpOverrides;
+    use openact_core::{ActionRecord, ConnectionRecord};
+    use openact_registry::factory::{Action, ActionFactory, AsAny, Connection, ConnectionFactory};
+    use openact_store::SqlStore;
+    use serde_json::json;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct TestFactory {
+        executions: Arc<AtomicUsize>,
+    }
+
+    struct TestConnection {
+        trn: Trn,
+        connector: ConnectorKind,
+    }
+
+    struct TestAction {
+        trn: Trn,
+        connector: ConnectorKind,
+        executions: Arc<AtomicUsize>,
+    }
+
+    impl AsAny for TestConnection {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Connection for TestConnection {
+        fn trn(&self) -> &Trn {
+            &self.trn
+        }
+
+        fn connector_kind(&self) -> &ConnectorKind {
+            &self.connector
+        }
+
+        async fn health_check(&self) -> openact_registry::RegistryResult<bool> {
+            Ok(true)
+        }
+
+        fn metadata(&self) -> std::collections::HashMap<String, serde_json::Value> {
+            std::collections::HashMap::new()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ConnectionFactory for TestFactory {
+        fn connector_kind(&self) -> ConnectorKind {
+            ConnectorKind::new("test")
+        }
+
+        fn metadata(&self) -> ConnectorMetadata {
+            ConnectorMetadata {
+                kind: ConnectorKind::new("test"),
+                display_name: "Test Connector".into(),
+                description: "Test connector for MCP adapter".into(),
+                category: "test".into(),
+                supported_operations: vec![],
+                supports_auth: false,
+                example_config: None,
+                version: "1.0".into(),
+            }
+        }
+
+        async fn create_connection(
+            &self,
+            record: &ConnectionRecord,
+        ) -> openact_registry::RegistryResult<Arc<dyn Connection>> {
+            Ok(Arc::new(TestConnection {
+                trn: record.trn.clone(),
+                connector: record.connector.clone(),
+            }))
+        }
+    }
+
+    impl AsAny for TestAction {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Action for TestAction {
+        fn trn(&self) -> &Trn {
+            &self.trn
+        }
+
+        fn connector_kind(&self) -> &ConnectorKind {
+            &self.connector
+        }
+
+        async fn execute(
+            &self,
+            _input: serde_json::Value,
+        ) -> openact_registry::RegistryResult<serde_json::Value> {
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            Ok(json!({ "echo": "ok" }))
+        }
+
+        fn metadata(&self) -> std::collections::HashMap<String, serde_json::Value> {
+            std::collections::HashMap::new()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ActionFactory for TestFactory {
+        fn connector_kind(&self) -> ConnectorKind {
+            ConnectorKind::new("test")
+        }
+
+        fn metadata(&self) -> ConnectorMetadata {
+            <Self as ConnectionFactory>::metadata(self)
+        }
+
+        async fn create_action(
+            &self,
+            action_record: &ActionRecord,
+            _connection: Arc<dyn Connection>,
+        ) -> openact_registry::RegistryResult<Box<dyn Action>> {
+            Ok(Box::new(TestAction {
+                trn: action_record.trn.clone(),
+                connector: action_record.connector.clone(),
+                executions: self.executions.clone(),
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn openact_execute_trn_enforces_mcp_and_governance() {
+        let store = Arc::new(SqlStore::new("sqlite::memory:?cache=shared").await.unwrap());
+        let app_state = AppState::from_arc(store.clone());
+
+        let executions = Arc::new(AtomicUsize::new(0));
+        let factory = Arc::new(TestFactory { executions: executions.clone() });
+
+        let conn_store = store.as_ref().clone();
+        let act_repo = store.as_ref().clone();
+        let mut registry = ConnectorRegistry::new(conn_store, act_repo);
+        registry.register_connection_factory(factory.clone());
+        registry.register_action_factory(factory);
+
+        let tenant = "tenant";
+        let connector = ConnectorKind::new("test");
+        let connection_trn = Trn::new(format!("trn:openact:{}:connection/test/conn@v1", tenant));
+        let action_trn = Trn::new(format!("trn:openact:{}:action/test/do@v1", tenant));
+        let now = Utc::now();
+
+        ConnectionStore::upsert(
+            store.as_ref(),
+            &ConnectionRecord {
+                trn: connection_trn.clone(),
+                connector: connector.clone(),
+                name: "conn".into(),
+                config_json: json!({}),
+                created_at: now,
+                updated_at: now,
+                version: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        let mut action_record = ActionRecord {
+            trn: action_trn.clone(),
+            connector: connector.clone(),
+            name: "do".into(),
+            connection_trn: connection_trn.clone(),
+            config_json: json!({}),
+            mcp_enabled: false,
+            mcp_overrides: None,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+        };
+        ActionRepository::upsert(store.as_ref(), &action_record).await.unwrap();
+
+        let mut adapter = McpAdapter {
+            app_state,
+            registry,
+            governance: GovernanceConfig::new(vec![], vec![], 4, 30),
+        };
+
+        let request = InvokeRequest {
+            tool: "openact.execute".to_string(),
+            tenant: Some(tenant.to_string()),
+            args: json!({ "action_trn": action_trn.as_str() }),
+        };
+        let err = adapter.invoke(request).await.expect_err("mcp disabled should block");
+        assert_eq!(err.code, "FORBIDDEN");
+        assert!(err.message.contains("not enabled"), "message={}", err.message);
+
+        action_record.mcp_enabled = true;
+        action_record.mcp_overrides = Some(McpOverrides {
+            tool_name: Some("denied.tool".into()),
+            description: None,
+            tags: vec![],
+            requires_auth: false,
+        });
+        ActionRepository::upsert(store.as_ref(), &action_record).await.unwrap();
+        adapter.governance = GovernanceConfig::new(vec![], vec!["denied.*".into()], 4, 30);
+
+        let request = InvokeRequest {
+            tool: "openact.execute".to_string(),
+            tenant: Some(tenant.to_string()),
+            args: json!({ "action_trn": action_trn.as_str() }),
+        };
+        let err = adapter.invoke(request).await.expect_err("governance deny should block");
+        assert_eq!(err.code, "FORBIDDEN");
+        assert!(err.message.contains("not allowed"), "message={}", err.message);
+
+        action_record.mcp_overrides = Some(McpOverrides {
+            tool_name: Some("allowed.tool".into()),
+            description: None,
+            tags: vec![],
+            requires_auth: false,
+        });
+        ActionRepository::upsert(store.as_ref(), &action_record).await.unwrap();
+        adapter.governance = GovernanceConfig::new(
+            vec!["openact.execute".into(), "allowed.*".into()],
+            vec![],
+            4,
+            30,
+        );
+
+        let request = InvokeRequest {
+            tool: "openact.execute".to_string(),
+            tenant: Some(tenant.to_string()),
+            args: json!({ "action_trn": action_trn.as_str(), "input": { "echo": "ok" } }),
+        };
+        let result = adapter.invoke(request).await.expect("governance should allow execution");
+        assert_eq!(result.structured, json!({ "echo": "ok" }));
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
     }
 }

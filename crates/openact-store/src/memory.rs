@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use openact_core::{
-    store::{ActionListFilter, ActionListOptions, ActionListResult, ActionRepository, ActionSortField, AuthConnectionStore, ConnectionStore, RunStore},
+    store::{
+        ActionListFilter, ActionListOptions, ActionListResult, ActionRepository, ActionSortField,
+        AuthConnectionStore, ConnectionStore, RunStore,
+    },
     ActionRecord, AuthConnection, Checkpoint, ConnectionRecord, ConnectorKind, CoreResult, Trn,
 };
 use std::collections::HashMap;
@@ -116,7 +119,11 @@ impl ActionRepository for MemoryActionRepository {
         Ok(results)
     }
 
-    async fn list_filtered(&self, filter: ActionListFilter, opts: Option<ActionListOptions>) -> CoreResult<Vec<ActionRecord>> {
+    async fn list_filtered(
+        &self,
+        filter: ActionListFilter,
+        opts: Option<ActionListOptions>,
+    ) -> CoreResult<Vec<ActionRecord>> {
         let data = self.data.read().await;
         let mut v: Vec<ActionRecord> = data.values().cloned().collect();
         if let Some(t) = filter.tenant.as_deref() {
@@ -140,7 +147,9 @@ impl ActionRepository for MemoryActionRepository {
         }
         if let Some(ref q) = filter.q {
             let ql = q.to_lowercase();
-            v.retain(|r| r.name.to_lowercase().contains(&ql) || r.trn.as_str().to_lowercase().contains(&ql));
+            v.retain(|r| {
+                r.name.to_lowercase().contains(&ql) || r.trn.as_str().to_lowercase().contains(&ql)
+            });
         }
 
         // Governance allow/deny
@@ -159,13 +168,25 @@ impl ActionRepository for MemoryActionRepository {
         let opts = opts.unwrap_or_default();
         match opts.sort_field.unwrap_or(ActionSortField::CreatedAt) {
             ActionSortField::CreatedAt => {
-                if opts.ascending { v.sort_by_key(|r| r.created_at); } else { v.sort_by_key(|r| std::cmp::Reverse(r.created_at)); }
+                if opts.ascending {
+                    v.sort_by_key(|r| r.created_at);
+                } else {
+                    v.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+                }
             }
             ActionSortField::Name => {
-                if opts.ascending { v.sort_by(|a,b| a.name.cmp(&b.name)); } else { v.sort_by(|a,b| b.name.cmp(&a.name)); }
+                if opts.ascending {
+                    v.sort_by(|a, b| a.name.cmp(&b.name));
+                } else {
+                    v.sort_by(|a, b| b.name.cmp(&a.name));
+                }
             }
             ActionSortField::Version => {
-                if opts.ascending { v.sort_by_key(|r| r.version); } else { v.sort_by_key(|r| std::cmp::Reverse(r.version)); }
+                if opts.ascending {
+                    v.sort_by_key(|r| r.version);
+                } else {
+                    v.sort_by_key(|r| std::cmp::Reverse(r.version));
+                }
             }
         }
 
@@ -174,13 +195,21 @@ impl ActionRepository for MemoryActionRepository {
         if page > 0 && page_size > 0 {
             let start = ((page - 1) * page_size) as usize;
             let end = (start + page_size as usize).min(v.len());
-            if start < v.len() { v = v[start..end].to_vec(); } else { v.clear(); }
+            if start < v.len() {
+                v = v[start..end].to_vec();
+            } else {
+                v.clear();
+            }
         }
 
         Ok(v)
     }
 
-    async fn list_filtered_paged(&self, filter: ActionListFilter, opts: ActionListOptions) -> CoreResult<ActionListResult> {
+    async fn list_filtered_paged(
+        &self,
+        filter: ActionListFilter,
+        opts: ActionListOptions,
+    ) -> CoreResult<ActionListResult> {
         // Reuse list_filtered logic to get total and slicing
         let data = self.data.read().await;
         let mut v: Vec<ActionRecord> = data.values().cloned().collect();
@@ -208,7 +237,9 @@ impl ActionRepository for MemoryActionRepository {
         }
         if let Some(ref q) = filter.q {
             let ql = q.to_lowercase();
-            v.retain(|r| r.name.to_lowercase().contains(&ql) || r.trn.as_str().to_lowercase().contains(&ql));
+            v.retain(|r| {
+                r.name.to_lowercase().contains(&ql) || r.trn.as_str().to_lowercase().contains(&ql)
+            });
         }
 
         if let Some(ref allows) = filter.allow_patterns {
@@ -227,13 +258,25 @@ impl ActionRepository for MemoryActionRepository {
         // Sort
         match opts.sort_field.unwrap_or(ActionSortField::CreatedAt) {
             ActionSortField::CreatedAt => {
-                if opts.ascending { v.sort_by_key(|r| r.created_at); } else { v.sort_by_key(|r| std::cmp::Reverse(r.created_at)); }
+                if opts.ascending {
+                    v.sort_by_key(|r| r.created_at);
+                } else {
+                    v.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+                }
             }
             ActionSortField::Name => {
-                if opts.ascending { v.sort_by(|a,b| a.name.cmp(&b.name)); } else { v.sort_by(|a,b| b.name.cmp(&a.name)); }
+                if opts.ascending {
+                    v.sort_by(|a, b| a.name.cmp(&b.name));
+                } else {
+                    v.sort_by(|a, b| b.name.cmp(&a.name));
+                }
             }
             ActionSortField::Version => {
-                if opts.ascending { v.sort_by_key(|r| r.version); } else { v.sort_by_key(|r| std::cmp::Reverse(r.version)); }
+                if opts.ascending {
+                    v.sort_by_key(|r| r.version);
+                } else {
+                    v.sort_by_key(|r| std::cmp::Reverse(r.version));
+                }
             }
         }
 
@@ -243,7 +286,11 @@ impl ActionRepository for MemoryActionRepository {
             let page_size = page_size.max(1);
             let start = ((page - 1) * page_size) as usize;
             let end = (start + page_size as usize).min(v.len());
-            if start < v.len() { v = v[start..end].to_vec(); } else { v.clear(); }
+            if start < v.len() {
+                v = v[start..end].to_vec();
+            } else {
+                v.clear();
+            }
         }
 
         Ok(ActionListResult { records: v, total })
@@ -253,13 +300,21 @@ impl ActionRepository for MemoryActionRepository {
 fn pattern_matches_any(patterns: &Vec<String>, r: &ActionRecord) -> bool {
     let _tool = format!("{}.{}", r.connector.as_str(), r.name);
     for p in patterns {
-        if p == "*" { return true; }
+        if p == "*" {
+            return true;
+        }
         if let Some(prefix) = p.strip_suffix(".*") {
-            if r.connector.as_str() == prefix { return true; }
+            if r.connector.as_str() == prefix {
+                return true;
+            }
         } else if let Some(suffix) = p.strip_prefix("*.") {
-            if r.name == suffix { return true; }
+            if r.name == suffix {
+                return true;
+            }
         } else if let Some((c, a)) = p.split_once('.') {
-            if r.connector.as_str() == c && r.name == a { return true; }
+            if r.connector.as_str() == c && r.name == a {
+                return true;
+            }
         } else if r.connector.as_str() == p {
             return true;
         }

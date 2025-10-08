@@ -4,7 +4,10 @@ use crate::error::{StoreError, StoreResult};
 use crate::sql_store::migrations::MigrationRunner;
 use async_trait::async_trait;
 use openact_core::{
-    store::{ActionListFilter, ActionListOptions, ActionListResult, ActionRepository, ActionSortField, AuthConnectionStore, ConnectionStore, RunStore},
+    store::{
+        ActionListFilter, ActionListOptions, ActionListResult, ActionRepository, ActionSortField,
+        AuthConnectionStore, ConnectionStore, RunStore,
+    },
     ActionRecord, AuthConnection, Checkpoint, ConnectionRecord, CoreResult, Trn,
 };
 use serde_json::Value as JsonValue;
@@ -393,13 +396,21 @@ impl ActionRepository for SqlStore {
         Ok(records)
     }
 
-    async fn list_filtered(&self, filter: ActionListFilter, opts: Option<ActionListOptions>) -> CoreResult<Vec<ActionRecord>> {
+    async fn list_filtered(
+        &self,
+        filter: ActionListFilter,
+        opts: Option<ActionListOptions>,
+    ) -> CoreResult<Vec<ActionRecord>> {
         // Build dynamic SQL with parameters
         let mut sql = String::from(
             "SELECT trn, connector, name, connection_trn, config_json, mcp_enabled, mcp_overrides_json, created_at, updated_at, version FROM actions",
         );
         let mut conds: Vec<String> = Vec::new();
-        enum Bind { S(String), B(bool), T(chrono::DateTime<chrono::Utc>) }
+        enum Bind {
+            S(String),
+            B(bool),
+            T(chrono::DateTime<chrono::Utc>),
+        }
         let mut binds: Vec<Bind> = Vec::new();
 
         if let Some(ref t) = filter.tenant {
@@ -446,7 +457,9 @@ impl ActionRepository for SqlStore {
                 if !allows.iter().any(|p| p == "*") {
                     let mut or_conds: Vec<String> = Vec::new();
                     for pat in allows {
-                        if pat == "*" { continue; }
+                        if pat == "*" {
+                            continue;
+                        }
                         if let Some(prefix) = pat.strip_suffix(".*") {
                             or_conds.push("(connector = ?)".to_string());
                             binds.push(Bind::S(prefix.to_string()));
@@ -513,7 +526,9 @@ impl ActionRepository for SqlStore {
             ActionSortField::Name => sql.push_str("name"),
             ActionSortField::Version => sql.push_str("version"),
         }
-        if !opts.ascending { sql.push_str(" DESC"); }
+        if !opts.ascending {
+            sql.push_str(" DESC");
+        }
 
         // Pagination
         if let (Some(page), Some(page_size)) = (opts.page, opts.page_size) {
@@ -528,9 +543,15 @@ impl ActionRepository for SqlStore {
         let mut query = sqlx::query(&sql);
         for b in binds {
             match b {
-                Bind::S(s) => { query = query.bind(s); },
-                Bind::B(v) => { query = query.bind(v); },
-                Bind::T(ts) => { query = query.bind(ts); },
+                Bind::S(s) => {
+                    query = query.bind(s);
+                }
+                Bind::B(v) => {
+                    query = query.bind(v);
+                }
+                Bind::T(ts) => {
+                    query = query.bind(ts);
+                }
             }
         }
         if let (Some(page), Some(page_size)) = (opts.page, opts.page_size) {
@@ -545,12 +566,15 @@ impl ActionRepository for SqlStore {
         let mut records = Vec::new();
         for row in rows {
             let config_json_str: String = row.get("config_json");
-            let config_json: JsonValue = serde_json::from_str(&config_json_str).map_err(StoreError::Serialization)?;
+            let config_json: JsonValue =
+                serde_json::from_str(&config_json_str).map_err(StoreError::Serialization)?;
 
             let mcp_overrides_json: Option<String> = row.get("mcp_overrides_json");
             let mcp_overrides = if let Some(json_str) = mcp_overrides_json {
                 Some(serde_json::from_str(&json_str).map_err(StoreError::Serialization)?)
-            } else { None };
+            } else {
+                None
+            };
 
             records.push(ActionRecord {
                 trn: Trn::new(row.get::<String, _>("trn")),
@@ -577,7 +601,11 @@ impl ActionRepository for SqlStore {
         // Build WHERE and binds once
         let mut where_sql = String::new();
         let mut conds: Vec<String> = Vec::new();
-        enum Bind { S(String), B(bool), T(chrono::DateTime<chrono::Utc>) }
+        enum Bind {
+            S(String),
+            B(bool),
+            T(chrono::DateTime<chrono::Utc>),
+        }
         let mut binds: Vec<Bind> = Vec::new();
 
         if let Some(ref t) = filter.tenant {
@@ -621,7 +649,9 @@ impl ActionRepository for SqlStore {
                 if !allows.iter().any(|p| p == "*") {
                     let mut or_conds: Vec<String> = Vec::new();
                     for pat in allows {
-                        if pat == "*" { continue; }
+                        if pat == "*" {
+                            continue;
+                        }
                         if let Some(prefix) = pat.strip_suffix(".*") {
                             or_conds.push("(connector = ?)".to_string());
                             binds.push(Bind::S(prefix.to_string()));
@@ -682,9 +712,15 @@ impl ActionRepository for SqlStore {
         let mut count_query = sqlx::query(&count_sql);
         for b in &binds {
             match b {
-                Bind::S(s) => { count_query = count_query.bind(s.clone()); },
-                Bind::B(v) => { count_query = count_query.bind(*v); },
-                Bind::T(ts) => { count_query = count_query.bind(ts.clone()); },
+                Bind::S(s) => {
+                    count_query = count_query.bind(s.clone());
+                }
+                Bind::B(v) => {
+                    count_query = count_query.bind(*v);
+                }
+                Bind::T(ts) => {
+                    count_query = count_query.bind(ts.clone());
+                }
             }
         }
         let row = count_query.fetch_one(&self.pool).await.map_err(StoreError::Database)?;
@@ -698,7 +734,9 @@ impl ActionRepository for SqlStore {
             ActionSortField::Name => sql.push_str("name"),
             ActionSortField::Version => sql.push_str("version"),
         }
-        if !opts.ascending { sql.push_str(" DESC"); }
+        if !opts.ascending {
+            sql.push_str(" DESC");
+        }
         if let (Some(page), Some(page_size)) = (opts.page, opts.page_size) {
             let page = page.max(1);
             let page_size = page_size.max(1);
@@ -707,9 +745,15 @@ impl ActionRepository for SqlStore {
             let mut query = sqlx::query(&sql);
             for b in &binds {
                 match b {
-                    Bind::S(s) => { query = query.bind(s.clone()); },
-                    Bind::B(v) => { query = query.bind(*v); },
-                    Bind::T(ts) => { query = query.bind(ts.clone()); },
+                    Bind::S(s) => {
+                        query = query.bind(s.clone());
+                    }
+                    Bind::B(v) => {
+                        query = query.bind(*v);
+                    }
+                    Bind::T(ts) => {
+                        query = query.bind(ts.clone());
+                    }
                 }
             }
             query = query.bind(page_size as i64).bind(offset as i64);
@@ -717,11 +761,14 @@ impl ActionRepository for SqlStore {
             let mut records = Vec::new();
             for row in rows {
                 let config_json_str: String = row.get("config_json");
-                let config_json: JsonValue = serde_json::from_str(&config_json_str).map_err(StoreError::Serialization)?;
+                let config_json: JsonValue =
+                    serde_json::from_str(&config_json_str).map_err(StoreError::Serialization)?;
                 let mcp_overrides_json: Option<String> = row.get("mcp_overrides_json");
                 let mcp_overrides = if let Some(json_str) = mcp_overrides_json {
                     Some(serde_json::from_str(&json_str).map_err(StoreError::Serialization)?)
-                } else { None };
+                } else {
+                    None
+                };
                 records.push(ActionRecord {
                     trn: Trn::new(row.get::<String, _>("trn")),
                     connector: openact_core::ConnectorKind::new(row.get::<String, _>("connector")),
@@ -742,7 +789,6 @@ impl ActionRepository for SqlStore {
         let records = self.list_filtered(filter, Some(opts)).await?;
         Ok(ActionListResult { records, total: total as u64 })
     }
-    
 }
 
 #[async_trait]

@@ -1,0 +1,1 @@
+./scripts/run_github_oauth.sh --client-id Ov23lihVkExosE0hR0Bh --client-secret 869a42e70049593424af97dbd7281b4b8313ccaf

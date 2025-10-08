@@ -7,7 +7,9 @@ pub struct Usage {
 }
 
 impl Usage {
-    pub fn total(&self) -> u32 { self.prompt_tokens + self.completion_tokens }
+    pub fn total(&self) -> u32 {
+        self.prompt_tokens + self.completion_tokens
+    }
 }
 
 /// A minimal streaming assembler that collects text deltas and usage, and reports stats on finish.
@@ -33,10 +35,11 @@ impl StreamAssembler {
             self.usage.completion_tokens.saturating_add(completion_tokens);
     }
 
-    pub fn elapsed(&self) -> Duration { self.started_at.elapsed() }
+    pub fn elapsed(&self) -> Duration {
+        self.started_at.elapsed()
+    }
 
     pub fn finish(self) -> (String, Usage, Duration) {
         (self.buffer, self.usage, self.started_at.elapsed())
     }
 }
-

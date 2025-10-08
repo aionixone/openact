@@ -76,7 +76,7 @@ pub fn run_flow(
             .map_err(|e| anyhow!("plan step failed at {current}: {e}"))?;
         match cmd {
             Command::ExecuteTask { state_name, resource, next_state } => {
-                println!("[engine] executing state={} resource={}", state_name, resource);
+                tracing::debug!(state = %state_name, resource = %resource, "executing task state");
                 // Use stepflow-dsl TaskState fields: parameters / assign / output
                 let mapper = MappingFacade::new();
                 // Construct mapping context from current engine context
@@ -112,6 +112,7 @@ pub fn run_flow(
 
                 // parameters
                 let mapped_input = mapper.evaluate_arguments(&parameters, &ctx)?;
+                tracing::debug!(state = %state_name, mapped_input = ?mapped_input, "evaluated parameters");
 
                 // Execute with context merged with mapped parameters (parameters override)
                 let exec_in_owned = if let Some(mi) = mapped_input {
@@ -129,15 +130,14 @@ pub fn run_flow(
                 } else {
                     context.clone()
                 };
-                println!(
-                    "[engine] mapped params keys: {}",
-                    exec_in_owned
-                        .as_object()
-                        .map(|o| o.keys().cloned().collect::<Vec<_>>().join(","))
-                        .unwrap_or_else(|| "<non-object>".to_string())
-                );
+                let mapped_keys = exec_in_owned
+                    .as_object()
+                    .map(|o| o.keys().cloned().collect::<Vec<_>>().join(","))
+                    .unwrap_or_else(|| "<non-object>".to_string());
+                tracing::trace!(state = %state_name, keys = %mapped_keys, "mapped parameter keys");
+                tracing::debug!(state = %state_name, exec_context_keys = ?exec_in_owned.as_object().map(|o| o.keys().collect::<Vec<_>>()), "executing handler");
                 let raw_out = handler.execute(&resource, &state_name, &exec_in_owned)?;
-                println!("[engine] state={} handler returned", state_name);
+                tracing::debug!(state = %state_name, "state handler returned");
 
                 // assign → extend vars after execution (can access result)
                 if assign.is_some() {
@@ -296,6 +296,7 @@ pub fn run_until_pause_or_end(
     mut context: Value,
     handler: &dyn TaskHandler,
     max_steps: usize,
+    existing_run_id: Option<&str>,
 ) -> Result<RunOutcome> {
     if !context.is_object() {
         context = json!({});
@@ -311,10 +312,7 @@ pub fn run_until_pause_or_end(
                 match run_flow(dsl, &state_name, context.clone(), handler, 1) {
                     Ok(out) => {
                         context = out;
-                        println!(
-                            "[engine] state {} executed ok; next={:?}",
-                            state_name, next_state
-                        );
+                        tracing::debug!(state = %state_name, next = ?next_state, "state executed successfully");
                         if let Some(next) = next_state {
                             current = next;
                         } else if dsl.is_end_state(&state_name) {
@@ -325,8 +323,10 @@ pub fn run_until_pause_or_end(
                     }
                     Err(e) => match e.downcast::<PauseFor>() {
                         Ok(pause) => {
-                            println!("[engine] state {} paused: {}", state_name, pause.reason);
-                            let run_id = uuid::Uuid::new_v4().to_string();
+                            tracing::debug!(state = %state_name, reason = %pause.reason, "state paused");
+                            let run_id = existing_run_id
+                                .map(|existing| existing.to_string())
+                                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                             return Ok(RunOutcome::Pending(PendingInfo {
                                 run_id,
                                 next_state: state_name.clone(),
@@ -335,10 +335,10 @@ pub fn run_until_pause_or_end(
                             }));
                         }
                         Err(e) => {
-                            println!("[engine] state {} error: {}", state_name, e);
+                            tracing::error!(state = %state_name, error = %e, "state execution error");
                             return Err(e);
                         }
-                    }
+                    },
                 }
             }
             _ => {

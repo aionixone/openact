@@ -60,8 +60,14 @@ pub async fn execute_workflow(state: ServerState, execution_id: String) {
         }
     };
 
-    let result =
-        run_until_pause_or_end(flow, &start_state, exec_context, state.task_handler.as_ref(), 100);
+    let result = run_until_pause_or_end(
+        flow,
+        &start_state,
+        exec_context,
+        state.task_handler.as_ref(),
+        100,
+        None,
+    );
 
     let mut executions = state.executions.write().unwrap();
     if let Some(execution) = executions.get_mut(&execution_id) {
@@ -72,7 +78,7 @@ pub async fn execute_workflow(state: ServerState, execution_id: String) {
                 execution.status = ExecutionStatus::Completed;
                 execution.completed_at = Some(now);
                 execution.context = Some(final_context.clone());
-                println!("[server] execution {} finished", execution_id);
+                tracing::info!(execution_id = %execution_id, "execution finished");
                 state.broadcast_event(ExecutionEvent {
                     event_type: "execution_completed".to_string(),
                     execution_id: execution_id.clone(),
@@ -86,7 +92,7 @@ pub async fn execute_workflow(state: ServerState, execution_id: String) {
                 execution.context = Some(pending.context.clone());
                 // Set current_state to the paused state's next_state so we resume correctly
                 execution.current_state = Some(pending.next_state.clone());
-                println!("[server] execution {} paused at {}", execution_id, pending.next_state);
+                tracing::info!(execution_id = %execution_id, state = %pending.next_state, "execution paused");
                 state.broadcast_event(ExecutionEvent {
                     event_type: "execution_paused".to_string(),
                     execution_id: execution_id.clone(),
@@ -98,7 +104,7 @@ pub async fn execute_workflow(state: ServerState, execution_id: String) {
                 execution.status = ExecutionStatus::Failed;
                 execution.error = Some(e.to_string());
                 execution.completed_at = Some(now);
-                println!("[server] execution {} failed: {}", execution_id, e);
+                tracing::error!(execution_id = %execution_id, error = %e, "execution failed");
                 state.broadcast_event(ExecutionEvent {
                     event_type: "execution_failed".to_string(),
                     execution_id: execution_id.clone(),

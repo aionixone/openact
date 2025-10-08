@@ -19,12 +19,13 @@ impl TaskHandler for EnsureFreshTokenHandler {
             .get("connection_ref")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("connection_ref required"))?;
+        let auth_ref = crate::actions::connection::normalize_auth_ref(cref);
         let token_url = ctx.get("tokenUrl").and_then(|v| v.as_str());
         let client_id = ctx.get("clientId").and_then(|v| v.as_str());
         let client_secret = ctx.get("clientSecret").and_then(|v| v.as_str());
         let skew = ctx.get("skewSeconds").and_then(|v| v.as_i64()).unwrap_or(120);
 
-        let mut conn = futures::executor::block_on(self.store.get(cref))?.unwrap_or_default();
+        let mut conn = futures::executor::block_on(self.store.get(&auth_ref))?.unwrap_or_default();
 
         // decide if needs refresh
         let now = Utc::now();
@@ -61,7 +62,7 @@ impl TaskHandler for EnsureFreshTokenHandler {
             if let Some(ex) = out.get("expires_in").and_then(|v| v.as_i64()) {
                 conn.expires_at = Some(now + Duration::seconds(ex));
             }
-            futures::executor::block_on(self.store.put(cref, &conn))?;
+            futures::executor::block_on(self.store.put(&auth_ref, &conn))?;
         }
 
         Ok(serde_json::to_value(conn)?)

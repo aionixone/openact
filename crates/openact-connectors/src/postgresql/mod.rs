@@ -1,6 +1,6 @@
 use crate::{ConnectorError, ConnectorResult};
 use actions::{ActionParameter, PostgresAction};
-use serde::{Deserialize, Serialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Map, Value};
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow, PgTypeInfo};
 use sqlx::{Column, Pool, Postgres, Row, TypeInfo, ValueRef};
@@ -10,14 +10,16 @@ use std::time::Duration;
 use url::form_urlencoded::Serializer;
 
 pub mod actions;
-pub mod validator;
 pub mod factory;
+pub mod validator;
 
 pub use factory::PostgresFactory;
 
 /// Connection configuration for PostgreSQL connectors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostgresConnection {
+    #[serde(default = "PostgresConnection::current_version")]
+    pub config_version: u16,
     pub host: String,
     pub port: u16,
     pub database: String,
@@ -56,6 +58,10 @@ where
 }
 
 impl PostgresConnection {
+    pub const fn current_version() -> u16 {
+        1
+    }
+
     /// Create a connection pool from this configuration.
     pub async fn create_pool(&self) -> ConnectorResult<Pool<Postgres>> {
         let connection_url = self.build_connection_url()?;
@@ -85,18 +91,12 @@ impl PostgresConnection {
         }
 
         let mut params = self.query_params.clone();
-        let application_name = self
-            .application_name
-            .clone()
-            .unwrap_or_else(|| "openact".to_string());
-        params
-            .entry("application_name".to_string())
-            .or_insert(application_name);
+        let application_name =
+            self.application_name.clone().unwrap_or_else(|| "openact".to_string());
+        params.entry("application_name".to_string()).or_insert(application_name);
 
         if let Some(ssl_mode) = &self.ssl_mode {
-            params
-                .entry("sslmode".to_string())
-                .or_insert(ssl_mode.clone());
+            params.entry("sslmode".to_string()).or_insert(ssl_mode.clone());
         }
 
         let user = urlencoding::encode(&self.user);
@@ -106,10 +106,8 @@ impl PostgresConnection {
             user.into_owned()
         };
 
-        let mut connection = format!(
-            "postgres://{}@{}:{}/{}",
-            credentials, self.host, self.port, self.database
-        );
+        let mut connection =
+            format!("postgres://{}@{}:{}/{}", credentials, self.host, self.port, self.database);
 
         if !params.is_empty() {
             let mut serializer = Serializer::new(String::new());
@@ -133,15 +131,11 @@ pub struct PostgresExecutor {
 impl PostgresExecutor {
     pub async fn from_connection(connection: &PostgresConnection) -> ConnectorResult<Self> {
         let pool = connection.create_pool().await?;
-        Ok(Self {
-            pool: Arc::new(pool),
-        })
+        Ok(Self { pool: Arc::new(pool) })
     }
 
     pub fn from_pool(pool: Pool<Postgres>) -> Self {
-        Self {
-            pool: Arc::new(pool),
-        }
+        Self { pool: Arc::new(pool) }
     }
 
     pub async fn health_check(&self) -> ConnectorResult<()> {
@@ -158,9 +152,7 @@ impl PostgresExecutor {
             let rows = self.fetch_rows(&action.statement, &args, action).await?;
             Ok(Value::Array(rows))
         } else {
-            let affected = self
-                .execute_command(&action.statement, &args, action)
-                .await?;
+            let affected = self.execute_command(&action.statement, &args, action).await?;
             Ok(json!({ "rows_affected": affected }))
         }
     }
@@ -297,9 +289,7 @@ fn bind_single_argument<'q>(
             } else if let Some(v) = num.as_f64() {
                 query = query.bind(v);
             } else {
-                return Err(ConnectorError::Validation(
-                    "Unsupported numeric value".to_string(),
-                ));
+                return Err(ConnectorError::Validation("Unsupported numeric value".to_string()));
             }
         }
         ("number", other) => {
@@ -349,9 +339,7 @@ fn bind_single_argument<'q>(
             } else if let Some(v) = num.as_f64() {
                 query = query.bind(v);
             } else {
-                return Err(ConnectorError::Validation(
-                    "Unsupported numeric value".to_string(),
-                ));
+                return Err(ConnectorError::Validation("Unsupported numeric value".to_string()));
             }
         }
         (_, Value::String(text)) => {
@@ -471,6 +459,7 @@ mod tests {
     #[test]
     fn test_build_connection_url() {
         let mut conn = PostgresConnection {
+            config_version: PostgresConnection::current_version(),
             host: "localhost".to_string(),
             port: 5432,
             database: "demo".to_string(),
@@ -483,8 +472,7 @@ mod tests {
             max_connections: None,
         };
 
-        conn.query_params
-            .insert("search_path".to_string(), "public".to_string());
+        conn.query_params.insert("search_path".to_string(), "public".to_string());
 
         let url = conn.build_connection_url().unwrap();
         assert!(url.contains("postgres://postgres:s3cret@localhost:5432/demo"));

@@ -1,13 +1,13 @@
 //! PostgreSQL connector factory implementation
 
+use crate::postgresql::{actions::PostgresAction, PostgresConnection, PostgresExecutor};
+use async_trait::async_trait;
+use openact_core::{types::ConnectorMetadata, ActionRecord, ConnectionRecord, ConnectorKind, Trn};
 use openact_registry::{
     error::{RegistryError, RegistryResult},
     factory::{Action, ActionFactory, AsAny, Connection, ConnectionFactory},
-    ConnectorRegistry, ConnectorRegistrar,
+    ConnectorRegistrar, ConnectorRegistry,
 };
-use async_trait::async_trait;
-use crate::postgresql::{PostgresConnection, PostgresExecutor, actions::PostgresAction};
-use openact_core::{types::ConnectorMetadata, ActionRecord, ConnectionRecord, ConnectorKind, Trn};
 use serde_json::Value as JsonValue;
 use std::{collections::HashMap, sync::Arc};
 
@@ -72,10 +72,10 @@ impl ConnectionFactory for PostgresFactory {
     async fn create_connection(
         &self,
         record: &ConnectionRecord,
-    ) -> RegistryResult<Box<dyn Connection>> {
+    ) -> RegistryResult<Arc<dyn Connection>> {
         // Parse connection config into PostgresConnection
-        let postgres_connection: PostgresConnection = serde_json::from_value(record.config_json.clone())
-            .map_err(|e| {
+        let postgres_connection: PostgresConnection =
+            serde_json::from_value(record.config_json.clone()).map_err(|e| {
                 RegistryError::ConnectionCreationFailed(format!(
                     "Invalid PostgreSQL connection config: {}",
                     e
@@ -88,7 +88,7 @@ impl ConnectionFactory for PostgresFactory {
             inner: postgres_connection,
         };
 
-        Ok(Box::new(connection))
+        Ok(Arc::new(connection))
     }
 }
 
@@ -106,21 +106,25 @@ impl ActionFactory for PostgresFactory {
     async fn create_action(
         &self,
         action_record: &ActionRecord,
-        connection: Box<dyn Connection>,
+        connection: Arc<dyn Connection>,
     ) -> RegistryResult<Box<dyn Action>> {
         // Downcast connection to PostgresConnectionWrapper
-        let postgres_connection = connection
-            .as_ref()
-            .as_any()
-            .downcast_ref::<PostgresConnectionWrapper>()
-            .ok_or_else(|| {
-                RegistryError::ActionCreationFailed("Connection is not PostgreSQL connection".to_string())
-            })?;
+        let postgres_connection =
+            connection.as_ref().as_any().downcast_ref::<PostgresConnectionWrapper>().ok_or_else(
+                || {
+                    RegistryError::ActionCreationFailed(
+                        "Connection is not PostgreSQL connection".to_string(),
+                    )
+                },
+            )?;
 
         // Parse action config into PostgresAction
-        let postgres_action: PostgresAction = serde_json::from_value(action_record.config_json.clone())
-            .map_err(|e| {
-                RegistryError::ActionCreationFailed(format!("Invalid PostgreSQL action config: {}", e))
+        let postgres_action: PostgresAction =
+            serde_json::from_value(action_record.config_json.clone()).map_err(|e| {
+                RegistryError::ActionCreationFailed(format!(
+                    "Invalid PostgreSQL action config: {}",
+                    e
+                ))
             })?;
 
         let action = PostgresActionWrapper {
@@ -167,27 +171,15 @@ impl Connection for PostgresConnectionWrapper {
 
     fn metadata(&self) -> HashMap<String, JsonValue> {
         let mut metadata = HashMap::new();
-        metadata.insert(
-            "host".to_string(),
-            JsonValue::String(self.inner.host.clone()),
-        );
+        metadata.insert("host".to_string(), JsonValue::String(self.inner.host.clone()));
         metadata.insert(
             "port".to_string(),
             JsonValue::Number(serde_json::Number::from(self.inner.port)),
         );
-        metadata.insert(
-            "database".to_string(),
-            JsonValue::String(self.inner.database.clone()),
-        );
-        metadata.insert(
-            "user".to_string(),
-            JsonValue::String(self.inner.user.clone()),
-        );
+        metadata.insert("database".to_string(), JsonValue::String(self.inner.database.clone()));
+        metadata.insert("user".to_string(), JsonValue::String(self.inner.user.clone()));
         if let Some(ref ssl_mode) = self.inner.ssl_mode {
-            metadata.insert(
-                "ssl_mode".to_string(),
-                JsonValue::String(ssl_mode.clone()),
-            );
+            metadata.insert("ssl_mode".to_string(), JsonValue::String(ssl_mode.clone()));
         }
         metadata
     }
@@ -219,25 +211,21 @@ impl Action for PostgresActionWrapper {
 
     async fn execute(&self, input: JsonValue) -> RegistryResult<JsonValue> {
         // Create executor from connection
-        let executor = PostgresExecutor::from_connection(&self.connection)
-            .await
-            .map_err(|e| RegistryError::ExecutionFailed(format!("Failed to create PostgreSQL executor: {}", e)))?;
+        let executor = PostgresExecutor::from_connection(&self.connection).await.map_err(|e| {
+            RegistryError::ExecutionFailed(format!("Failed to create PostgreSQL executor: {}", e))
+        })?;
 
         // Execute the PostgreSQL action
-        let result = executor
-            .execute(&self.action, input)
-            .await
-            .map_err(|e| RegistryError::ExecutionFailed(format!("PostgreSQL execution failed: {}", e)))?;
+        let result = executor.execute(&self.action, input).await.map_err(|e| {
+            RegistryError::ExecutionFailed(format!("PostgreSQL execution failed: {}", e))
+        })?;
 
         Ok(result)
     }
 
     fn metadata(&self) -> HashMap<String, JsonValue> {
         let mut metadata = HashMap::new();
-        metadata.insert(
-            "statement".to_string(),
-            JsonValue::String(self.action.statement.clone()),
-        );
+        metadata.insert("statement".to_string(), JsonValue::String(self.action.statement.clone()));
         if !self.action.parameters.is_empty() {
             metadata.insert(
                 "parameters".to_string(),
@@ -252,33 +240,43 @@ impl Action for PostgresActionWrapper {
         match input {
             JsonValue::Null => {
                 if !self.action.parameters.is_empty() {
-                    return Err(RegistryError::InvalidInput(
-                        format!("PostgreSQL action expects {} parameters but received null", self.action.parameters.len())
-                    ));
+                    return Err(RegistryError::InvalidInput(format!(
+                        "PostgreSQL action expects {} parameters but received null",
+                        self.action.parameters.len()
+                    )));
                 }
             }
             JsonValue::Array(values) => {
-                if !self.action.parameters.is_empty() && values.len() != self.action.parameters.len() {
-                    return Err(RegistryError::InvalidInput(
-                        format!("PostgreSQL action expects {} parameters but received {}", self.action.parameters.len(), values.len())
-                    ));
+                if !self.action.parameters.is_empty()
+                    && values.len() != self.action.parameters.len()
+                {
+                    return Err(RegistryError::InvalidInput(format!(
+                        "PostgreSQL action expects {} parameters but received {}",
+                        self.action.parameters.len(),
+                        values.len()
+                    )));
                 }
             }
             JsonValue::Object(map) => {
                 // Check if it's an "args" wrapper
                 if let Some(JsonValue::Array(values)) = map.get("args") {
-                    if !self.action.parameters.is_empty() && values.len() != self.action.parameters.len() {
-                        return Err(RegistryError::InvalidInput(
-                            format!("PostgreSQL action expects {} parameters but received {}", self.action.parameters.len(), values.len())
-                        ));
+                    if !self.action.parameters.is_empty()
+                        && values.len() != self.action.parameters.len()
+                    {
+                        return Err(RegistryError::InvalidInput(format!(
+                            "PostgreSQL action expects {} parameters but received {}",
+                            self.action.parameters.len(),
+                            values.len()
+                        )));
                     }
                 } else {
                     // Named parameters - check all required parameters are present
                     for param in &self.action.parameters {
                         if !map.contains_key(&param.name) {
-                            return Err(RegistryError::InvalidInput(
-                                format!("Missing required parameter: {}", param.name)
-                            ));
+                            return Err(RegistryError::InvalidInput(format!(
+                                "Missing required parameter: {}",
+                                param.name
+                            )));
                         }
                     }
                 }
@@ -316,7 +314,10 @@ impl Action for PostgresActionWrapper {
 
     fn mcp_output_schema(&self, _record: &openact_core::ActionRecord) -> Option<JsonValue> {
         let stmt = self.action.statement.to_lowercase();
-        let returns_rows = stmt.starts_with("select") || stmt.starts_with("with") || stmt.starts_with("show") || stmt.contains(" returning ");
+        let returns_rows = stmt.starts_with("select")
+            || stmt.starts_with("with")
+            || stmt.starts_with("show")
+            || stmt.contains(" returning ");
         if returns_rows {
             Some(serde_json::json!({
                 "type": "object",
@@ -342,11 +343,12 @@ impl Action for PostgresActionWrapper {
     fn mcp_annotations(&self, _record: &openact_core::ActionRecord) -> Option<JsonValue> {
         use serde_json::json;
         let stmt = self.action.statement.trim_start().to_lowercase();
-        let read_only = if stmt.starts_with("select") || stmt.starts_with("with") || stmt.starts_with("show") {
-            Some(true)
-        } else {
-            Some(false)
-        };
+        let read_only =
+            if stmt.starts_with("select") || stmt.starts_with("with") || stmt.starts_with("show") {
+                Some(true)
+            } else {
+                Some(false)
+            };
         let destructive = if stmt.starts_with("insert")
             || stmt.starts_with("update")
             || stmt.starts_with("delete")
@@ -358,20 +360,27 @@ impl Action for PostgresActionWrapper {
         } else {
             Some(false)
         };
-        let idempotent = if stmt.starts_with("select") || stmt.starts_with("with") || stmt.starts_with("show") {
-            Some(true)
-        } else {
-            None
-        };
+        let idempotent =
+            if stmt.starts_with("select") || stmt.starts_with("with") || stmt.starts_with("show") {
+                Some(true)
+            } else {
+                None
+            };
         let title = {
             let first = stmt.split_whitespace().next().unwrap_or("").to_uppercase();
             format!("{} statement", first)
         };
         let mut obj = serde_json::Map::new();
         obj.insert("title".to_string(), json!(title));
-        if let Some(v) = read_only { obj.insert("readOnlyHint".to_string(), json!(v)); }
-        if let Some(v) = destructive { obj.insert("destructiveHint".to_string(), json!(v)); }
-        if let Some(v) = idempotent { obj.insert("idempotentHint".to_string(), json!(v)); }
+        if let Some(v) = read_only {
+            obj.insert("readOnlyHint".to_string(), json!(v));
+        }
+        if let Some(v) = destructive {
+            obj.insert("destructiveHint".to_string(), json!(v));
+        }
+        if let Some(v) = idempotent {
+            obj.insert("idempotentHint".to_string(), json!(v));
+        }
         Some(JsonValue::Object(obj))
     }
 }
@@ -380,15 +389,13 @@ impl Action for PostgresActionWrapper {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use openact_registry::RegistryError;
     use serde_json::json;
 
     #[tokio::test]
     async fn test_postgres_factory_creation() {
         let factory = PostgresFactory::new();
-        assert_eq!(
-            ConnectionFactory::connector_kind(&factory),
-            ConnectorKind::new("postgres")
-        );
+        assert_eq!(ConnectionFactory::connector_kind(&factory), ConnectorKind::new("postgres"));
     }
 
     #[tokio::test]
@@ -420,5 +427,63 @@ mod tests {
         assert_eq!(metadata["host"], json!("localhost"));
         assert_eq!(metadata["port"], json!(5432));
         assert_eq!(metadata["database"], json!("test"));
+    }
+
+    #[tokio::test]
+    async fn test_postgres_action_creation_and_validation() {
+        let factory = PostgresFactory::new();
+        let now = Utc::now();
+
+        let connection_record = ConnectionRecord {
+            trn: Trn::new("trn:openact:test:connection/postgresql/test".to_string()),
+            connector: ConnectorKind::new("postgresql"),
+            name: "test".to_string(),
+            config_json: json!({
+                "host": "localhost",
+                "port": 5432,
+                "database": "test",
+                "user": "postgres",
+                "password": "secret"
+            }),
+            created_at: now,
+            updated_at: now,
+            version: 1,
+        };
+        let connection = factory.create_connection(&connection_record).await.unwrap();
+
+        let action_record = ActionRecord {
+            trn: Trn::new("trn:openact:test:action/postgresql/list@v1".to_string()),
+            connector: ConnectorKind::new("postgresql"),
+            name: "list".into(),
+            connection_trn: connection_record.trn.clone(),
+            config_json: json!({
+                "statement": "SELECT * FROM users WHERE id = $1",
+                "parameters": [
+                    {"name": "id", "type": "number"}
+                ]
+            }),
+            mcp_enabled: true,
+            mcp_overrides: None,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+        };
+
+        let action = factory
+            .create_action(&action_record, connection)
+            .await
+            .expect("postgres action should build");
+
+        let err = action
+            .validate_input(&json!(null))
+            .await
+            .expect_err("null input rejected when parameters required");
+        assert!(matches!(err, RegistryError::InvalidInput(_)));
+
+        action.validate_input(&json!([1])).await.expect("positional args accepted");
+
+        let schema = action.mcp_input_schema(&action_record);
+        let required = schema["required"].as_array().expect("required array");
+        assert!(required.contains(&json!("id")));
     }
 }

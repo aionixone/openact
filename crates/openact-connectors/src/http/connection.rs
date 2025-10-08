@@ -70,9 +70,9 @@ pub struct TimeoutConfig {
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            connect_ms: 10_000,  // 10 seconds
-            read_ms: 30_000,     // 30 seconds
-            total_ms: 60_000,    // 60 seconds
+            connect_ms: 10_000, // 10 seconds
+            read_ms: 30_000,    // 30 seconds
+            total_ms: 60_000,   // 60 seconds
         }
     }
 }
@@ -108,10 +108,7 @@ pub struct NetworkConfig {
 
 impl Default for NetworkConfig {
     fn default() -> Self {
-        Self {
-            proxy_url: None,
-            tls: Some(TlsConfig::default()),
-        }
+        Self { proxy_url: None, tls: Some(TlsConfig::default()) }
     }
 }
 
@@ -138,14 +135,8 @@ impl Default for HttpPolicy {
                 "expect".to_string(),
                 "connection".to_string(),
             ],
-            reserved_headers: vec![
-                "authorization".to_string(),
-                "user-agent".to_string(),
-            ],
-            multi_value_append_headers: vec![
-                "accept".to_string(),
-                "accept-encoding".to_string(),
-            ],
+            reserved_headers: vec!["authorization".to_string(), "user-agent".to_string()],
+            multi_value_append_headers: vec!["accept".to_string(), "accept-encoding".to_string()],
             drop_forbidden_headers: true,
             normalize_header_names: true,
             max_header_value_length: 8192,
@@ -218,43 +209,49 @@ pub struct InvocationHttpParameters {
 /// Complete HTTP connection configuration (maps to connection.config_json)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpConnection {
+    #[serde(default = "HttpConnection::current_version")]
+    pub config_version: u16,
     /// Base URL for the API (new field for cleaner config)
     pub base_url: String,
-    
+
     /// Authorization configuration
     #[serde(default = "default_authorization_type")]
     pub authorization: AuthorizationType,
-    
+
     /// Authentication parameters (optional for None authorization type)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_parameters: Option<AuthParameters>,
-    
+
     /// Default HTTP parameters
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invocation_http_parameters: Option<InvocationHttpParameters>,
-    
+
     /// Network configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network_config: Option<NetworkConfig>,
-    
+
     /// Timeout configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_config: Option<TimeoutConfig>,
-    
+
     /// HTTP policy configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http_policy: Option<HttpPolicy>,
-    
+
     /// Retry policy configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_policy: Option<RetryPolicy>,
-    
+
     /// Reference to auth_connections table for OAuth tokens
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_ref: Option<String>,
 }
 
 impl HttpConnection {
+    pub const fn current_version() -> u16 {
+        1
+    }
+
     /// Create a new HTTP connection with defaults
     pub fn new(base_url: String, authorization: AuthorizationType) -> Self {
         let auth_params = if matches!(authorization, AuthorizationType::None) {
@@ -266,8 +263,9 @@ impl HttpConnection {
                 oauth_parameters: None,
             })
         };
-        
+
         Self {
+            config_version: Self::current_version(),
             base_url,
             authorization,
             auth_parameters: auth_params,

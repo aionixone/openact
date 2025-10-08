@@ -1,6 +1,10 @@
 //! Tenant extraction middleware
 
-use axum::{http::{Request, StatusCode}, response::{Response, IntoResponse}, Json};
+use axum::{
+    http::{Request, StatusCode},
+    response::{IntoResponse, Response},
+    Json,
+};
 use serde_json::json;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
@@ -42,21 +46,18 @@ where
     fn call(&mut self, mut req: Request<B>) -> Self::Future {
         // Extract tenant from header or query param
         let header_tenant = req.headers().get("x-tenant").and_then(|v| v.to_str().ok());
-        let query_tenant = req
-            .uri()
-            .query()
-            .and_then(|q| {
-                // naive parser: split by '&' then '='
-                for pair in q.split('&') {
-                    let mut it = pair.splitn(2, '=');
-                    let k = it.next().unwrap_or("");
-                    let v = it.next().unwrap_or("");
-                    if k == "tenant" || k == "x-tenant" {
-                        return Some(v.to_string());
-                    }
+        let query_tenant = req.uri().query().and_then(|q| {
+            // naive parser: split by '&' then '='
+            for pair in q.split('&') {
+                let mut it = pair.splitn(2, '=');
+                let k = it.next().unwrap_or("");
+                let v = it.next().unwrap_or("");
+                if k == "tenant" || k == "x-tenant" {
+                    return Some(v.to_string());
                 }
-                None
-            });
+            }
+            None
+        });
 
         let require = std::env::var("OPENACT_REQUIRE_TENANT")
             .map(|v| {
@@ -80,7 +81,9 @@ where
                 error: crate::error::ErrorDetails {
                     code: "INVALID_INPUT".into(),
                     message: "Missing tenant (provide X-Tenant header)".into(),
-                    details: Some(json!({"hint": "Set X-Tenant header or disable OPENACT_REQUIRE_TENANT"})),
+                    details: Some(
+                        json!({"hint": "Set X-Tenant header or disable OPENACT_REQUIRE_TENANT"}),
+                    ),
                 },
                 metadata: crate::dto::ResponseMeta {
                     request_id,

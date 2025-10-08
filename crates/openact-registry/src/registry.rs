@@ -2,7 +2,7 @@
 
 use crate::{
     error::{RegistryError, RegistryResult},
-    factory::{Action, ActionFactory, AsAny, Connection, ConnectionFactory},
+    factory::{Action, ActionFactory, Connection, ConnectionFactory},
 };
 use openact_core::{
     store::{ActionRepository, ConnectionStore},
@@ -12,8 +12,8 @@ use openact_core::{
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 
 /// Execution context containing runtime information
 #[derive(Debug, Clone)]
@@ -224,8 +224,7 @@ impl ConnectorRegistry {
             .ok_or_else(|| RegistryError::ConnectionNotFound(connection_trn.clone()))?;
 
         // Create connection instance
-        let connection = self.create_connection(&connection_record).await?;
-        let connection_arc: Arc<dyn Connection> = Arc::from(connection);
+        let connection_arc = self.create_connection(&connection_record).await?;
 
         // Cache the connection
         {
@@ -240,7 +239,7 @@ impl ConnectorRegistry {
     async fn create_connection(
         &self,
         record: &ConnectionRecord,
-    ) -> RegistryResult<Box<dyn Connection>> {
+    ) -> RegistryResult<Arc<dyn Connection>> {
         let factory = self
             .connection_factories
             .get(&record.connector)
@@ -259,12 +258,7 @@ impl ConnectorRegistry {
             RegistryError::ConnectorNotRegistered(action_record.connector.clone())
         })?;
 
-        // Convert Arc<dyn Connection> to Box<dyn Connection>
-        // This requires cloning the connection data, but factories expect owned connections
-        // TODO: Consider redesigning factories to accept Arc<dyn Connection> directly
-        let connection_box = Box::new(ConnectionWrapper(connection));
-
-        factory.create_action(action_record, connection_box).await
+        factory.create_action(action_record, connection).await
     }
 
     /// Health check for a specific connection
@@ -421,9 +415,13 @@ impl ConnectorRegistry {
 
     async fn try_get_cached_annotations(&self, key: &ActionCacheKey) -> Option<Option<JsonValue>> {
         let cache = self.mcp_derive_cache.read().await;
-        cache
-            .get(key)
-            .and_then(|e| if Self::cache_entry_fresh(e) { Some(e.annotations.clone()) } else { None })
+        cache.get(key).and_then(|e| {
+            if Self::cache_entry_fresh(e) {
+                Some(e.annotations.clone())
+            } else {
+                None
+            }
+        })
     }
 
     async fn cache_annotations(&self, key: &ActionCacheKey, annotations: Option<JsonValue>) {
@@ -445,40 +443,142 @@ impl ConnectorRegistry {
     }
 }
 
-/// Wrapper to convert Arc<dyn Connection> to Box<dyn Connection>
-/// This is a temporary solution until we redesign the factory interfaces
-struct ConnectionWrapper(Arc<dyn Connection>);
-
-impl AsAny for ConnectionWrapper {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self.0.as_any()
-    }
-}
-
-#[async_trait::async_trait]
-impl Connection for ConnectionWrapper {
-    fn trn(&self) -> &Trn {
-        self.0.trn()
-    }
-
-    fn connector_kind(&self) -> &ConnectorKind {
-        self.0.connector_kind()
-    }
-
-    async fn health_check(&self) -> RegistryResult<bool> {
-        self.0.health_check().await
-    }
-
-    fn metadata(&self) -> HashMap<String, JsonValue> {
-        self.0.metadata()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::factory::{Action, ActionFactory, AsAny, Connection, ConnectionFactory};
+    use chrono::Utc;
     use openact_store::memory::{MemoryActionRepository, MemoryConnectionStore};
     use serde_json::json;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct CountingFactory {
+        creations: Arc<AtomicUsize>,
+    }
+
+    struct CountingConnection {
+        trn: Trn,
+        connector: ConnectorKind,
+    }
+
+    struct CountingAction {
+        trn: Trn,
+        connector: ConnectorKind,
+    }
+
+    impl AsAny for CountingConnection {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Connection for CountingConnection {
+        fn trn(&self) -> &Trn {
+            &self.trn
+        }
+
+        fn connector_kind(&self) -> &ConnectorKind {
+            &self.connector
+        }
+
+        async fn health_check(&self) -> RegistryResult<bool> {
+            Ok(true)
+        }
+
+        fn metadata(&self) -> HashMap<String, JsonValue> {
+            HashMap::new()
+        }
+    }
+
+    impl AsAny for CountingAction {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Action for CountingAction {
+        fn trn(&self) -> &Trn {
+            &self.trn
+        }
+
+        fn connector_kind(&self) -> &ConnectorKind {
+            &self.connector
+        }
+
+        async fn execute(&self, _input: JsonValue) -> RegistryResult<JsonValue> {
+            Ok(json!({"ok": true}))
+        }
+
+        fn metadata(&self) -> HashMap<String, JsonValue> {
+            HashMap::new()
+        }
+
+        fn mcp_input_schema(&self, _record: &ActionRecord) -> JsonValue {
+            json!({ "type": "object" })
+        }
+
+        fn mcp_output_schema(&self, _record: &ActionRecord) -> Option<JsonValue> {
+            Some(json!({ "type": "object" }))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ConnectionFactory for CountingFactory {
+        fn connector_kind(&self) -> ConnectorKind {
+            ConnectorKind::new("test")
+        }
+
+        fn metadata(&self) -> ConnectorMetadata {
+            ConnectorMetadata {
+                kind: ConnectorKind::new("test"),
+                display_name: "Test".into(),
+                description: "Counting connector".into(),
+                category: "test".into(),
+                supported_operations: vec![],
+                supports_auth: false,
+                example_config: None,
+                version: "1.0".into(),
+            }
+        }
+
+        async fn create_connection(
+            &self,
+            record: &ConnectionRecord,
+        ) -> RegistryResult<Arc<dyn Connection>> {
+            Ok(Arc::new(CountingConnection {
+                trn: record.trn.clone(),
+                connector: record.connector.clone(),
+            }))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ActionFactory for CountingFactory {
+        fn connector_kind(&self) -> ConnectorKind {
+            ConnectorKind::new("test")
+        }
+
+        fn metadata(&self) -> ConnectorMetadata {
+            <Self as ConnectionFactory>::metadata(self)
+        }
+
+        async fn create_action(
+            &self,
+            action_record: &ActionRecord,
+            _connection: Arc<dyn Connection>,
+        ) -> RegistryResult<Box<dyn Action>> {
+            self.creations.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(CountingAction {
+                trn: action_record.trn.clone(),
+                connector: action_record.connector.clone(),
+            }))
+        }
+    }
 
     #[tokio::test]
     async fn test_registry_creation() {
@@ -492,5 +592,65 @@ mod tests {
         let stats = registry.stats().await;
         assert_eq!(stats["registered_connectors"], json!(0));
         assert_eq!(stats["cached_connections"], json!(0));
+    }
+
+    #[tokio::test]
+    async fn derive_mcp_schemas_uses_cache() {
+        let connection_store = MemoryConnectionStore::new();
+        let action_repository = MemoryActionRepository::new();
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let factory = Arc::new(CountingFactory { creations: counter.clone() });
+
+        let mut registry =
+            ConnectorRegistry::new(connection_store.clone(), action_repository.clone());
+        registry.register_connection_factory(factory.clone());
+        registry.register_action_factory(factory);
+
+        let now = Utc::now();
+        let connector = ConnectorKind::new("test");
+        let connection_trn = Trn::new("trn:openact:tenant:connection/test/conn@v1");
+        let action_trn = Trn::new("trn:openact:tenant:action/test/run@v1");
+
+        ConnectionStore::upsert(
+            &connection_store,
+            &ConnectionRecord {
+                trn: connection_trn.clone(),
+                connector: connector.clone(),
+                name: "conn".into(),
+                config_json: json!({}),
+                created_at: now,
+                updated_at: now,
+                version: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        ActionRepository::upsert(
+            &action_repository,
+            &ActionRecord {
+                trn: action_trn.clone(),
+                connector: connector.clone(),
+                name: "run".into(),
+                connection_trn: connection_trn.clone(),
+                config_json: json!({}),
+                mcp_enabled: true,
+                mcp_overrides: None,
+                created_at: now,
+                updated_at: now,
+                version: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        let action_record =
+            ActionRepository::get(&action_repository, &action_trn).await.unwrap().unwrap();
+
+        registry.derive_mcp_schemas(&action_record).await.unwrap();
+        registry.derive_mcp_schemas(&action_record).await.unwrap();
+
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 }

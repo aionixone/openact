@@ -3,25 +3,30 @@ use axum::{
     http::{Request, StatusCode},
     Router,
 };
-use openact_server::{restapi::create_router, AppState};
-use openact_store::SqlStore;
-use serde_json::json;
-use std::sync::Arc;
-use tower::ServiceExt;
 use chrono::Utc;
 use openact_core::{
     store::{ActionRepository, ConnectionStore},
     types::{ActionRecord, ConnectionRecord, ConnectorKind, Trn},
 };
+use openact_server::{restapi::create_router, AppState};
+use openact_store::SqlStore;
+use serde_json::json;
+use std::sync::Arc;
+use tower::ServiceExt;
 
 async fn make_router() -> Router {
     let store = Arc::new(SqlStore::new("sqlite::memory:").await.unwrap());
     let conn_store = store.as_ref().clone();
     let act_store = store.as_ref().clone();
     let registry = openact_registry::ConnectorRegistry::new(conn_store, act_store);
-    let app_state = AppState { store, registry: Arc::new(registry) };
+    let app_state = AppState {
+        store: store.clone(),
+        registry: Arc::new(registry),
+        #[cfg(feature = "authflow")]
+        flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
+    };
     let governance = openact_mcp::GovernanceConfig::new(vec![], vec![], 4, 1);
-    create_router(app_state, governance)
+    create_router().with_state((app_state, governance))
 }
 
 #[tokio::test]
@@ -91,10 +96,16 @@ async fn execute_inline_validation_success() {
     let body_bytes = body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     let warnings = body_json["metadata"]["warnings"].as_array().cloned().unwrap_or_default();
-    assert!(warnings.iter().any(|w| w.as_str().map(|s| s.starts_with("input_schema_digest=sha256:")).unwrap_or(false)));
+    assert!(warnings.iter().any(|w| w
+        .as_str()
+        .map(|s| s.starts_with("input_schema_digest=sha256:"))
+        .unwrap_or(false)));
     assert!(warnings.iter().any(|w| w.as_str() == Some("validated=true")));
     assert_eq!(body_json["metadata"]["tenant"], serde_json::Value::String("acme".into()));
-    assert_eq!(body_json["metadata"]["action_trn"], serde_json::Value::String("trn:openact:acme:action/http/do_it@v1".into()));
+    assert_eq!(
+        body_json["metadata"]["action_trn"],
+        serde_json::Value::String("trn:openact:acme:action/http/do_it@v1".into())
+    );
 }
 
 #[tokio::test]
@@ -194,11 +205,16 @@ async fn make_router_with_gov(allow: Vec<&str>, deny: Vec<&str>, seed: bool) -> 
     let conn_store = store.as_ref().clone();
     let act_store = store.as_ref().clone();
     let registry = openact_registry::ConnectorRegistry::new(conn_store, act_store);
-    let app_state = AppState { store, registry: Arc::new(registry) };
+    let app_state = AppState {
+        store: store.clone(),
+        registry: Arc::new(registry),
+        #[cfg(feature = "authflow")]
+        flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
+    };
     let allow = allow.into_iter().map(|s| s.to_string()).collect();
     let deny = deny.into_iter().map(|s| s.to_string()).collect();
     let governance = openact_mcp::GovernanceConfig::new(allow, deny, 4, 1);
-    create_router(app_state, governance)
+    create_router().with_state((app_state, governance))
 }
 
 #[tokio::test]

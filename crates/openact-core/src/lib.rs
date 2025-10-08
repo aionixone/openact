@@ -1,10 +1,10 @@
 pub mod error;
+pub mod policy;
+pub mod resolve;
 pub mod sanitization;
 pub mod store;
-pub mod types;
-pub mod resolve;
-pub mod policy;
 pub mod stream;
+pub mod types;
 
 // Re-export commonly used types
 pub use error::{CoreError, CoreResult};

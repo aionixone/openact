@@ -13,17 +13,17 @@ use axum::{
     extract::{Extension, Path, Query, State},
     response::Json,
 };
-use openact_core::store::{ActionRepository, ActionListFilter};
-use openact_core::types::{Trn, ToolName, ActionTrn};
+use chrono::{DateTime, Utc};
+use openact_core::store::{ActionListFilter, ActionRepository};
+use openact_core::types::{ActionTrn, ToolName, Trn};
 use openact_core::ConnectorKind;
 use openact_mcp::GovernanceConfig;
 use openact_registry::{ExecutionContext, RegistryError};
+use openact_runtime::{records_from_inline_config, registry_from_records_ext};
 use serde_json::{json, Value};
 use std::convert::TryFrom;
 use std::time::Duration;
 use tokio::time::timeout;
-use openact_runtime::{records_from_inline_config, registry_from_records_ext};
-use chrono::{DateTime, Utc};
 
 /// GET /api/v1/actions
 pub async fn get_actions(
@@ -41,7 +41,9 @@ pub async fn get_actions(
 
     // Helper: parse RFC3339 timestamps to Utc
     fn parse_ts(s: &Option<String>) -> Option<DateTime<Utc>> {
-        s.as_ref().and_then(|v| DateTime::parse_from_rfc3339(v).ok()).map(|dt| dt.with_timezone(&Utc))
+        s.as_ref()
+            .and_then(|v| DateTime::parse_from_rfc3339(v).ok())
+            .map(|dt| dt.with_timezone(&Utc))
     }
 
     // Gather action records according to filters (DB-side pagination + total)
@@ -185,8 +187,14 @@ pub async fn execute_action_stream(
     Extension(tenant): Extension<Tenant>,
     Query(query): Query<std::collections::HashMap<String, String>>, // version & options
     Json(req): Json<ExecuteRequest>,
-) -> Result<axum::response::sse::Sse<impl futures_util::stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>>, (axum::http::StatusCode, Json<crate::error::ErrorResponse>)>
-{
+) -> Result<
+    axum::response::sse::Sse<
+        impl futures_util::stream::Stream<
+            Item = Result<axum::response::sse::Event, std::convert::Infallible>,
+        >,
+    >,
+    (axum::http::StatusCode, Json<crate::error::ErrorResponse>),
+> {
     use axum::response::sse::{Event, KeepAlive, Sse};
     let req_id = request_id.0.clone();
     tracing::info!(request_id=%req_id, tenant=%tenant.as_str(), action=%action, "REST execute_action_stream");
@@ -283,7 +291,8 @@ pub async fn execute_action_stream(
         }
     };
 
-    let sse = Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(10)).text("keep-alive"));
+    let sse = Sse::new(stream)
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(10)).text("keep-alive"));
     Ok(sse)
 }
 
@@ -700,21 +709,21 @@ pub async fn execute_inline(
     let req_id = request_id.0.clone();
     // logging moved after effective tenant resolution
     // Determine effective tenant for metadata (request field overrides header)
-    let effective_tenant = req
-        .tenant
-        .clone()
-        .unwrap_or_else(|| tenant_hdr.as_str().to_string());
+    let effective_tenant = req.tenant.clone().unwrap_or_else(|| tenant_hdr.as_str().to_string());
 
     // Convert inline config to records
-    let (conn_records, action_records) = records_from_inline_config(req.connections.clone(), req.actions.clone())
-        .map_err(|e| ServerError::InvalidInput(e.to_string()))
-        .map_err(|e| e.to_http_response(req_id.clone()))?;
+    let (conn_records, action_records) =
+        records_from_inline_config(req.connections.clone(), req.actions.clone())
+            .map_err(|e| ServerError::InvalidInput(e.to_string()))
+            .map_err(|e| e.to_http_response(req_id.clone()))?;
 
     // Resolve action by name from provided action records
     let action_record = action_records
         .iter()
         .find(|r| r.name == req.action)
-        .ok_or_else(|| ServerError::NotFound(format!("Action '{}' not found in inline config", req.action)))
+        .ok_or_else(|| {
+            ServerError::NotFound(format!("Action '{}' not found in inline config", req.action))
+        })
         .map_err(|e| e.to_http_response(req_id.clone()))?;
 
     // Governance check for tool name
@@ -788,12 +797,12 @@ pub async fn execute_inline(
     let fut = async move {
         let ctx = ExecutionContext::new();
         if dry_run {
-            return Ok::<_, ServerError>(ExecuteResponse { result: json!({"dry_run": true, "input": input}) });
+            return Ok::<_, ServerError>(ExecuteResponse {
+                result: json!({"dry_run": true, "input": input}),
+            });
         }
-        let exec = registry
-            .execute(&action_trn, input, Some(ctx))
-            .await
-            .map_err(map_registry_error)?;
+        let exec =
+            registry.execute(&action_trn, input, Some(ctx)).await.map_err(map_registry_error)?;
         Ok::<_, ServerError>(ExecuteResponse { result: exec.output })
     };
 
@@ -808,8 +817,12 @@ pub async fn execute_inline(
 
     // Build warnings combining schema digest and validation flag
     let mut warnings_vec: Vec<String> = Vec::new();
-    if let Some(d) = schema_digest.clone() { warnings_vec.push(d); }
-    if let Some(vf) = validation_flag { warnings_vec.push(vf); }
+    if let Some(d) = schema_digest.clone() {
+        warnings_vec.push(d);
+    }
+    if let Some(vf) = validation_flag {
+        warnings_vec.push(vf);
+    }
     let warnings = if warnings_vec.is_empty() { None } else { Some(warnings_vec) };
 
     let response = ResponseEnvelope {

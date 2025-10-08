@@ -33,10 +33,7 @@ fn require_string(
             "Field '{}' must be a non-empty string",
             field
         ))),
-        None => Err(ConnectorError::InvalidConfig(format!(
-            "Missing required field '{}'",
-            field
-        ))),
+        None => Err(ConnectorError::InvalidConfig(format!("Missing required field '{}'", field))),
     }
 }
 
@@ -46,13 +43,9 @@ fn require_integer(
 ) -> Result<i64, ConnectorError> {
     match map.get(field) {
         Some(JsonValue::Number(num)) if num.as_i64().is_some() => Ok(num.as_i64().unwrap()),
-        Some(_) => Err(ConnectorError::InvalidConfig(format!(
-            "Field '{}' must be a valid integer",
-            field
-        ))),
-        None => Err(ConnectorError::InvalidConfig(format!(
-            "Missing required field '{}'",
-            field
-        ))),
+        Some(_) => {
+            Err(ConnectorError::InvalidConfig(format!("Field '{}' must be a valid integer", field)))
+        }
+        None => Err(ConnectorError::InvalidConfig(format!("Missing required field '{}'", field))),
     }
 }

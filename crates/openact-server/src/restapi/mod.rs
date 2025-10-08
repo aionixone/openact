@@ -16,18 +16,20 @@ pub async fn serve(
     governance: GovernanceConfig,
     addr: &str,
 ) -> ServerResult<()> {
-    let app = create_router(app_state, governance);
+    let state = (app_state, governance);
+    let app = create_router().with_state(state);
 
     let addr: SocketAddr =
         addr.parse().map_err(|e| ServerError::InvalidInput(format!("Invalid address: {}", e)))?;
 
     tracing::info!("Starting REST API server on {}", addr);
 
+    let make_svc = app.into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(
         tokio::net::TcpListener::bind(addr)
             .await
             .map_err(|e| ServerError::Internal(format!("Failed to bind: {}", e)))?,
-        app,
+        make_svc,
     )
     .await
     .map_err(|e| ServerError::Internal(format!("Server error: {}", e)))?;

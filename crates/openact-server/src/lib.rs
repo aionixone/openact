@@ -5,6 +5,8 @@
 pub mod app_state;
 pub mod dto;
 pub mod error;
+#[cfg(feature = "authflow")]
+pub mod flow_runner;
 pub mod mcp;
 pub mod middleware;
 pub mod restapi;

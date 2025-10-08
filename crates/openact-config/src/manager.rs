@@ -79,7 +79,13 @@ pub struct ImportOptions {
 
 impl Default for ImportOptions {
     fn default() -> Self {
-        Self { dry_run: false, force: false, validate: true, namespace: None, versioning: VersioningStrategy::AlwaysBump }
+        Self {
+            dry_run: false,
+            force: false,
+            validate: true,
+            namespace: None,
+            versioning: VersioningStrategy::AlwaysBump,
+        }
     }
 }
 
@@ -354,24 +360,66 @@ impl ConfigManager {
                 let (planned_trn, skip_import) = match options.versioning.clone() {
                     VersioningStrategy::AlwaysBump => {
                         let next_ver = latest.map(|(_, v)| v + 1).unwrap_or(1);
-                        (self.build_connection_trn_with_version(&connector_kind, &resource_name, next_ver), false)
+                        (
+                            self.build_connection_trn_with_version(
+                                &connector_kind,
+                                &resource_name,
+                                next_ver,
+                            ),
+                            false,
+                        )
                     }
                     VersioningStrategy::ReuseIfUnchanged => {
                         if let Some((rec, v)) = latest {
                             if rec.config_json == connection_config.config {
-                                (self.build_connection_trn_with_version(&connector_kind, &resource_name, v), true)
+                                (
+                                    self.build_connection_trn_with_version(
+                                        &connector_kind,
+                                        &resource_name,
+                                        v,
+                                    ),
+                                    true,
+                                )
                             } else {
-                                (self.build_connection_trn_with_version(&connector_kind, &resource_name, v + 1), false)
+                                (
+                                    self.build_connection_trn_with_version(
+                                        &connector_kind,
+                                        &resource_name,
+                                        v + 1,
+                                    ),
+                                    false,
+                                )
                             }
                         } else {
-                            (self.build_connection_trn_with_version(&connector_kind, &resource_name, 1), false)
+                            (
+                                self.build_connection_trn_with_version(
+                                    &connector_kind,
+                                    &resource_name,
+                                    1,
+                                ),
+                                false,
+                            )
                         }
                     }
                     VersioningStrategy::ForceRollbackToLatest => {
                         if let Some((_, v)) = latest {
-                            (self.build_connection_trn_with_version(&connector_kind, &resource_name, v), true)
+                            (
+                                self.build_connection_trn_with_version(
+                                    &connector_kind,
+                                    &resource_name,
+                                    v,
+                                ),
+                                true,
+                            )
                         } else {
-                            (self.build_connection_trn_with_version(&connector_kind, &resource_name, 1), options.dry_run)
+                            (
+                                self.build_connection_trn_with_version(
+                                    &connector_kind,
+                                    &resource_name,
+                                    1,
+                                ),
+                                options.dry_run,
+                            )
                         }
                     }
                 };
@@ -388,7 +436,9 @@ impl ConfigManager {
                     .get(&resource_name)
                     .expect("planned connection TRN must exist")
                     .clone();
-                if skip_connection_import { continue; }
+                if skip_connection_import {
+                    continue;
+                }
 
                 match self
                     .import_connection(
@@ -438,24 +488,66 @@ impl ConfigManager {
                     let (action_trn, skip_action_import) = match options.versioning.clone() {
                         VersioningStrategy::AlwaysBump => {
                             let next_ver = latest.map(|(_, v)| v + 1).unwrap_or(1);
-                            (self.build_action_trn_with_version(&connector_kind, &resource_name, next_ver), false)
+                            (
+                                self.build_action_trn_with_version(
+                                    &connector_kind,
+                                    &resource_name,
+                                    next_ver,
+                                ),
+                                false,
+                            )
                         }
                         VersioningStrategy::ReuseIfUnchanged => {
                             if let Some((rec, v)) = latest {
                                 if rec.config_json == action_config.config {
-                                    (self.build_action_trn_with_version(&connector_kind, &resource_name, v), true)
+                                    (
+                                        self.build_action_trn_with_version(
+                                            &connector_kind,
+                                            &resource_name,
+                                            v,
+                                        ),
+                                        true,
+                                    )
                                 } else {
-                                    (self.build_action_trn_with_version(&connector_kind, &resource_name, v + 1), false)
+                                    (
+                                        self.build_action_trn_with_version(
+                                            &connector_kind,
+                                            &resource_name,
+                                            v + 1,
+                                        ),
+                                        false,
+                                    )
                                 }
                             } else {
-                                (self.build_action_trn_with_version(&connector_kind, &resource_name, 1), false)
+                                (
+                                    self.build_action_trn_with_version(
+                                        &connector_kind,
+                                        &resource_name,
+                                        1,
+                                    ),
+                                    false,
+                                )
                             }
                         }
                         VersioningStrategy::ForceRollbackToLatest => {
                             if let Some((_, v)) = latest {
-                                (self.build_action_trn_with_version(&connector_kind, &resource_name, v), true)
+                                (
+                                    self.build_action_trn_with_version(
+                                        &connector_kind,
+                                        &resource_name,
+                                        v,
+                                    ),
+                                    true,
+                                )
                             } else {
-                                (self.build_action_trn_with_version(&connector_kind, &resource_name, 1), options.dry_run)
+                                (
+                                    self.build_action_trn_with_version(
+                                        &connector_kind,
+                                        &resource_name,
+                                        1,
+                                    ),
+                                    options.dry_run,
+                                )
                             }
                         }
                     };
@@ -473,7 +565,9 @@ impl ConfigManager {
                             ))
                         })?;
 
-                    if skip_action_import { continue; }
+                    if skip_action_import {
+                        continue;
+                    }
 
                     match self
                         .import_action(

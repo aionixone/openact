@@ -28,7 +28,10 @@ mod callback_impl {
     use tokio::sync::oneshot;
     use tokio_util::sync::CancellationToken;
 
-    use crate::{engine::TaskHandler, workflow::{resume_from_pause, start_until_pause}};
+    use crate::{
+        engine::TaskHandler,
+        workflow::{resume_from_pause, start_until_pause},
+    };
     use openact_core::store::RunStore;
     use openact_store;
 
@@ -245,11 +248,19 @@ mod callback_impl {
             let ctx = &pending.context;
 
             // Resolve pointers for display/correlation (explicit, no hidden defaults)
-            let authorize_url = ctx.pointer(authorize_url_ptr).and_then(|v| v.as_str()).unwrap_or("");
-            let state_val = ctx.pointer(state_ptr).and_then(|v| v.as_str()).ok_or_else(|| anyhow!("state not found at {}", state_ptr))?;
+            let authorize_url =
+                ctx.pointer(authorize_url_ptr).and_then(|v| v.as_str()).unwrap_or("");
+            let state_val = ctx
+                .pointer(state_ptr)
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("state not found at {}", state_ptr))?;
 
             println!("🔗 Please visit the following URL in your browser to authorize:");
-            if !authorize_url.is_empty() { println!("   {}", authorize_url); } else { println!("   <no authorize_url; check your flow context>"); }
+            if !authorize_url.is_empty() {
+                println!("   {}", authorize_url);
+            } else {
+                println!("   <no authorize_url; check your flow context>");
+            }
             println!("📡 Waiting for callback at: {}", self.callback_url());
 
             // 2. Wait for callback
@@ -280,7 +291,9 @@ mod callback_impl {
             .await?;
             let final_result = match outcome {
                 crate::engine::RunOutcome::Finished(ctx) => ctx,
-                crate::engine::RunOutcome::Pending(_) => anyhow::bail!("unexpected pending after resume"),
+                crate::engine::RunOutcome::Pending(_) => {
+                    anyhow::bail!("unexpected pending after resume")
+                }
             };
             println!("✅ OAuth2 authentication completed!");
 
@@ -307,7 +320,9 @@ mod callback_impl {
                         // Best-effort: use ConnectionStore trait to fetch and upsert the connection record
                         use openact_core::store::ConnectionStore;
                         use openact_core::types::Trn;
-                        if let Ok(Some(conn_rec)) = ConnectionStore::get(&store, &Trn::new(conn_trn.clone())).await {
+                        if let Ok(Some(conn_rec)) =
+                            ConnectionStore::get(&store, &Trn::new(conn_trn.clone())).await
+                        {
                             // NOTE: Binding auth_ref into connection config requires domain-specific schema.
                             // For now, we simply re-upsert the existing record to keep flow consistent.
                             let _ = ConnectionStore::upsert(&store, &conn_rec).await;

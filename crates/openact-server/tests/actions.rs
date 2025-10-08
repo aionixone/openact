@@ -194,10 +194,15 @@ impl TestContext {
         registry.register_connection_factory(factory.clone());
         registry.register_action_factory(factory);
 
-        let app_state = AppState { store, registry: Arc::new(registry) };
+        let app_state = AppState {
+            store: store.clone(),
+            registry: Arc::new(registry),
+            #[cfg(feature = "authflow")]
+            flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
+        };
         let governance = openact_mcp::GovernanceConfig::new(vec![], vec![], 4, 1);
 
-        let router = create_router(app_state, governance);
+        let router = create_router().with_state((app_state, governance));
 
         Self {
             router,
@@ -300,8 +305,8 @@ impl openact_registry::factory::ConnectionFactory for TestFactory {
     async fn create_connection(
         &self,
         record: &ConnectionRecord,
-    ) -> openact_registry::RegistryResult<Box<dyn openact_registry::factory::Connection>> {
-        Ok(Box::new(TestConnection {
+    ) -> openact_registry::RegistryResult<Arc<dyn openact_registry::factory::Connection>> {
+        Ok(Arc::new(TestConnection {
             trn: record.trn.clone(),
             connector: record.connector.clone(),
             delay: self.delay,
@@ -331,9 +336,10 @@ impl openact_registry::factory::ActionFactory for TestFactory {
     async fn create_action(
         &self,
         action_record: &ActionRecord,
-        connection: Box<dyn openact_registry::factory::Connection>,
+        connection: Arc<dyn openact_registry::factory::Connection>,
     ) -> openact_registry::RegistryResult<Box<dyn openact_registry::factory::Action>> {
         let delay = connection
+            .as_ref()
             .as_any()
             .downcast_ref::<TestConnection>()
             .map(|c| c.delay)

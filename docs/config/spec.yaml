@@ -15,17 +15,43 @@ connections:
     description: "..."     # optional
 
     # Style A (flattened syntax, recommended for authoring)
-    # HTTP example fields (others by connector kind)
-    # base_url: "https://api.example.com"
-    # authorization: "api_key|basic|oauth2|none"
-    # auth_parameters: { ... }
-    # timeout_seconds: 30
+    # connector-specific fields go directly under the connection node and are
+    # normalized to the `config` map.
 
     # Style B (explicit config wrapper) - loader normalizes both styles into config
     # config:
-    #   base_url: "https://api.example.com"
-    #   authorization: "api_key"
-    #   auth_parameters: { ... }
+    #   ... connector specific fields ...
+
+    # Example: HTTP connection (Style A)
+    # kind: http
+    # auth_ref: "trn:openact:default:auth/github/alice"   # reference to AuthFlow-generated credential
+    # base_url: "https://api.example.com"
+    # authorization: "api_key"            # or basic | oauth2 | none
+    # auth_parameters:
+    #   api_key_auth_parameters:
+    #     api_key_name: "X-API-Key"
+    #     api_key_value: "${API_KEY}"
+    # timeout_config:
+    #   connect_ms: 5000
+    #   read_ms: 30000
+    # http_policy:
+    #   follow_redirects: true
+    # retry_policy:
+    #   max_attempts: 3
+
+    # Example: PostgreSQL connection (Style B)
+    # kind: postgres
+    # config:
+    #   host: "${PG_HOST}"
+    #   port: 5432
+    #   database: "analytics"
+    #   user: "analytics"
+    #   password: "${PG_PASSWORD}"
+    #   ssl_mode: "require"
+    #   connect_timeout_seconds: 10
+    #   max_connections: 10
+    #   query_params:
+    #     search_path: "public"
 
 
 # Flat actions catalog (aka tools)
@@ -61,19 +87,30 @@ actions:
 
     # Connector-specific execution config (HTTP/SQL/Redis/...) kept inside config
     config:
-      # http example fields:
-      # method: "GET|POST|PUT|PATCH|DELETE"
+      # HTTP action example
+      # method: "GET"
       # path: "/resource/{id}"
-      # headers: { }
-      # query: { }
-      # body: { } | "raw-string"
-      # timeout_seconds: 30
+      # headers:
+      #   Authorization: ["Bearer {{token}}"]
+      # query_params:
+      #   verbose: ["true"]
+      # body:
+      #   json:
+      #     example: true
+      # timeout_config:
+      #   read_ms: 15000
+      # response_policy:
+      #   success_status: [200, 201]
 
-      # postgres/mysql example:
+      # PostgreSQL action example
       # statement: |
-      #   SELECT * FROM table WHERE id = $1;   # postgres uses $1..$N, mysql uses ?
+      #   SELECT * FROM table WHERE id = $1;
+      # parameters:
+      #   - name: id
+      #     param_type: "number"
+      # result_format: "json"
 
-      # redis example:
+      # Redis action example
       # command: ["GET", "{{key}}"]          # template placeholders map from parameters
 
     # Optional MCP exposure and overrides
@@ -105,14 +142,32 @@ actions:
 # - Names: action keys are globally unique; used as default MCP tool names/aliases and for governance filters.
 #   Use stable, semantic names to avoid alias conflicts when combined with mcp.tool_name.
 
-# HTTP-only merge semantics (comments):
-# - Precedence (low → high): connection.config < action.config < call input
-# - Shallow-merge maps: headers, query, cookies (one level). Higher layer overwrites keys in lower layer.
+# HTTP connector specifics:
+# - Merge precedence (low → high): connection.config < action.config < call input
+# - Shallow-merge maps: headers, query_params, cookies (one level). Higher layer overwrites lower layer keys.
 #   Deletion: set key: null at higher layer to remove it from the merged result.
-# - Whole-object replace: body, authorization/auth_parameters, timeout/retry/policy.
-# - Base URL & routing: base_url only from connection; method/path only from action (and call input path vars).
+# - Whole-object replace: body/auth_parameters/timeout_config/network_config/http_policy/retry_policy.
+# - Base URL & routing: base_url comes only from connection; method/path defined per action; call input may supply
+#   template variables via input.path.
 # - GET/HEAD: request body is ignored (warning emitted). Other methods send body with Content-Type rules:
 #     explicit Content-Type honored; otherwise infer (object/array → application/json, string → text/plain).
+# - Parameters: path variables auto-derived from `path`; additional parameters defined under `parameters` list.
+# - `auth_ref` must point to an entry created by AuthFlow (TRN format `trn:openact:{tenant}:auth/{provider}/{user}`),
+#   allowing connectors to reuse OAuth credentials persisted in `auth_connections`.
+
+# PostgreSQL connector specifics:
+# - `config` fields map to `PostgresConnection`: host, port, database, user, password, ssl_mode, query_params, etc.
+# - Actions require `statement` (supports multiline). Positional parameters use `$1..$N`; named parameters map from
+#   action `parameters` or input object keys.
+# - Input shapes accepted:
+#     * `{ "args": [..] }` positional array matching declared parameters.
+#     * Plain object `{ id: 1 }` with keys matching parameter names.
+#     * `null` when no parameters are expected.
+# - Outputs: SELECT/RETURNING statements emit arrays of row objects; others return `{ "rows_affected": n }`.
+# - `limits.max_rows` controls cursor fetch cap; `timeout_ms` maps to query timeout when supported.
+
+# Redis / other connectors should follow similar patterns: document connection config, action config, merge semantics,
+# and input/output conventions here when added.
 
 # Parameters (comments):
 # - May be defined on both connection and action; merged by name (action overrides). Used for validation & MCP inputSchema.
@@ -132,4 +187,3 @@ actions:
 # Governance (comments):
 # - Server-level governance can allow/deny tools by pattern (e.g., ["openact.execute"], ["postgres.*"]).
 # - Combine with `mcp.requires_auth` and tags to drive client-side UX or policy engines.
-

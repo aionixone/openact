@@ -48,7 +48,11 @@ pub struct ProtocolError {
 }
 
 impl ProtocolError {
-    pub fn new<C: Into<String>, M: Into<String>>(code: C, message: M, data: Option<JsonValue>) -> Self {
+    pub fn new<C: Into<String>, M: Into<String>>(
+        code: C,
+        message: M,
+        data: Option<JsonValue>,
+    ) -> Self {
         Self { code: code.into(), message: message.into(), data }
     }
 }

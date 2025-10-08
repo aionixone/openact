@@ -5,12 +5,14 @@
     "Config": {
       "type": "pass",
       "assign": {
-        "config.authorizeUrl": "https://github.com/login/oauth/authorize",
-        "config.tokenUrl": "https://github.com/login/oauth/access_token",
-        "config.userInfoUrl": "https://api.github.com/user",
-        "config.redirectUri": "{% input.redirectUri ? input.redirectUri : 'http://localhost:8080/oauth/callback' %}",
-        "config.scope": "{% input.scope ? input.scope : 'user:email' %}",
-        "config.userAgent": "openact/0.1"
+        "config": {
+          "authorizeUrl": "https://github.com/login/oauth/authorize",
+          "tokenUrl": "https://github.com/login/oauth/access_token",
+          "userInfoUrl": "https://api.github.com/user",
+          "redirectUri": "{% input.redirectUri %}",
+          "scope": "user:email",
+          "userAgent": "openact/0.1"
+        }
       },
       "next": "StartAuth"
     },
@@ -43,7 +45,7 @@
         }
       },
       "assign": {
-        "auth": { "code": "{% result.code %}" }
+        "authCode": "{% result.code %}"
       },
       "next": "Exchange"
     },
@@ -62,7 +64,7 @@
           "client_id": "{% input.clientId %}",
           "client_secret": "{% input.clientSecret %}",
           "redirect_uri": "{% $config.redirectUri %}",
-          "code": "{% $auth.code %}",
+          "code": "{% $authCode %}",
           "code_verifier": "{% $auth.code_verifier %}"
         }
       },
@@ -90,7 +92,7 @@
         }
       },
       "assign": {
-        "user": { "login": "{% result.body.login %}" }
+        "userLogin": "{% result.body.login %}"
       },
       "next": "Persist"
     },
@@ -98,10 +100,14 @@
       "type": "task",
       "resource": "connection.update",
       "parameters": {
-        "connection_ref": "{% (input.tenant ? input.tenant : 'default') & ':github:' & ($user.login ? $user.login : 'unknown') %}",
+        "connection_ref": "{% input.tenant & ':github:' & $userLogin %}",
         "access_token": "{% $oauth.access_token %}",
         "refresh_token": "{% $oauth.refresh_token %}",
         "expires_in": "{% $oauth.expires_in %}"
+      },
+      "output": {
+        "auth_ref": "{% result.auth_ref %}",
+        "connection_ref": "{% result.connection_ref %}"
       },
       "end": true
     }

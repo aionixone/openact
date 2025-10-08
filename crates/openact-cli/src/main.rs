@@ -3,7 +3,9 @@
 use clap::Parser;
 use openact_cli::{
     cli::{Cli, Commands},
-    commands::{ExecuteCommand, ExportCommand, ImportCommand, ListCommand, MigrateCommand},
+    commands::{
+        ExecuteCommand, ExportCommand, FlowRunCommand, ImportCommand, ListCommand, MigrateCommand,
+    },
     error::CliResult,
     utils::{init_tracing, ColoredOutput},
 };
@@ -143,6 +145,8 @@ async fn run() -> CliResult<()> {
             )
             .await
         }
+
+        Commands::FlowRun { args } => FlowRunCommand::run(&cli.db_path, args).await,
     }
 }
 

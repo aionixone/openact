@@ -6,18 +6,16 @@ use stepflow_dsl::WorkflowDSL;
 use crate::engine::{run_until_pause_or_end, PendingInfo, RunOutcome, TaskHandler};
 use openact_core::{store::RunStore, Checkpoint};
 
- 
-
 /// Start a workflow until the first pause (generic, no DSL assumptions).
 /// Stores a checkpoint and returns the pending info.
 pub async fn start_until_pause(
     dsl: &WorkflowDSL,
     handler: &dyn TaskHandler,
-    run_store: &impl RunStore,
+    run_store: &dyn RunStore,
     mut context: Value,
 ) -> Result<PendingInfo> {
     // Run until pause point (oauth2.await_callback)
-    let outcome = run_until_pause_or_end(dsl, &dsl.start_at, context.take(), handler, 100)?;
+    let outcome = run_until_pause_or_end(dsl, &dsl.start_at, context.take(), handler, 100, None)?;
     let pending = match outcome {
         RunOutcome::Pending(p) => p,
         _ => return Err(anyhow!("workflow did not pause")),
@@ -34,14 +32,12 @@ pub async fn start_until_pause(
     Ok(pending)
 }
 
- 
-
 /// Resume a workflow from a stored pause, applying an input patch under `input`.
 /// Returns the final context or a pending outcome depending on the flow.
 pub async fn resume_from_pause(
     dsl: &WorkflowDSL,
     handler: &dyn TaskHandler,
-    run_store: &impl RunStore,
+    run_store: &dyn RunStore,
     run_id: &str,
     input_patch: Value,
 ) -> Result<RunOutcome> {
@@ -67,7 +63,8 @@ pub async fn resume_from_pause(
     }
 
     // Continue execution from next_state until end
-    let outcome = run_until_pause_or_end(dsl, &cp.paused_state, ctx, handler, 100)?;
+    let outcome =
+        run_until_pause_or_end(dsl, &cp.paused_state, ctx, handler, 100, Some(&cp.run_id))?;
     Ok(outcome)
 }
 
@@ -160,8 +157,9 @@ states:
         let dsl: WorkflowDSL = serde_yaml::from_str(&yaml).unwrap();
         let run_store = MemoryRunStore::default();
         // Start until pause
-        let pending = futures::executor::block_on(start_until_pause(&dsl, &Router, &run_store, json!({})))
-            .unwrap();
+        let pending =
+            futures::executor::block_on(start_until_pause(&dsl, &Router, &run_store, json!({})))
+                .unwrap();
         // Simulate callback: read state from vars.auth in pending context and apply input patch
         let state = pending.context.pointer("/vars/auth/state").and_then(|v| v.as_str()).unwrap();
         let outcome = futures::executor::block_on(resume_from_pause(

@@ -3,13 +3,13 @@
 //! This crate provides MCP server capabilities for OpenAct, allowing OpenAct actions
 //! to be exposed as MCP tools. Implementation follows the same pattern as the Go reference.
 
+pub mod adapter;
 pub mod app_state;
 pub mod error;
 pub mod governance;
 pub mod jsonrpc;
 pub mod mcp;
 pub mod server;
-pub mod adapter;
 pub mod server_rmcp;
 
 // Re-export key types

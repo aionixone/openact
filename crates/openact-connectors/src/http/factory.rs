@@ -1,14 +1,14 @@
 //! HTTP connector factory implementation
 
+use crate::auth::{AuthConnection, AuthConnectionStore};
+use crate::http::{HttpAction, HttpConnection, HttpExecutor};
+use async_trait::async_trait;
+use openact_core::{types::ConnectorMetadata, ActionRecord, ConnectionRecord, ConnectorKind, Trn};
 use openact_registry::{
     error::{RegistryError, RegistryResult},
     factory::{Action, ActionFactory, AsAny, Connection, ConnectionFactory},
-    ConnectorRegistry, ConnectorRegistrar,
+    ConnectorRegistrar, ConnectorRegistry,
 };
-use async_trait::async_trait;
-use crate::auth::{AuthConnection, AuthConnectionStore};
-use crate::http::{HttpAction, HttpConnection, HttpExecutor};
-use openact_core::{types::ConnectorMetadata, ActionRecord, ConnectionRecord, ConnectorKind, Trn};
 use serde_json::Value as JsonValue;
 use std::{collections::HashMap, sync::Arc};
 
@@ -80,7 +80,7 @@ impl ConnectionFactory for HttpFactory {
     async fn create_connection(
         &self,
         record: &ConnectionRecord,
-    ) -> RegistryResult<Box<dyn Connection>> {
+    ) -> RegistryResult<Arc<dyn Connection>> {
         // Parse connection config into HttpConnection
         let http_connection: HttpConnection = serde_json::from_value(record.config_json.clone())
             .map_err(|e| {
@@ -96,7 +96,7 @@ impl ConnectionFactory for HttpFactory {
             inner: http_connection,
         };
 
-        Ok(Box::new(connection))
+        Ok(Arc::new(connection))
     }
 }
 
@@ -114,7 +114,7 @@ impl ActionFactory for HttpFactory {
     async fn create_action(
         &self,
         action_record: &ActionRecord,
-        connection: Box<dyn Connection>,
+        connection: Arc<dyn Connection>,
     ) -> RegistryResult<Box<dyn Action>> {
         // Downcast connection to HttpConnectionWrapper
         let http_connection = connection
@@ -167,10 +167,7 @@ impl Connection for HttpConnectionWrapper {
 
     fn metadata(&self) -> HashMap<String, JsonValue> {
         let mut metadata = HashMap::new();
-        metadata.insert(
-            "base_url".to_string(),
-            JsonValue::String(self.inner.base_url.clone()),
-        );
+        metadata.insert("base_url".to_string(), JsonValue::String(self.inner.base_url.clone()));
         if let Some(ref timeout_config) = self.inner.timeout_config {
             metadata.insert(
                 "timeout_config".to_string(),
@@ -231,14 +228,8 @@ impl Action for HttpActionWrapper {
 
     fn metadata(&self) -> HashMap<String, JsonValue> {
         let mut metadata = HashMap::new();
-        metadata.insert(
-            "method".to_string(),
-            JsonValue::String(self.action.method.clone()),
-        );
-        metadata.insert(
-            "path".to_string(),
-            JsonValue::String(self.action.path.clone()),
-        );
+        metadata.insert("method".to_string(), JsonValue::String(self.action.method.clone()));
+        metadata.insert("path".to_string(), JsonValue::String(self.action.path.clone()));
         metadata
     }
 
@@ -248,6 +239,31 @@ impl Action for HttpActionWrapper {
             return Err(RegistryError::InvalidInput(
                 "HTTP action input should be a JSON object or null".to_string(),
             ));
+        }
+
+        let required_path_vars = extract_path_variables(&self.action.path);
+        if !required_path_vars.is_empty() {
+            let mut path_lookup = None;
+            if let JsonValue::Object(map) = input {
+                if let Some(path) = map.get("path").and_then(|v| v.as_object()) {
+                    path_lookup = Some(path);
+                }
+            }
+            for var in required_path_vars {
+                let present = path_lookup.and_then(|path| path.get(&var)).and_then(|value| {
+                    if value.is_null() {
+                        None
+                    } else {
+                        Some(value)
+                    }
+                });
+                if present.is_none() {
+                    return Err(RegistryError::InvalidInput(format!(
+                        "Missing path parameter: {}",
+                        var
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -260,10 +276,8 @@ impl Action for HttpActionWrapper {
 
         // 1) Path variables from /path/{var}
         for var in extract_path_variables(&self.action.path) {
-            properties.insert(
-                var.clone(),
-                json!({"type": "string", "description": "Path parameter"}),
-            );
+            properties
+                .insert(var.clone(), json!({"type": "string", "description": "Path parameter"}));
             required.push(var);
         }
 
@@ -368,9 +382,15 @@ impl Action for HttpActionWrapper {
         };
         let mut obj = serde_json::Map::new();
         obj.insert("title".to_string(), json!(title));
-        if let Some(v) = read_only { obj.insert("readOnlyHint".to_string(), json!(v)); }
-        if let Some(v) = destructive { obj.insert("destructiveHint".to_string(), json!(v)); }
-        if let Some(v) = idempotent { obj.insert("idempotentHint".to_string(), json!(v)); }
+        if let Some(v) = read_only {
+            obj.insert("readOnlyHint".to_string(), json!(v));
+        }
+        if let Some(v) = destructive {
+            obj.insert("destructiveHint".to_string(), json!(v));
+        }
+        if let Some(v) = idempotent {
+            obj.insert("idempotentHint".to_string(), json!(v));
+        }
         Some(JsonValue::Object(obj))
     }
 }
@@ -385,10 +405,14 @@ fn extract_path_variables(path: &str) -> Vec<String> {
         if ch == '{' {
             let mut name = String::new();
             while let Some(c) = chars.next() {
-                if c == '}' { break; }
+                if c == '}' {
+                    break;
+                }
                 name.push(c);
             }
-            if !name.is_empty() { res.push(name); }
+            if !name.is_empty() {
+                res.push(name);
+            }
         }
     }
     res
@@ -397,7 +421,9 @@ fn extract_path_variables(path: &str) -> Vec<String> {
 fn infer_body_schema_from_typed(body: &RequestBodyType) -> JsonValue {
     use serde_json::json;
     match body {
-        RequestBodyType::Json { data } => infer_objectish_schema(data).unwrap_or(json!({"type": "object"})),
+        RequestBodyType::Json { data } => {
+            infer_objectish_schema(data).unwrap_or(json!({"type": "object"}))
+        }
         RequestBodyType::Form { .. } => json!({
             "type": "object",
             "additionalProperties": {"type": "string"}
@@ -418,7 +444,11 @@ fn infer_objectish_schema(value: &JsonValue) -> Option<JsonValue> {
                     JsonValue::Null => json!({"type": ["null", "string"]}),
                     JsonValue::Bool(_) => json!({"type": "boolean"}),
                     JsonValue::Number(n) => {
-                        if n.is_i64() || n.is_u64() { json!({"type": "integer"}) } else { json!({"type": "number"}) }
+                        if n.is_i64() || n.is_u64() {
+                            json!({"type": "integer"})
+                        } else {
+                            json!({"type": "number"})
+                        }
                     }
                     JsonValue::String(_) => json!({"type": "string"}),
                     JsonValue::Array(_) => json!({"type": "array"}),
@@ -444,15 +474,13 @@ fn infer_objectish_schema(value: &JsonValue) -> Option<JsonValue> {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use openact_registry::RegistryError;
     use serde_json::json;
 
     #[tokio::test]
     async fn test_http_factory_creation() {
         let factory = HttpFactory::new();
-        assert_eq!(
-            ConnectionFactory::connector_kind(&factory),
-            ConnectorKind::new("http")
-        );
+        assert_eq!(ConnectionFactory::connector_kind(&factory), ConnectorKind::new("http"));
     }
 
     #[tokio::test]
@@ -487,6 +515,71 @@ mod tests {
 
         let metadata = connection.metadata();
         assert_eq!(metadata["base_url"], json!("https://api.example.com"));
+    }
+
+    #[tokio::test]
+    async fn test_http_action_creation_and_schema() {
+        let factory = HttpFactory::new();
+        let now = Utc::now();
+
+        let connection_record = ConnectionRecord {
+            trn: Trn::new("trn:openact:test:connection/http/test".to_string()),
+            connector: ConnectorKind::new("http"),
+            name: "test".to_string(),
+            config_json: json!({
+                "base_url": "https://api.example.com",
+                "authorization": "none"
+            }),
+            created_at: now,
+            updated_at: now,
+            version: 1,
+        };
+        let connection = factory.create_connection(&connection_record).await.unwrap();
+
+        let action_record = ActionRecord {
+            trn: Trn::new("trn:openact:test:action/http/fetch@v1".to_string()),
+            connector: ConnectorKind::new("http"),
+            name: "fetch".into(),
+            connection_trn: connection_record.trn.clone(),
+            config_json: json!({
+                "method": "GET",
+                "path": "/users/{id}",
+                "headers": {
+                    "Accept": ["application/json"]
+                }
+            }),
+            mcp_enabled: true,
+            mcp_overrides: None,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+        };
+
+        let action = factory
+            .create_action(&action_record, connection)
+            .await
+            .expect("http action should build");
+
+        let err = action
+            .validate_input(&json!("invalid"))
+            .await
+            .expect_err("string input should be rejected");
+        assert!(matches!(err, RegistryError::InvalidInput(_)));
+
+        let missing = action
+            .validate_input(&json!({}))
+            .await
+            .expect_err("missing path parameter should error");
+        assert!(matches!(missing, RegistryError::InvalidInput(_)));
+
+        action
+            .validate_input(&json!({"path": {"id": "123"}}))
+            .await
+            .expect("object input accepted");
+
+        let schema = action.mcp_input_schema(&action_record);
+        let required = schema["required"].as_array().expect("required array");
+        assert!(required.contains(&json!("id")), "path parameter should be required");
     }
 }
 
