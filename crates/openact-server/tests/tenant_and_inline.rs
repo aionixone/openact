@@ -19,11 +19,29 @@ async fn make_router() -> Router {
     let conn_store = store.as_ref().clone();
     let act_store = store.as_ref().clone();
     let registry = openact_registry::ConnectorRegistry::new(conn_store, act_store);
+    let orchestrator_runs: Arc<dyn openact_core::orchestration::OrchestratorRunStore> = store.clone();
+    let orchestrator_outbox: Arc<dyn openact_core::orchestration::OrchestratorOutboxStore> = store.clone();
+    let run_service = openact_server::orchestration::RunService::new(orchestrator_runs.clone());
+    let outbox_service = openact_server::orchestration::OutboxService::new(orchestrator_outbox.clone());
+    let outbox_dispatcher = Arc::new(openact_server::orchestration::OutboxDispatcher::new(
+        outbox_service.clone(),
+        run_service.clone(),
+        "http://localhost:8080/api/v1/stepflow/events".to_string(),
+    ));
+    let heartbeat_supervisor = Arc::new(openact_server::orchestration::HeartbeatSupervisor::new(
+        run_service.clone(),
+        outbox_service.clone(),
+    ));
+
     let app_state = AppState {
         store: store.clone(),
         registry: Arc::new(registry),
-        orchestrator_runs: store.clone(),
-        orchestrator_outbox: store.clone(),
+        orchestrator_runs,
+        orchestrator_outbox,
+        run_service,
+        outbox_service,
+        outbox_dispatcher,
+        heartbeat_supervisor,
         #[cfg(feature = "authflow")]
         flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
     };
@@ -207,11 +225,29 @@ async fn make_router_with_gov(allow: Vec<&str>, deny: Vec<&str>, seed: bool) -> 
     let conn_store = store.as_ref().clone();
     let act_store = store.as_ref().clone();
     let registry = openact_registry::ConnectorRegistry::new(conn_store, act_store);
+    let orchestrator_runs: Arc<dyn openact_core::orchestration::OrchestratorRunStore> = store.clone();
+    let orchestrator_outbox: Arc<dyn openact_core::orchestration::OrchestratorOutboxStore> = store.clone();
+    let run_service = openact_server::orchestration::RunService::new(orchestrator_runs.clone());
+    let outbox_service = openact_server::orchestration::OutboxService::new(orchestrator_outbox.clone());
+    let outbox_dispatcher = Arc::new(openact_server::orchestration::OutboxDispatcher::new(
+        outbox_service.clone(),
+        run_service.clone(),
+        "http://localhost:8080/api/v1/stepflow/events".to_string(),
+    ));
+    let heartbeat_supervisor = Arc::new(openact_server::orchestration::HeartbeatSupervisor::new(
+        run_service.clone(),
+        outbox_service.clone(),
+    ));
+
     let app_state = AppState {
         store: store.clone(),
         registry: Arc::new(registry),
-        orchestrator_runs: store.clone(),
-        orchestrator_outbox: store.clone(),
+        orchestrator_runs,
+        orchestrator_outbox,
+        run_service,
+        outbox_service,
+        outbox_dispatcher,
+        heartbeat_supervisor,
         #[cfg(feature = "authflow")]
         flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
     };

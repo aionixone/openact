@@ -26,105 +26,6 @@ use tower::ServiceExt;
 const TEST_CONNECTOR: &str = "test";
 const TEST_ACTION_NAME: &str = "echo";
 
-#[tokio::test]
-async fn execute_by_trn_rejects_cross_tenant_action() {
-    let ctx = TestContext::new(Duration::from_millis(0)).await;
-    let payload = json!({"action_trn": ctx.action_trn, "input": {}});
-
-    let response = ctx
-        .router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/execute")
-                .header("content-type", "application/json")
-                .header("x-tenant", "tenant-b")
-                .body(Body::from(payload.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    let status = response.status();
-    let body_bytes = body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-    assert_eq!(body_json["success"], serde_json::Value::Bool(false));
-    assert_eq!(body_json["error"]["code"], serde_json::Value::String("NOT_FOUND".into()));
-}
-
-#[tokio::test]
-async fn execute_action_dry_run_skips_execution_and_returns_metadata() {
-    let ctx = TestContext::new(Duration::from_millis(0)).await;
-    let uri = format!("/api/v1/actions/{}/execute", ctx.tool_name.as_str());
-    let payload = json!({
-        "input": {"message": "hello"},
-        "options": {"dry_run": true}
-    });
-
-    let response = ctx
-        .router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(uri)
-                .header("x-tenant", ctx.tenant.as_str())
-                .header("content-type", "application/json")
-                .body(Body::from(payload.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body_bytes = body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-
-    assert_eq!(body_json["success"], serde_json::Value::Bool(true));
-    assert_eq!(
-        body_json["data"]["result"],
-        json!({"dry_run": true, "input": {"message": "hello"}})
-    );
-    assert_eq!(
-        body_json["metadata"]["action_trn"],
-        serde_json::Value::String(ctx.action_trn.clone())
-    );
-    let warnings = body_json["metadata"]["warnings"].as_array().unwrap();
-    assert!(warnings.iter().any(|w| w.as_str() == Some("dry_run=true")));
-    assert_eq!(ctx.executions.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn execute_action_timeout_respects_request_override() {
-    let ctx = TestContext::new(Duration::from_millis(80)).await;
-    let uri = format!("/api/v1/actions/{}/execute", ctx.tool_name.as_str());
-    let payload = json!({
-        "input": {"slow": true},
-        "options": {"timeout_ms": 10}
-    });
-
-    let response = ctx
-        .router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(uri)
-                .header("x-tenant", ctx.tenant.as_str())
-                .header("content-type", "application/json")
-                .body(Body::from(payload.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
-    assert_eq!(ctx.executions.load(Ordering::SeqCst), 1);
-}
-
 struct TestContext {
     router: Router,
     executions: Arc<AtomicUsize>,
@@ -194,11 +95,29 @@ impl TestContext {
         registry.register_connection_factory(factory.clone());
         registry.register_action_factory(factory);
 
+        let orchestrator_runs: Arc<dyn openact_core::orchestration::OrchestratorRunStore> = store.clone();
+        let orchestrator_outbox: Arc<dyn openact_core::orchestration::OrchestratorOutboxStore> = store.clone();
+        let run_service = openact_server::orchestration::RunService::new(orchestrator_runs.clone());
+        let outbox_service = openact_server::orchestration::OutboxService::new(orchestrator_outbox.clone());
+        let outbox_dispatcher = Arc::new(openact_server::orchestration::OutboxDispatcher::new(
+            outbox_service.clone(),
+            run_service.clone(),
+            "http://localhost:8080/api/v1/stepflow/events".to_string(),
+        ));
+        let heartbeat_supervisor = Arc::new(openact_server::orchestration::HeartbeatSupervisor::new(
+            run_service.clone(),
+            outbox_service.clone(),
+        ));
+
         let app_state = AppState {
             store: store.clone(),
             registry: Arc::new(registry),
-            orchestrator_runs: store.clone(),
-            orchestrator_outbox: store.clone(),
+            orchestrator_runs,
+            orchestrator_outbox,
+            run_service,
+            outbox_service,
+            outbox_dispatcher,
+            heartbeat_supervisor,
             #[cfg(feature = "authflow")]
             flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
         };
@@ -354,4 +273,103 @@ impl openact_registry::factory::ActionFactory for TestFactory {
             delay,
         }))
     }
+}
+
+#[tokio::test]
+async fn execute_by_trn_rejects_cross_tenant_action() {
+    let ctx = TestContext::new(Duration::from_millis(0)).await;
+    let payload = json!({"action_trn": ctx.action_trn, "input": {}});
+
+    let response = ctx
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/execute")
+                .header("content-type", "application/json")
+                .header("x-tenant", "tenant-b")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let body_bytes = body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(body_json["success"], serde_json::Value::Bool(false));
+    assert_eq!(body_json["error"]["code"], serde_json::Value::String("NOT_FOUND".into()));
+}
+
+#[tokio::test]
+async fn execute_action_dry_run_skips_execution_and_returns_metadata() {
+    let ctx = TestContext::new(Duration::from_millis(0)).await;
+    let uri = format!("/api/v1/actions/{}/execute", ctx.tool_name.as_str());
+    let payload = json!({
+        "input": {"message": "hello"},
+        "options": {"dry_run": true}
+    });
+
+    let response = ctx
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("x-tenant", ctx.tenant.as_str())
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body_bytes = body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+    assert_eq!(body_json["success"], serde_json::Value::Bool(true));
+    assert_eq!(
+        body_json["data"]["result"],
+        json!({"dry_run": true, "input": {"message": "hello"}})
+    );
+    assert_eq!(
+        body_json["metadata"]["action_trn"],
+        serde_json::Value::String(ctx.action_trn.clone())
+    );
+    let warnings = body_json["metadata"]["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|w| w.as_str() == Some("dry_run=true")));
+    assert_eq!(ctx.executions.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn execute_action_timeout_respects_request_override() {
+    let ctx = TestContext::new(Duration::from_millis(80)).await;
+    let uri = format!("/api/v1/actions/{}/execute", ctx.tool_name.as_str());
+    let payload = json!({
+        "input": {"slow": true},
+        "options": {"timeout_ms": 10}
+    });
+
+    let response = ctx
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("x-tenant", ctx.tenant.as_str())
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+    assert_eq!(ctx.executions.load(Ordering::SeqCst), 1);
 }

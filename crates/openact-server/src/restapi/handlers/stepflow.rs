@@ -5,7 +5,7 @@ use crate::{
     dto::StepflowCommandResponse,
     error::ServerError,
     middleware::{request_id::RequestId, tenant::Tenant},
-    orchestration::RunService,
+    orchestration::StepflowCommandAdapter,
     AppState,
 };
 use aionix_protocol::parse_command_envelope;
@@ -21,7 +21,6 @@ use serde_json::{json, Value};
 use std::convert::TryFrom;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
-use uuid::Uuid;
 
 const SUPPORTED_SCHEMA_PREFIX: &str = "1.";
 
@@ -36,7 +35,7 @@ pub async fn execute_command(
     (axum::http::StatusCode, Json<crate::error::ErrorResponse>),
 > {
     let req_id = request_id.0.clone();
-    let run_service = RunService::new(app_state.orchestrator_runs.clone());
+    let run_service = app_state.run_service.clone();
 
     let envelope = parse_command_envelope(&raw).map_err(|err| {
         let server_err = ServerError::InvalidInput(format!("invalid command envelope: {}", err));
@@ -123,9 +122,20 @@ pub async fn execute_command(
         .unwrap_or(governance.timeout);
 
     let registry = app_state.registry.clone();
-    let run_id = Uuid::new_v4().to_string();
+    let (run_record, heartbeat_timeout_secs) = StepflowCommandAdapter::prepare_run(
+        &envelope,
+        &command_tenant,
+        &target_trn,
+        effective_timeout,
+    );
+    let run_id = run_record.run_id.clone();
 
-    // TODO: integrate with orchestrator runtime for asynchronous flows
+    if let Err(err) = run_service.create_run(run_record).await {
+        tracing::error!(error = %err, command_id = %envelope.id, "failed to persist orchestrator run");
+        let server_err = ServerError::Internal("failed to persist orchestrator run".into());
+        return Err(server_err.to_http_response(req_id.clone()));
+    }
+
     let execution_start = Instant::now();
     let action_trn_str = target_trn.as_str().to_string();
 
@@ -200,7 +210,7 @@ pub async fn execute_command(
         result: Some(output),
         run_id: Some(run_id),
         phase: None,
-        heartbeat_timeout: None,
+        heartbeat_timeout: heartbeat_timeout_secs,
         status_ttl: None,
         correlation_id: Some(
             envelope.correlation_id.clone().unwrap_or_else(|| envelope.id.clone()),

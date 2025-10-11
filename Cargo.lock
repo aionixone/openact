@@ -2686,6 +2686,7 @@ dependencies = [
  "openact-registry",
  "openact-runtime",
  "openact-store",
+ "reqwest 0.12.23",
  "serde",
  "serde_json",
  "sha2",

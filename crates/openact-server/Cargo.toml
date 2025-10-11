@@ -28,6 +28,7 @@ sha2 = "0.10"
 async-stream = "0.3"
 chrono = { version = "0.4", features = ["serde", "clock"] }
 stepflow-dsl = { path = "../../../stepflow-dsl", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [features]
 default = []
