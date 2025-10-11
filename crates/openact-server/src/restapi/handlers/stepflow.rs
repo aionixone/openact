@@ -50,6 +50,7 @@ pub async fn execute_command(
     let req_id = request_id.0.clone();
     let run_service = app_state.run_service.clone();
     let outbox_service = app_state.outbox_service.clone();
+    let async_manager = app_state.async_manager.clone();
 
     let envelope = parse_command_envelope(&raw).map_err(|err| {
         let server_err = ServerError::InvalidInput(format!("invalid command envelope: {}", err));
@@ -229,6 +230,134 @@ pub async fn execute_command(
         }
     };
 
+    let status_value = output
+        .as_object()
+        .and_then(|map| map.get("status"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_ascii_lowercase());
+
+    if let Some(status) = status_value.as_deref() {
+        match status {
+            "running" | "accepted" => {
+                let heartbeat_timeout = output
+                    .as_object()
+                    .and_then(|map| map.get("heartbeatTimeout"))
+                    .and_then(|value| value.as_u64())
+                    .or(heartbeat_timeout_secs);
+                let status_ttl = output
+                    .as_object()
+                    .and_then(|map| map.get("statusTtl"))
+                    .and_then(|value| value.as_u64());
+                let phase = output
+                    .as_object()
+                    .and_then(|map| map.get("phase"))
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.to_string())
+                    .or_else(|| {
+                        if status == "running" {
+                            Some("async_waiting".to_string())
+                        } else {
+                            Some("fire_forget".to_string())
+                        }
+                    });
+
+                if let Err(update_err) = run_service
+                    .update_status(
+                        &run_id,
+                        OrchestratorRunStatus::Running,
+                        phase.clone(),
+                        Some(output.clone()),
+                        None,
+                    )
+                    .await
+                {
+                    tracing::error!(error = %update_err, run_id = %run_id, "failed to persist async status payload");
+                }
+
+                tracing::info!(
+                    request_id = %req_id,
+                    command_id = %envelope.id,
+                    action = %action_trn_str,
+                    duration_ms = %execution_start.elapsed().as_millis(),
+                    status = %status,
+                    "stepflow command executing asynchronously"
+                );
+
+                let handle_value = output.as_object().and_then(|map| map.get("handle").cloned());
+
+                if status == "running" {
+                    match handle_value.clone() {
+                        Some(handle) => {
+                            if let Err(err) =
+                                async_manager.submit(run_snapshot.clone(), handle.clone())
+                            {
+                                tracing::error!(
+                                    error = %err,
+                                    run_id = %run_id,
+                                    "failed to register async handle"
+                                );
+                            }
+                        }
+                        None => tracing::warn!(
+                            run_id = %run_id,
+                            "async response missing handle payload"
+                        ),
+                    }
+                }
+
+                let external_ref = handle_value
+                    .as_ref()
+                    .and_then(|value| value.as_object())
+                    .and_then(|map| map.get("externalRunId"))
+                    .and_then(|value| value.as_str())
+                    .map(|s| s.to_string());
+
+                let mut metadata_map = run_snapshot
+                    .metadata
+                    .as_ref()
+                    .and_then(|value| value.as_object())
+                    .cloned()
+                    .unwrap_or_default();
+                metadata_map.insert("asyncMode".to_string(), Value::String(status.to_string()));
+                if let Some(handle) = handle_value.clone() {
+                    metadata_map.insert("asyncHandle".to_string(), handle);
+                }
+
+                if let Err(err) = run_service
+                    .update_async_metadata(
+                        &run_id,
+                        Some(Value::Object(metadata_map)),
+                        external_ref.clone(),
+                    )
+                    .await
+                {
+                    tracing::error!(
+                        error = %err,
+                        run_id = %run_id,
+                        "failed to persist async metadata"
+                    );
+                }
+
+                let response = StepflowCommandResponse {
+                    status: status.to_string(),
+                    result: output
+                        .as_object()
+                        .and_then(|map| map.get("handle").cloned())
+                        .or_else(|| output.as_object().and_then(|map| map.get("result").cloned())),
+                    run_id: Some(run_id),
+                    phase,
+                    heartbeat_timeout,
+                    status_ttl,
+                    correlation_id: envelope.correlation_id.clone(),
+                    request_id: Some(req_id),
+                };
+
+                return Ok(Json(response));
+            }
+            _ => {}
+        }
+    }
+
     tracing::info!(
         request_id = %req_id,
         command_id = %envelope.id,
@@ -294,6 +423,7 @@ pub async fn cancel_command(
     let req_id = request_id.0.clone();
     let run_service = app_state.run_service.clone();
     let outbox_service = app_state.outbox_service.clone();
+    let async_manager = app_state.async_manager.clone();
 
     let run = run_service
         .get(&run_id)
@@ -338,12 +468,20 @@ pub async fn cancel_command(
         cancel_details.insert("traceId".into(), Value::String(trace_id.clone()));
     }
 
-    let error_value = if cancel_details.is_empty() {
-        None
-    } else {
-        Some(Value::Object(cancel_details.clone()))
-    };
+    let error_value =
+        if cancel_details.is_empty() { None } else { Some(Value::Object(cancel_details.clone())) };
     let cancel_payload = error_value.clone().unwrap_or(Value::Null);
+
+    if let Some(handle) = run
+        .metadata
+        .as_ref()
+        .and_then(|value| value.as_object())
+        .and_then(|map| map.get("asyncHandle"))
+    {
+        if let Err(err) = async_manager.cancel_run(&run, handle, payload.reason.as_deref()).await {
+            tracing::warn!(run_id = %run.run_id, error = %err, "async cancel request failed");
+        }
+    }
 
     run_service
         .update_status(

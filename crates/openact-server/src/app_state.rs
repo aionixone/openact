@@ -12,8 +12,8 @@ use chrono::Duration as ChronoDuration;
 #[cfg(feature = "authflow")]
 use crate::flow_runner::FlowRunManager;
 use crate::orchestration::{
-    HeartbeatSupervisor, HeartbeatSupervisorConfig, OutboxDispatcher, OutboxDispatcherConfig,
-    OutboxService, RunService,
+    AsyncTaskManager, HeartbeatSupervisor, HeartbeatSupervisorConfig, OutboxDispatcher,
+    OutboxDispatcherConfig, OutboxService, RunService,
 };
 
 /// Shared application state
@@ -27,6 +27,7 @@ pub struct AppState {
     pub outbox_service: OutboxService,
     pub outbox_dispatcher: Arc<OutboxDispatcher>,
     pub heartbeat_supervisor: Arc<HeartbeatSupervisor>,
+    pub async_manager: Arc<AsyncTaskManager>,
     #[cfg(feature = "authflow")]
     pub flow_manager: Arc<FlowRunManager>,
 }
@@ -68,6 +69,8 @@ impl AppState {
             outbox_service.clone(),
             heartbeat_cfg,
         ));
+        let async_manager =
+            Arc::new(AsyncTaskManager::new(run_service.clone(), outbox_service.clone()));
 
         Ok(Self {
             store,
@@ -78,6 +81,7 @@ impl AppState {
             outbox_service,
             outbox_dispatcher,
             heartbeat_supervisor,
+            async_manager,
             #[cfg(feature = "authflow")]
             flow_manager,
         })

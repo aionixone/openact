@@ -15,6 +15,7 @@ thiserror = "1"
 rand = "0.8"
 tokio = { version = "1", features = ["time"] }
 tracing = "0.1"
+uuid = { version = "1", features = ["serde", "v4"] }
 
 # HTTP connector dependencies
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "multipart"], optional = true }

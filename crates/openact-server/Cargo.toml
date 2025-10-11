@@ -29,6 +29,8 @@ async-stream = "0.3"
 chrono = { version = "0.4", features = ["serde", "clock"] }
 stepflow-dsl = { path = "../../../stepflow-dsl", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+regex = "1"
+jsonpath_lib = "0.3"
 
 [features]
 default = []
@@ -39,3 +41,4 @@ mcp-rmcp = []
 [dev-dependencies]
 async-trait = "0.1"
 urlencoding = "2.1"
+httpmock = "0.7"

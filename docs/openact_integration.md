@@ -59,26 +59,92 @@ OpenAct must expose a task execution endpoint (e.g. `POST /actions/{trn}/execute
 | Scenario | Response |
 | --- | --- |
 | Immediate completion | `200 OK` + payload `{ "status": "succeeded", "result": ... }`. |
-| Job accepted, running asynchronously | `202 Accepted` + optional handle `{ "runId": "...", "phase": "running" }`. |
+| Job accepted, running asynchronously | `202 Accepted` + handle object (see below). |
+| Fire-and-forget trigger | `202 Accepted` + `{ "status": "accepted" }`. |
 | Validation error | `400/422` with details. |
 | Idempotency conflict | `409 Conflict`. |
 
-To allow Stepflow to correlate asynchronous work, include the following JSON fields in the
-response body:
+### Async handle schema
+
+When returning `status: "running"` include a handle describing how OpenAct should wait,
+refresh heartbeats, and cancel:
 
 ```json
 {
-  "phase": "running",
+  "status": "running",
+  "phase": "async_waiting",
   "runId": "openact-run-1234",
-  "heartbeatTimeout": 30,
-  "statusTtl": 600
+  "heartbeatTimeout": 60,
+  "statusTtl": 3600,
+  "handle": {
+    "backendId": "generic_async",
+    "externalRunId": "mock-123",
+    "config": {
+      "tracker": {
+        "kind": "http_poll",
+        "url": "https://jobs.example.com/api/runs/{{externalRunId}}",
+        "method": "GET",
+        "interval_ms": 2000,
+        "timeout_ms": 900000,
+        "max_attempts": 100,
+        "backoff_factor": 1.5,
+        "success_status": [200, 202],
+        "failure_status": [400, 404, 500],
+        "success_conditions": [
+          { "pointer": "/state", "equals": "SUCCEEDED" },
+          { "pointer": "/details/message", "contains": "completed" }
+        ],
+        "failure_conditions": [
+          { "pointer": "/state", "equals": "FAILED" },
+          { "pointer": "/state", "regex": "^ERROR" }
+        ],
+        "result_pointer": "/payload/output"
+      },
+      "cancel": {
+        "kind": "http",
+        "url": "https://jobs.example.com/api/runs/{{externalRunId}}/cancel",
+        "method": "POST",
+        "headers": {
+          "X-Cancel-Reason": "{{reason}}"
+        },
+        "body": {
+          "reason": "{{reason}}"
+        }
+      }
+    }
+  }
 }
 ```
+
+* `tracker.kind = http_poll` instructs OpenAct to poll the remote status until a success
+  or failure condition is satisfied. Success / failure can be determined by HTTP status,
+  response body fields, or both. Supported body predicates:
+  * `equals` / `not_equals` — compare JSON values.
+  * `contains` — substring search on string values.
+  * `regex` — regular expression match (Rust regex syntax).
+  * `jsonpath` — evaluate an expression (e.g. `$.items[?(@.state=='DONE')]`) with optional
+    `equals`/`exists` flags.
+  * `greater_than`, `greater_or_equal`, `less_than`, `less_or_equal` — numeric comparisons.
+  * absence of a predicate means “exists and is non-null”.
+* `backoff_factor` defaults to `1.0`, enabling exponential backoff when > 1.0.
+* `success_conditions` / `failure_conditions` use JSON pointer syntax. When no `equals`
+  is supplied, the condition is satisfied if the pointer resolves to a non-null value.
+* `cancel.kind = http` describes a best-effort cancellation endpoint. Templates can
+  reference `{{externalRunId}}` and `{{reason}}`.
+
+OpenAct persists the handle metadata so the waiter and cancel code can recover state
+after restarts.
 
 ## 3. Waiter / Event Emission
 
 When the action completes (success or failure), OpenAct must post an `EventEnvelope`
-to Stepflow’s `/stepflow/events` endpoint. This is the waiter mechanism.
+to Stepflow’s `/stepflow/events` endpoint. This is performed by the waiter subsystem:
+
+1. **Tracker**: executes according to the handle (`http_poll`, `mock_complete`, …).
+2. **Heartbeat refresh**: each poll updates `heartbeat_at`; the HeartbeatSupervisor will
+   mark the run as timed out if heartbeats stop.
+3. **Cancel plan**: when a cancel request is received, the manager executes the configured
+   cancel plan before marking the run cancelled.
 
 ### HTTP Endpoint
 
@@ -105,7 +171,7 @@ replay with exponential backoff; Stepflow’s endpoint is idempotent (by `id`).
 | `tenant` | Mirrors command tenant |
 | `traceId` | Same as the command’s `traceId` |
 | `resourceTrn` | The action’s TRN (`CommandEnvelope.target`) |
-| `runId` | Identifier of the execution instance (derive from command parameters or backend handle) |
+| `runId` | Identifier of the Stepflow execution (from the command extensions or metadata) |
 | `correlationId` | Command `id` |
 | `relatedTrns` | Optional list (e.g. external resources touched) |
 | `actorTrn` | If known |
@@ -172,7 +238,7 @@ SQLite store keep the state durable even if the service restarts:
 
 | Table | Purpose | Key Columns |
 | --- | --- | --- |
-| `orchestrator_runs` | One row per command execution (`run_id`). Tracks `status`, `phase`, `heartbeat_at`, `deadline_at`, serialized `result` / `error`, and metadata (traceId, correlationId). | `run_id` primary key |
+| `orchestrator_runs` | One row per command execution (`run_id`). Tracks `status`, `phase`, `heartbeat_at`, `deadline_at`, serialized `result` / `error`, async handle metadata, and the external reference id. | `run_id` primary key |
 | `orchestrator_outbox` | Pending `EventEnvelope` payloads waiting to be delivered back to Stepflow (or another orchestrator). | `id` (auto increment), `run_id`, `next_attempt_at`, `attempts` |
 
 ### Callback Endpoint

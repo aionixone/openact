@@ -2561,6 +2561,7 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]
@@ -2678,6 +2679,8 @@ dependencies = [
  "axum",
  "chrono",
  "futures-util",
+ "httpmock",
+ "jsonpath_lib",
  "jsonschema",
  "openact-authflow",
  "openact-core",
@@ -2686,6 +2689,7 @@ dependencies = [
  "openact-registry",
  "openact-runtime",
  "openact-store",
+ "regex",
  "reqwest 0.12.23",
  "serde",
  "serde_json",

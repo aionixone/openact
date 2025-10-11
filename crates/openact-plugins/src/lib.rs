@@ -10,6 +10,10 @@ fn postgres_registrar() -> ConnectorRegistrar {
     openact_connectors::postgresql_registrar()
 }
 
+fn generic_async_registrar() -> ConnectorRegistrar {
+    openact_connectors::generic_async_registrar()
+}
+
 /// Return all enabled registrars based on crate features
 pub fn registrars() -> Vec<ConnectorRegistrar> {
     let mut list = Vec::new();
@@ -19,6 +23,8 @@ pub fn registrars() -> Vec<ConnectorRegistrar> {
 
     #[cfg(feature = "postgresql")]
     list.push(postgres_registrar());
+
+    list.push(generic_async_registrar());
 
     list
 }

@@ -11,8 +11,8 @@ use openact_core::{
 };
 use openact_server::{
     orchestration::{
-        HeartbeatSupervisor, HeartbeatSupervisorConfig, OutboxDispatcher, OutboxDispatcherConfig,
-        OutboxService, RunService,
+        AsyncTaskManager, HeartbeatSupervisor, HeartbeatSupervisorConfig, OutboxDispatcher,
+        OutboxDispatcherConfig, OutboxService, RunService,
     },
     restapi::create_router,
     AppState,
@@ -43,6 +43,8 @@ async fn make_router() -> Router {
         outbox_service.clone(),
         HeartbeatSupervisorConfig::default(),
     ));
+    let async_manager =
+        Arc::new(AsyncTaskManager::new(run_service.clone(), outbox_service.clone()));
 
     let app_state = AppState {
         store: store.clone(),
@@ -53,6 +55,7 @@ async fn make_router() -> Router {
         outbox_service,
         outbox_dispatcher,
         heartbeat_supervisor,
+        async_manager,
         #[cfg(feature = "authflow")]
         flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
     };
@@ -251,6 +254,8 @@ async fn make_router_with_gov(allow: Vec<&str>, deny: Vec<&str>, seed: bool) -> 
         outbox_service.clone(),
         HeartbeatSupervisorConfig::default(),
     ));
+    let async_manager =
+        Arc::new(AsyncTaskManager::new(run_service.clone(), outbox_service.clone()));
 
     let app_state = AppState {
         store: store.clone(),
@@ -261,6 +266,7 @@ async fn make_router_with_gov(allow: Vec<&str>, deny: Vec<&str>, seed: bool) -> 
         outbox_service,
         outbox_dispatcher,
         heartbeat_supervisor,
+        async_manager,
         #[cfg(feature = "authflow")]
         flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
     };

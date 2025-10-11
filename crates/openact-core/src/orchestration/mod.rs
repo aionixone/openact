@@ -132,6 +132,12 @@ pub trait OrchestratorRunStore: Send + Sync {
         next_poll_at: Option<DateTime<Utc>>,
         poll_attempts: i32,
     ) -> CoreResult<()>;
+    async fn update_metadata_external(
+        &self,
+        run_id: &str,
+        metadata: Option<Value>,
+        external_ref: Option<String>,
+    ) -> CoreResult<()>;
     async fn list_for_timeout(
         &self,
         heartbeat_cutoff: DateTime<Utc>,

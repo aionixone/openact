@@ -59,6 +59,18 @@ impl RunService {
     ) -> anyhow::Result<Vec<OrchestratorRunRecord>> {
         self.runs.list_for_timeout(heartbeat_cutoff, limit).await.map_err(|e| anyhow::anyhow!(e))
     }
+
+    pub async fn update_async_metadata(
+        &self,
+        run_id: &str,
+        metadata: Option<Value>,
+        external_ref: Option<String>,
+    ) -> anyhow::Result<()> {
+        self.runs
+            .update_metadata_external(run_id, metadata, external_ref)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
+    }
 }
 
 /// Service managing outbox envelopes destined for orchestrators.
@@ -102,9 +114,11 @@ impl OutboxService {
     }
 }
 
-mod stepflow;
-pub use stepflow::StepflowCommandAdapter;
+mod async_manager;
 mod outbox_dispatcher;
+mod stepflow;
+pub use async_manager::AsyncTaskManager;
 pub use outbox_dispatcher::{
     HeartbeatSupervisor, HeartbeatSupervisorConfig, OutboxDispatcher, OutboxDispatcherConfig,
 };
+pub use stepflow::StepflowCommandAdapter;

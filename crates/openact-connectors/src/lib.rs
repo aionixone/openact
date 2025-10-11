@@ -5,6 +5,8 @@ pub mod auth;
 #[cfg(feature = "http")]
 pub mod http;
 
+pub mod generic_async;
+
 #[cfg(feature = "postgresql")]
 pub mod postgresql;
 
@@ -22,6 +24,8 @@ pub use auth::{AuthConnection, AuthConnectionStore, TokenInfo, RefreshOutcome};
 #[cfg(feature = "http")]
 pub use http::{HttpConnection, HttpAction, HttpExecutor, HttpExecutionResult, HttpFactory};
 
+pub use generic_async::{GenericAsyncAction, GenericAsyncConnection, GenericAsyncFactory};
+
 #[cfg(feature = "postgresql")]
 pub use postgresql::{PostgresConnection, PostgresExecutor, PostgresFactory};
 
@@ -35,6 +39,10 @@ pub use redis::{RedisConnection, RedisExecutor};
 #[cfg(feature = "http")]
 pub fn http_registrar() -> openact_registry::ConnectorRegistrar {
     HttpFactory::registrar()
+}
+
+pub fn generic_async_registrar() -> openact_registry::ConnectorRegistrar {
+    GenericAsyncFactory::registrar()
 }
 
 #[cfg(feature = "postgresql")]

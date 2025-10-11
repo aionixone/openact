@@ -1388,6 +1388,31 @@ impl OrchestratorRunStore for SqlStore {
         Ok(())
     }
 
+    async fn update_metadata_external(
+        &self,
+        run_id: &str,
+        metadata: Option<JsonValue>,
+        external_ref: Option<String>,
+    ) -> CoreResult<()> {
+        let metadata_json = serialize_optional_json(metadata.as_ref())?;
+
+        sqlx::query(
+            r#"
+            UPDATE orchestrator_runs
+            SET metadata_json = ?, external_ref = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(metadata_json)
+        .bind(external_ref)
+        .bind(run_id)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        Ok(())
+    }
+
     async fn list_for_timeout(
         &self,
         heartbeat_cutoff: DateTime<Utc>,
