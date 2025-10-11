@@ -61,6 +61,7 @@ pub async fn serve_unified(
     governance: GovernanceConfig,
     cfg: ServeConfig,
 ) -> ServerResult<()> {
+    app_state.spawn_background_tasks();
     let mut tasks: Vec<tokio::task::JoinHandle<ServerResult<()>>> = Vec::new();
     if let Some(addr) = cfg.rest_addr.clone() {
         let st = app_state.clone();

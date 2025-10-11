@@ -36,6 +36,7 @@ pub async fn execute(args: ServeRestArgs, db_path: &str) -> CliResult<()> {
 
     // Create app state from database path
     let app_state = AppState::from_db_path(db_path).await?;
+    app_state.spawn_background_tasks();
 
     // Build governance config
     let governance = GovernanceConfig::new(

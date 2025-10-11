@@ -33,7 +33,7 @@ pub struct OutboxDispatcher {
     pub runs: RunService,
     pub endpoint: String,
     pub config: OutboxDispatcherConfig,
-    pub http_client: reqwest::Client,
+    pub http_client: Option<reqwest::Client>,
 }
 
 impl OutboxDispatcher {
@@ -43,7 +43,17 @@ impl OutboxDispatcher {
         endpoint: String,
         config: OutboxDispatcherConfig,
     ) -> Self {
-        Self { outbox, runs, endpoint, config, http_client: reqwest::Client::new() }
+        Self::with_client(outbox, runs, endpoint, config, Some(reqwest::Client::new()))
+    }
+
+    pub fn with_client(
+        outbox: OutboxService,
+        runs: RunService,
+        endpoint: String,
+        config: OutboxDispatcherConfig,
+        http_client: Option<reqwest::Client>,
+    ) -> Self {
+        Self { outbox, runs, endpoint, config, http_client }
     }
 
     pub async fn run_loop(self: Arc<Self>) {
@@ -71,9 +81,16 @@ impl OutboxDispatcher {
     }
 
     async fn process_record(&self, record: OrchestratorOutboxRecord) -> anyhow::Result<()> {
+        let client = match &self.http_client {
+            Some(client) => client,
+            None => {
+                // No HTTP client configured (e.g., unit tests); mark as delivered for observability.
+                self.outbox.mark_delivered(record.id, Utc::now()).await?;
+                return Ok(());
+            }
+        };
         let payload = record.payload.clone();
-        let response = self
-            .http_client
+        let response = client
             .post(&self.endpoint)
             .json(&payload)
             .send()

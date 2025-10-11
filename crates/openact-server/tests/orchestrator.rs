@@ -1,0 +1,124 @@
+use axum::{body::Body, http::Request};
+use chrono::{Duration as ChronoDuration, Utc};
+use serde_json::{json, Map};
+use std::sync::Arc;
+use std::time::Duration;
+use tower::ServiceExt;
+
+use openact_core::orchestration::{OrchestratorOutboxStore, OrchestratorRunStatus, OrchestratorRunStore};
+use openact_core::types::Trn;
+use openact_server::orchestration::{
+    HeartbeatSupervisor, HeartbeatSupervisorConfig, OutboxDispatcher, OutboxDispatcherConfig,
+    OutboxService, RunService, StepflowCommandAdapter,
+};
+use openact_server::{restapi::create_router, AppState};
+use openact_store::SqlStore;
+use uuid::Uuid;
+
+fn sample_envelope(target: &Trn, tenant: &str) -> aionix_protocol::CommandEnvelope {
+    aionix_protocol::CommandEnvelope {
+        schema_version: "1.1.0".to_string(),
+        id: Uuid::new_v4().to_string(),
+        timestamp: Utc::now().to_rfc3339(),
+        command: "openact.test.execute".to_string(),
+        source: format!("trn:stepflow:{}:engine", tenant),
+        target: target.as_str().to_string(),
+        tenant: tenant.to_string(),
+        trace_id: Uuid::new_v4().to_string(),
+        parameters: Map::new(),
+        actor_trn: None,
+        parameters_schema_ref: None,
+        expect_response: None,
+        timeout_seconds: Some(30),
+        idempotency_key: None,
+        authz_scopes: None,
+        correlation_id: None,
+        attachments: None,
+        labels: None,
+        schedule_at: None,
+        deadline: None,
+        extensions: Map::new(),
+    }
+}
+
+async fn build_app_state(store: Arc<SqlStore>) -> AppState {
+    let conn_store = store.as_ref().clone();
+    let act_store = store.as_ref().clone();
+    let registry = openact_registry::ConnectorRegistry::new(conn_store, act_store);
+
+    let orchestrator_runs: Arc<dyn OrchestratorRunStore> = store.clone();
+    let orchestrator_outbox: Arc<dyn OrchestratorOutboxStore> = store.clone();
+    let run_service = RunService::new(orchestrator_runs.clone());
+    let outbox_service = OutboxService::new(orchestrator_outbox.clone());
+    let outbox_dispatcher = Arc::new(OutboxDispatcher::with_client(
+        outbox_service.clone(),
+        run_service.clone(),
+        String::new(),
+        OutboxDispatcherConfig::default(),
+        None,
+    ));
+    let heartbeat_supervisor = Arc::new(HeartbeatSupervisor::new(
+        run_service.clone(),
+        outbox_service.clone(),
+        HeartbeatSupervisorConfig::default(),
+    ));
+
+    AppState {
+        store,
+        registry: Arc::new(registry),
+        orchestrator_runs,
+        orchestrator_outbox,
+        run_service,
+        outbox_service,
+        outbox_dispatcher,
+        heartbeat_supervisor,
+        #[cfg(feature = "authflow")]
+        flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
+    }
+}
+
+#[tokio::test]
+async fn orchestrator_callback_marks_success() {
+    let store = Arc::new(SqlStore::new("sqlite::memory:").await.unwrap());
+    let app_state = build_app_state(store.clone()).await;
+
+    let tenant = "acme";
+    let target_trn = Trn::new("trn:openact:acme:action/http/test".to_string());
+    let envelope = sample_envelope(&target_trn, tenant);
+    let (run_record, _) = StepflowCommandAdapter::prepare_run(
+        &envelope,
+        tenant,
+        &target_trn,
+        Duration::from_secs(30),
+    );
+    let run_id = run_record.run_id.clone();
+    app_state.run_service.create_run(run_record).await.unwrap();
+
+    let governance = openact_mcp::GovernanceConfig::new(vec![], vec![], 10, 30);
+    let router = create_router().with_state((app_state.clone(), governance));
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/orchestrator/runs/{}/completion", run_id))
+        .header("content-type", "application/json")
+        .header("x-tenant", tenant)
+        .body(Body::from(r#"{"status":"succeeded","result":{"foo":"bar"}}"#))
+        .unwrap();
+
+    let response = router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    let run_after = app_state.run_service.get(&run_id).await.unwrap().unwrap();
+    assert_eq!(run_after.status, OrchestratorRunStatus::Succeeded);
+    assert_eq!(run_after.phase.as_deref(), Some("succeeded"));
+    assert_eq!(run_after.result, Some(json!({"foo":"bar"})));
+
+    let due = app_state
+        .outbox_service
+        .fetch_due(Utc::now() + ChronoDuration::seconds(1), 10)
+        .await
+        .unwrap();
+    assert_eq!(due.len(), 1);
+    let payload = &due[0].payload;
+    assert_eq!(payload["data"]["status"], "succeeded");
+}

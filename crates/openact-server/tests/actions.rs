@@ -107,11 +107,12 @@ impl TestContext {
         let orchestrator_outbox: Arc<dyn OrchestratorOutboxStore> = store.clone();
         let run_service = RunService::new(orchestrator_runs.clone());
         let outbox_service = OutboxService::new(orchestrator_outbox.clone());
-        let outbox_dispatcher = Arc::new(OutboxDispatcher::new(
+        let outbox_dispatcher = Arc::new(OutboxDispatcher::with_client(
             outbox_service.clone(),
             run_service.clone(),
-            "http://localhost:8080/api/v1/stepflow/events".to_string(),
+            String::new(),
             OutboxDispatcherConfig::default(),
+            None,
         ));
         let heartbeat_supervisor = Arc::new(HeartbeatSupervisor::new(
             run_service.clone(),

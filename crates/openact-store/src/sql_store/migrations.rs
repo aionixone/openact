@@ -53,7 +53,6 @@ impl MigrationRunner {
         }
 
         if !applied_versions.contains(&3) {
-            println!("applying migration 003");
             self.run_migration_003().await?;
 
             sqlx::query(
@@ -184,7 +183,6 @@ impl MigrationRunner {
                 }
                 let statement = lines.join("\n").trim().trim_end_matches(';').trim().to_string();
                 if !statement.is_empty() {
-                    println!("migration003 executing: {}", statement);
                     sqlx::query(&statement).execute(&mut *tx).await?;
                 }
                 buffer.clear();
@@ -205,7 +203,6 @@ impl MigrationRunner {
         }
         let trailing_stmt = trailing_lines.join("\n").trim().to_string();
         if !trailing_stmt.is_empty() {
-            println!("migration003 executing trailing: {}", trailing_stmt);
             sqlx::query(&trailing_stmt).execute(&mut *tx).await?;
         }
 
