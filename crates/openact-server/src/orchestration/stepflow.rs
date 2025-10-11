@@ -19,9 +19,8 @@ impl StepflowCommandAdapter {
     ) -> (OrchestratorRunRecord, Option<u64>) {
         let run_id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        let deadline_at: Option<DateTime<Utc>> = chrono::Duration::from_std(effective_timeout)
-            .ok()
-            .map(|delta| now + delta);
+        let deadline_at: Option<DateTime<Utc>> =
+            chrono::Duration::from_std(effective_timeout).ok().map(|delta| now + delta);
 
         let heartbeat_timeout = effective_timeout.as_secs();
 
@@ -57,6 +56,24 @@ impl StepflowCommandAdapter {
         (record, Some(heartbeat_timeout))
     }
 
+    pub fn build_success_event(run: &OrchestratorRunRecord, output: &Value) -> Value {
+        let data = json!({
+            "status": "succeeded",
+            "result": output,
+            "commandId": run.command_id,
+        });
+        Self::build_event(run, "succeeded", data)
+    }
+
+    pub fn build_failure_event(run: &OrchestratorRunRecord, error: &Value) -> Value {
+        let data = json!({
+            "status": "failed",
+            "error": error,
+            "commandId": run.command_id,
+        });
+        Self::build_event(run, "failed", data)
+    }
+
     pub fn build_timeout_event(run: &OrchestratorRunRecord) -> Value {
         let data = json!({
             "status": "timed_out",
@@ -70,10 +87,7 @@ impl StepflowCommandAdapter {
         let id = Uuid::new_v4().to_string();
         let timestamp = Utc::now().to_rfc3339();
         let tenant = run.tenant.clone();
-        let correlation = run
-            .correlation_id
-            .clone()
-            .unwrap_or_else(|| run.command_id.clone());
+        let correlation = run.correlation_id.clone().unwrap_or_else(|| run.command_id.clone());
 
         json!({
             "specversion": "1.0",

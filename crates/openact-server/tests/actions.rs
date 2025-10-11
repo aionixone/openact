@@ -6,10 +6,18 @@ use axum::{
 };
 use chrono::Utc;
 use openact_core::{
+    orchestration::{OrchestratorOutboxStore, OrchestratorRunStore},
     store::{ActionRepository, ConnectionStore},
     types::{ActionRecord, ConnectionRecord, ConnectorKind, Trn},
 };
-use openact_server::{restapi::create_router, AppState};
+use openact_server::{
+    orchestration::{
+        HeartbeatSupervisor, HeartbeatSupervisorConfig, OutboxDispatcher, OutboxDispatcherConfig,
+        OutboxService, RunService,
+    },
+    restapi::create_router,
+    AppState,
+};
 use openact_store::SqlStore;
 use serde_json::json;
 use std::{
@@ -95,18 +103,20 @@ impl TestContext {
         registry.register_connection_factory(factory.clone());
         registry.register_action_factory(factory);
 
-        let orchestrator_runs: Arc<dyn openact_core::orchestration::OrchestratorRunStore> = store.clone();
-        let orchestrator_outbox: Arc<dyn openact_core::orchestration::OrchestratorOutboxStore> = store.clone();
-        let run_service = openact_server::orchestration::RunService::new(orchestrator_runs.clone());
-        let outbox_service = openact_server::orchestration::OutboxService::new(orchestrator_outbox.clone());
-        let outbox_dispatcher = Arc::new(openact_server::orchestration::OutboxDispatcher::new(
+        let orchestrator_runs: Arc<dyn OrchestratorRunStore> = store.clone();
+        let orchestrator_outbox: Arc<dyn OrchestratorOutboxStore> = store.clone();
+        let run_service = RunService::new(orchestrator_runs.clone());
+        let outbox_service = OutboxService::new(orchestrator_outbox.clone());
+        let outbox_dispatcher = Arc::new(OutboxDispatcher::new(
             outbox_service.clone(),
             run_service.clone(),
             "http://localhost:8080/api/v1/stepflow/events".to_string(),
+            OutboxDispatcherConfig::default(),
         ));
-        let heartbeat_supervisor = Arc::new(openact_server::orchestration::HeartbeatSupervisor::new(
+        let heartbeat_supervisor = Arc::new(HeartbeatSupervisor::new(
             run_service.clone(),
             outbox_service.clone(),
+            HeartbeatSupervisorConfig::default(),
         ));
 
         let app_state = AppState {

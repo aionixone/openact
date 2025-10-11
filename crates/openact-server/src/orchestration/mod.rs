@@ -57,10 +57,7 @@ impl RunService {
         heartbeat_cutoff: DateTime<Utc>,
         limit: usize,
     ) -> anyhow::Result<Vec<OrchestratorRunRecord>> {
-        self.runs
-            .list_for_timeout(heartbeat_cutoff, limit)
-            .await
-            .map_err(|e| anyhow::anyhow!(e))
+        self.runs.list_for_timeout(heartbeat_cutoff, limit).await.map_err(|e| anyhow::anyhow!(e))
     }
 }
 
@@ -108,4 +105,6 @@ impl OutboxService {
 mod stepflow;
 pub use stepflow::StepflowCommandAdapter;
 mod outbox_dispatcher;
-pub use outbox_dispatcher::{HeartbeatSupervisor, OutboxDispatcher};
+pub use outbox_dispatcher::{
+    HeartbeatSupervisor, HeartbeatSupervisorConfig, OutboxDispatcher, OutboxDispatcherConfig,
+};

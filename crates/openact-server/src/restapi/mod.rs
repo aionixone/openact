@@ -16,6 +16,7 @@ pub async fn serve(
     governance: GovernanceConfig,
     addr: &str,
 ) -> ServerResult<()> {
+    app_state.spawn_background_tasks();
     let state = (app_state, governance);
     let app = create_router().with_state(state);
 

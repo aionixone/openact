@@ -13,6 +13,8 @@ use axum::{
     extract::{Extension, State},
     Json,
 };
+use chrono::Utc;
+use openact_core::orchestration::OrchestratorOutboxInsert;
 use openact_core::orchestration::OrchestratorRunStatus;
 use openact_core::types::{ActionTrn, ToolName, Trn};
 use openact_mcp::GovernanceConfig;
@@ -36,6 +38,7 @@ pub async fn execute_command(
 > {
     let req_id = request_id.0.clone();
     let run_service = app_state.run_service.clone();
+    let outbox_service = app_state.outbox_service.clone();
 
     let envelope = parse_command_envelope(&raw).map_err(|err| {
         let server_err = ServerError::InvalidInput(format!("invalid command envelope: {}", err));
@@ -129,6 +132,7 @@ pub async fn execute_command(
         effective_timeout,
     );
     let run_id = run_record.run_id.clone();
+    let run_snapshot = run_record.clone();
 
     if let Err(err) = run_service.create_run(run_record).await {
         tracing::error!(error = %err, command_id = %envelope.id, "failed to persist orchestrator run");
@@ -164,6 +168,22 @@ pub async fn execute_command(
             {
                 tracing::error!(error = %update_err, run_id = %run_id, "failed to mark run as failed");
             }
+            let failure_payload = json!({ "message": server_err.to_string() });
+            let failure_event =
+                StepflowCommandAdapter::build_failure_event(&run_snapshot, &failure_payload);
+            if let Err(err) = outbox_service
+                .enqueue(OrchestratorOutboxInsert {
+                    run_id: Some(run_id.clone()),
+                    protocol: "aionix.event.stepflow".to_string(),
+                    payload: failure_event,
+                    next_attempt_at: Utc::now(),
+                    attempts: 0,
+                    last_error: None,
+                })
+                .await
+            {
+                tracing::error!(error = %err, run_id = %run_id, "failed to enqueue failure event");
+            }
             return Err(server_err.to_http_response(req_id.clone()));
         }
         Err(_) => {
@@ -178,6 +198,20 @@ pub async fn execute_command(
                 .await
             {
                 tracing::error!(error = %update_err, run_id = %run_id, "failed to mark run as timed out");
+            }
+            let timeout_event = StepflowCommandAdapter::build_timeout_event(&run_snapshot);
+            if let Err(err) = outbox_service
+                .enqueue(OrchestratorOutboxInsert {
+                    run_id: Some(run_id.clone()),
+                    protocol: "aionix.event.stepflow".to_string(),
+                    payload: timeout_event,
+                    next_attempt_at: Utc::now(),
+                    attempts: 0,
+                    last_error: None,
+                })
+                .await
+            {
+                tracing::error!(error = %err, run_id = %run_id, "failed to enqueue timeout event");
             }
             let err = ServerError::Timeout;
             return Err(err.to_http_response(req_id.clone()));
@@ -203,6 +237,21 @@ pub async fn execute_command(
         .await
     {
         tracing::error!(error = %update_err, run_id = %run_id, "failed to mark run as succeeded");
+    }
+
+    let success_event = StepflowCommandAdapter::build_success_event(&run_snapshot, &output);
+    if let Err(err) = outbox_service
+        .enqueue(OrchestratorOutboxInsert {
+            run_id: Some(run_id.clone()),
+            protocol: "aionix.event.stepflow".to_string(),
+            payload: success_event,
+            next_attempt_at: Utc::now(),
+            attempts: 0,
+            last_error: None,
+        })
+        .await
+    {
+        tracing::error!(error = %err, run_id = %run_id, "failed to enqueue success event");
     }
 
     let response = StepflowCommandResponse {

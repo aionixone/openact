@@ -5,11 +5,11 @@
 pub mod app_state;
 pub mod dto;
 pub mod error;
-pub mod orchestration;
 #[cfg(feature = "authflow")]
 pub mod flow_runner;
 pub mod mcp;
 pub mod middleware;
+pub mod orchestration;
 pub mod restapi;
 
 // Re-export key types

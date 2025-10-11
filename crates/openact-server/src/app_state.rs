@@ -5,10 +5,16 @@ use openact_plugins as plugins;
 use openact_registry::ConnectorRegistry;
 use openact_store::SqlStore;
 use std::sync::Arc;
+use std::time::Duration;
+
+use chrono::Duration as ChronoDuration;
 
 #[cfg(feature = "authflow")]
 use crate::flow_runner::FlowRunManager;
-use crate::orchestration::{HeartbeatSupervisor, OutboxDispatcher, OutboxService, RunService};
+use crate::orchestration::{
+    HeartbeatSupervisor, HeartbeatSupervisorConfig, OutboxDispatcher, OutboxDispatcherConfig,
+    OutboxService, RunService,
+};
 
 /// Shared application state
 #[derive(Clone)]
@@ -47,16 +53,20 @@ impl AppState {
         let orchestrator_outbox: Arc<dyn OrchestratorOutboxStore> = store.clone();
         let run_service = RunService::new(orchestrator_runs.clone());
         let outbox_service = OutboxService::new(orchestrator_outbox.clone());
+        let dispatcher_cfg = load_outbox_config();
+        let heartbeat_cfg = load_heartbeat_config();
         let stepflow_endpoint = std::env::var("OPENACT_STEPFLOW_EVENT_ENDPOINT")
             .unwrap_or_else(|_| "http://localhost:8080/api/v1/stepflow/events".to_string());
         let outbox_dispatcher = Arc::new(OutboxDispatcher::new(
             outbox_service.clone(),
             run_service.clone(),
             stepflow_endpoint,
+            dispatcher_cfg,
         ));
         let heartbeat_supervisor = Arc::new(HeartbeatSupervisor::new(
             run_service.clone(),
             outbox_service.clone(),
+            heartbeat_cfg,
         ));
 
         Ok(Self {
@@ -72,4 +82,46 @@ impl AppState {
             flow_manager,
         })
     }
+}
+
+impl AppState {
+    pub fn spawn_background_tasks(&self) {
+        let dispatcher = self.outbox_dispatcher.clone();
+        tokio::spawn(async move { dispatcher.run_loop().await });
+
+        let heartbeat = self.heartbeat_supervisor.clone();
+        tokio::spawn(async move { heartbeat.run_loop().await });
+    }
+}
+
+fn load_outbox_config() -> OutboxDispatcherConfig {
+    let batch = parse_env_usize("OPENACT_OUTBOX_BATCH_SIZE", 50);
+    let interval_ms = parse_env_u64("OPENACT_OUTBOX_INTERVAL_MS", 1_000);
+    let retry_ms = parse_env_u64("OPENACT_OUTBOX_RETRY_MS", 30_000);
+
+    OutboxDispatcherConfig {
+        batch_size: batch,
+        interval: Duration::from_millis(interval_ms),
+        retry_backoff: ChronoDuration::milliseconds(retry_ms as i64),
+    }
+}
+
+fn load_heartbeat_config() -> HeartbeatSupervisorConfig {
+    let batch = parse_env_usize("OPENACT_HEARTBEAT_BATCH_SIZE", 50);
+    let interval_ms = parse_env_u64("OPENACT_HEARTBEAT_INTERVAL_MS", 1_000);
+    let grace_ms = parse_env_u64("OPENACT_HEARTBEAT_GRACE_MS", 5_000);
+
+    HeartbeatSupervisorConfig {
+        batch_size: batch,
+        interval: Duration::from_millis(interval_ms),
+        timeout_grace: ChronoDuration::milliseconds(grace_ms as i64),
+    }
+}
+
+fn parse_env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key).ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(default)
+}
+
+fn parse_env_u64(key: &str, default: u64) -> u64 {
+    std::env::var(key).ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(default)
 }
