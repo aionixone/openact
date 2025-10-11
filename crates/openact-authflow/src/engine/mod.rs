@@ -265,7 +265,7 @@ pub fn run_flow(
             Command::Choice { state_name: _, next_state } => {
                 current = next_state;
             }
-            Command::Wait { state_name: _, seconds: _, wait_until: _, next_state } => {
+            Command::Wait { state_name: _, seconds: _, timestamp: _, next_state } => {
                 // Skip actual sleeping in engine core; upper layer can handle timing
                 if let Some(next) = next_state {
                     current = next;

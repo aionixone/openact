@@ -494,23 +494,17 @@ mod tests {
                 comment: Some("Test flow".to_string()),
                 version: Some("1.0".to_string()),
                 start_at: "Start".to_string(),
-                global_config: None,
-                error_handling: None,
+                timeout_seconds: None,
                 states: {
                     let mut states = HashMap::new();
                     states.insert(
                         "Start".to_string(),
                         stepflow_dsl::State::Succeed(stepflow_dsl::SucceedState {
                             base: stepflow_dsl::BaseState {
-                                comment: None,
-                                retry: None,
-                                catch: None,
-                                next: None,
                                 end: Some(true),
+                                ..Default::default()
                             },
-                            assign: None,
                             output: None,
-                            parameters: None,
                         }),
                     );
                     states
