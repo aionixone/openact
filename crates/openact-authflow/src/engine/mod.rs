@@ -1085,7 +1085,8 @@ states:
         let mut conn1 = openact_core::AuthConnection::new("tenant1", "prov", "user1", "old");
         conn1.update_refresh_token(Some("rt".to_string()));
         conn1.expires_at = Some(chrono::Utc::now() - chrono::Duration::seconds(1));
-        futures::executor::block_on(store.put("c1", &conn1)).unwrap();
+        // Store with the TRN that matches what connection.read will use
+        futures::executor::block_on(store.put(&conn1.trn, &conn1)).unwrap();
 
         let yaml = format!(
             r#"
@@ -1096,7 +1097,7 @@ states:
     type: task
     resource: "connection.read"
     parameters:
-      connection_ref: "c1"
+      connection_ref: "tenant1:prov:user1"
     assign:
       refresh_token: "{{% result.refresh_token %}}"
     next: "Refresh"
@@ -1116,7 +1117,7 @@ states:
     type: task
     resource: "connection.update"
     parameters:
-      connection_ref: "c1"
+      connection_ref: "tenant1:prov:user1"
       access_token: "{{% $new_access_token %}}"
       refresh_token: "{{% $new_refresh_token %}}"
       expires: 999999
@@ -1197,7 +1198,8 @@ states:
         let mut conn2 = openact_core::AuthConnection::new("tenant2", "prov", "user2", "old");
         conn2.update_refresh_token(Some("rt2".to_string()));
         conn2.expires_at = Some(chrono::Utc::now() - chrono::Duration::seconds(1));
-        futures::executor::block_on(store.put("c2", &conn2)).unwrap();
+        // Store with the TRN that matches what ensure.fresh_token will use
+        futures::executor::block_on(store.put(&conn2.trn, &conn2)).unwrap();
 
         let yaml = format!(
             r#"
@@ -1208,7 +1210,7 @@ states:
     type: task
     resource: "ensure.fresh_token"
     parameters:
-      connection_ref: "c2"
+      connection_ref: "tenant2:prov:user2"
       tokenUrl: "{}{}"
       clientId: "cid"
       clientSecret: "sec"

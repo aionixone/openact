@@ -729,7 +729,10 @@ impl ConfigManager {
         let trn_str = trn.as_str();
         let parts: Vec<&str> = trn_str.split('/').collect();
         if parts.len() >= 2 {
-            Ok(parts[parts.len() - 1].to_string())
+            let name_with_version = parts[parts.len() - 1];
+            // Remove @version suffix if present
+            let name = name_with_version.split('@').next().unwrap_or(name_with_version);
+            Ok(name.to_string())
         } else {
             Err(ConfigManagerError::InvalidStructure(format!("Invalid TRN format: {}", trn_str)))
         }
