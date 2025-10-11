@@ -122,3 +122,86 @@ async fn orchestrator_callback_marks_success() {
     let payload = &due[0].payload;
     assert_eq!(payload["data"]["status"], "succeeded");
 }
+
+#[tokio::test]
+async fn orchestrator_callback_marks_failure() {
+    let store = Arc::new(SqlStore::new("sqlite::memory:").await.unwrap());
+    let app_state = build_app_state(store.clone()).await;
+
+    let tenant = "acme";
+    let target_trn = Trn::new("trn:openact:acme:action/http/test".to_string());
+    let envelope = sample_envelope(&target_trn, tenant);
+    let (run_record, _) = StepflowCommandAdapter::prepare_run(
+        &envelope,
+        tenant,
+        &target_trn,
+        Duration::from_secs(30),
+    );
+    let run_id = run_record.run_id.clone();
+    app_state.run_service.create_run(run_record).await.unwrap();
+
+    let governance = openact_mcp::GovernanceConfig::new(vec![], vec![], 10, 30);
+    let router = create_router().with_state((app_state.clone(), governance));
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/orchestrator/runs/{}/completion", run_id))
+        .header("content-type", "application/json")
+        .header("x-tenant", tenant)
+        .body(Body::from(r#"{"status":"failed","error":{"code":"E_TEST"}}"#))
+        .unwrap();
+
+    let response = router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    let run_after = app_state.run_service.get(&run_id).await.unwrap().unwrap();
+    assert_eq!(run_after.status, OrchestratorRunStatus::Failed);
+    assert_eq!(run_after.phase.as_deref(), Some("failed"));
+    assert_eq!(run_after.error, Some(json!({"code":"E_TEST"})));
+
+    let due = app_state
+        .outbox_service
+        .fetch_due(Utc::now() + ChronoDuration::seconds(1), 10)
+        .await
+        .unwrap();
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].payload["data"]["status"], "failed");
+}
+
+#[tokio::test]
+async fn heartbeat_supervisor_marks_timeout_and_enqueues_event() {
+    let store = Arc::new(SqlStore::new("sqlite::memory:").await.unwrap());
+    let app_state = build_app_state(store.clone()).await;
+
+    let tenant = "acme";
+    let target_trn = Trn::new("trn:openact:acme:action/http/test".to_string());
+    let envelope = sample_envelope(&target_trn, tenant);
+    let (mut run_record, _) = StepflowCommandAdapter::prepare_run(
+        &envelope,
+        tenant,
+        &target_trn,
+        Duration::from_secs(30),
+    );
+    run_record.heartbeat_at = Utc::now() - ChronoDuration::seconds(60);
+    run_record.deadline_at = Some(Utc::now() - ChronoDuration::seconds(30));
+    let run_id = run_record.run_id.clone();
+    app_state.run_service.create_run(run_record).await.unwrap();
+
+    app_state
+        .heartbeat_supervisor
+        .process_timeouts_once()
+        .await
+        .expect("heartbeat processing");
+
+    let run_after = app_state.run_service.get(&run_id).await.unwrap().unwrap();
+    assert_eq!(run_after.status, OrchestratorRunStatus::TimedOut);
+    assert_eq!(run_after.phase.as_deref(), Some("timed_out"));
+
+    let due = app_state
+        .outbox_service
+        .fetch_due(Utc::now() + ChronoDuration::seconds(1), 10)
+        .await
+        .unwrap();
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].payload["data"]["status"], "timed_out");
+}

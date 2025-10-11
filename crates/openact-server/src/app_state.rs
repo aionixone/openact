@@ -95,27 +95,38 @@ impl AppState {
 }
 
 fn load_outbox_config() -> OutboxDispatcherConfig {
-    let batch = parse_env_usize("OPENACT_OUTBOX_BATCH_SIZE", 50);
-    let interval_ms = parse_env_u64("OPENACT_OUTBOX_INTERVAL_MS", 1_000);
-    let retry_ms = parse_env_u64("OPENACT_OUTBOX_RETRY_MS", 30_000);
-
-    OutboxDispatcherConfig {
-        batch_size: batch,
-        interval: Duration::from_millis(interval_ms),
-        retry_backoff: ChronoDuration::milliseconds(retry_ms as i64),
-    }
+    let mut cfg = OutboxDispatcherConfig::default();
+    cfg.batch_size = parse_env_usize("OPENACT_OUTBOX_BATCH_SIZE", cfg.batch_size);
+    cfg.interval = Duration::from_millis(parse_env_u64(
+        "OPENACT_OUTBOX_INTERVAL_MS",
+        cfg.interval.as_millis() as u64,
+    ));
+    cfg.retry_initial_backoff = ChronoDuration::milliseconds(parse_env_u64(
+        "OPENACT_OUTBOX_RETRY_INITIAL_MS",
+        cfg.retry_initial_backoff.num_milliseconds() as u64,
+    ) as i64);
+    cfg.retry_max_backoff = ChronoDuration::milliseconds(parse_env_u64(
+        "OPENACT_OUTBOX_RETRY_MAX_MS",
+        cfg.retry_max_backoff.num_milliseconds() as u64,
+    ) as i64);
+    cfg.retry_multiplier = parse_env_f64("OPENACT_OUTBOX_RETRY_FACTOR", cfg.retry_multiplier);
+    cfg.retry_max_attempts =
+        parse_env_u32("OPENACT_OUTBOX_RETRY_MAX_ATTEMPTS", cfg.retry_max_attempts);
+    cfg
 }
 
 fn load_heartbeat_config() -> HeartbeatSupervisorConfig {
-    let batch = parse_env_usize("OPENACT_HEARTBEAT_BATCH_SIZE", 50);
-    let interval_ms = parse_env_u64("OPENACT_HEARTBEAT_INTERVAL_MS", 1_000);
-    let grace_ms = parse_env_u64("OPENACT_HEARTBEAT_GRACE_MS", 5_000);
-
-    HeartbeatSupervisorConfig {
-        batch_size: batch,
-        interval: Duration::from_millis(interval_ms),
-        timeout_grace: ChronoDuration::milliseconds(grace_ms as i64),
-    }
+    let mut cfg = HeartbeatSupervisorConfig::default();
+    cfg.batch_size = parse_env_usize("OPENACT_HEARTBEAT_BATCH_SIZE", cfg.batch_size);
+    cfg.interval = Duration::from_millis(parse_env_u64(
+        "OPENACT_HEARTBEAT_INTERVAL_MS",
+        cfg.interval.as_millis() as u64,
+    ));
+    cfg.timeout_grace = ChronoDuration::milliseconds(parse_env_u64(
+        "OPENACT_HEARTBEAT_GRACE_MS",
+        cfg.timeout_grace.num_milliseconds() as u64,
+    ) as i64);
+    cfg
 }
 
 fn parse_env_usize(key: &str, default: usize) -> usize {
@@ -124,4 +135,16 @@ fn parse_env_usize(key: &str, default: usize) -> usize {
 
 fn parse_env_u64(key: &str, default: u64) -> u64 {
     std::env::var(key).ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(default)
+}
+
+fn parse_env_u32(key: &str, default: u32) -> u32 {
+    std::env::var(key).ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(default)
+}
+
+fn parse_env_f64(key: &str, default: f64) -> f64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| v.is_finite())
+        .unwrap_or(default)
 }

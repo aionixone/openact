@@ -8,6 +8,7 @@ use openact_core::orchestration::{
 };
 use serde_json::Value;
 use tokio::time::{sleep, Instant};
+use tracing::{debug, info, warn};
 
 use super::{OutboxService, RunService, StepflowCommandAdapter};
 
@@ -15,7 +16,10 @@ use super::{OutboxService, RunService, StepflowCommandAdapter};
 pub struct OutboxDispatcherConfig {
     pub batch_size: usize,
     pub interval: Duration,
-    pub retry_backoff: ChronoDuration,
+    pub retry_initial_backoff: ChronoDuration,
+    pub retry_max_backoff: ChronoDuration,
+    pub retry_multiplier: f64,
+    pub retry_max_attempts: u32,
 }
 
 impl Default for OutboxDispatcherConfig {
@@ -23,7 +27,10 @@ impl Default for OutboxDispatcherConfig {
         Self {
             batch_size: 50,
             interval: Duration::from_millis(1_000),
-            retry_backoff: ChronoDuration::seconds(30),
+            retry_initial_backoff: ChronoDuration::seconds(30),
+            retry_max_backoff: ChronoDuration::minutes(5),
+            retry_multiplier: 2.0,
+            retry_max_attempts: 5,
         }
     }
 }
@@ -72,12 +79,19 @@ impl OutboxDispatcher {
     async fn process_batch(&self) -> anyhow::Result<()> {
         let now = Utc::now();
         let records = self.outbox.fetch_due(now, self.config.batch_size).await?;
+        if !records.is_empty() {
+            debug!(count = records.len(), endpoint = %self.endpoint, "dispatching outbox batch");
+        }
         for record in records {
             if let Err(err) = self.process_record(record).await {
                 tracing::error!(error = %err, "outbox record failed");
             }
         }
         Ok(())
+    }
+
+    pub async fn process_batch_once(&self) -> anyhow::Result<()> {
+        self.process_batch().await
     }
 
     async fn process_record(&self, record: OrchestratorOutboxRecord) -> anyhow::Result<()> {
@@ -98,16 +112,48 @@ impl OutboxDispatcher {
             .context("send event to orchestrator")?;
 
         if response.status().is_success() {
+            info!(id = record.id, run_id = %record.run_id.clone().unwrap_or_default(), "outbox event delivered");
             self.outbox.mark_delivered(record.id, Utc::now()).await?;
         } else {
             let err_body = response.text().await.unwrap_or_else(|_| "<no body>".into());
-            let next_attempt = Utc::now() + self.config.retry_backoff;
-            self.outbox
-                .mark_retry(record.id, next_attempt, record.attempts + 1, Some(err_body))
-                .await?;
+            let current_attempt = record.attempts + 1;
+            if current_attempt as u32 >= self.config.retry_max_attempts {
+                warn!(
+                    id = record.id,
+                    run_id = %record.run_id.clone().unwrap_or_default(),
+                    attempts = current_attempt,
+                    "outbox event reached max retry attempts; dropping"
+                );
+                self.outbox.mark_delivered(record.id, Utc::now()).await?
+            } else {
+                let backoff = self.compute_backoff(current_attempt);
+                let next_attempt = Utc::now() + backoff;
+                warn!(
+                    id = record.id,
+                    run_id = %record.run_id.clone().unwrap_or_default(),
+                    attempts = current_attempt,
+                    backoff_ms = backoff.num_milliseconds(),
+                    "outbox delivery failed; scheduling retry"
+                );
+                self.outbox
+                    .mark_retry(record.id, next_attempt, current_attempt, Some(err_body))
+                    .await?;
+            }
         }
 
         Ok(())
+    }
+
+    fn compute_backoff(&self, attempts: i32) -> ChronoDuration {
+        let base_ms = self.config.retry_initial_backoff.num_milliseconds().max(1);
+        let factor = self.config.retry_multiplier.max(1.0);
+        let attempt_index = (attempts - 1).max(0) as f64;
+        let mut backoff_ms = (base_ms as f64) * factor.powf(attempt_index);
+        let max_ms = self.config.retry_max_backoff.num_milliseconds().max(base_ms);
+        if backoff_ms > max_ms as f64 {
+            backoff_ms = max_ms as f64;
+        }
+        ChronoDuration::milliseconds(backoff_ms.round() as i64)
     }
 }
 
@@ -156,6 +202,7 @@ impl HeartbeatSupervisor {
         let cutoff = Utc::now() - self.config.timeout_grace;
         let candidates = self.runs.list_for_timeout(cutoff, self.config.batch_size).await?;
         for run in candidates {
+            warn!(run_id = %run.run_id, "heartbeat timeout detected");
             self.runs
                 .update_status(
                     &run.run_id,
@@ -185,5 +232,9 @@ impl HeartbeatSupervisor {
             .await
             .map(|_| ())
             .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    pub async fn process_timeouts_once(&self) -> anyhow::Result<()> {
+        self.process_timeouts().await
     }
 }
