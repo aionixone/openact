@@ -144,6 +144,16 @@ pub struct StepflowCommandResponse {
     pub request_id: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelCommandResponse {
+    pub accepted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
 // Inline execution DTOs
 #[derive(Deserialize)]
 pub struct ExecuteInlineRequest {

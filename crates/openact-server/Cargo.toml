@@ -38,3 +38,4 @@ mcp-rmcp = []
 
 [dev-dependencies]
 async-trait = "0.1"
+urlencoding = "2.1"

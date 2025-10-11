@@ -5,5 +5,5 @@ pub mod actions;
 pub mod authflow;
 pub mod health;
 pub mod kinds;
-pub mod stepflow;
 pub mod orchestrator;
+pub mod stepflow;

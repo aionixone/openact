@@ -1,5 +1,10 @@
-use axum::{extract::{Path, State}, Extension, Json};
-use openact_core::orchestration::{OrchestratorOutboxInsert, OrchestratorRunRecord, OrchestratorRunStatus};
+use axum::{
+    extract::{Path, State},
+    Extension, Json,
+};
+use openact_core::orchestration::{
+    OrchestratorOutboxInsert, OrchestratorRunRecord, OrchestratorRunStatus,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -33,7 +38,10 @@ pub async fn mark_completion(
         .get(&run_id)
         .await
         .map_err(|e| ServerError::Internal(e.to_string()).to_http_response(req_id.clone()))?
-        .ok_or_else(|| ServerError::NotFound(format!("run {} not found", run_id)).to_http_response(req_id.clone()))?;
+        .ok_or_else(|| {
+            ServerError::NotFound(format!("run {} not found", run_id))
+                .to_http_response(req_id.clone())
+        })?;
 
     match payload.status.to_ascii_lowercase().as_str() {
         "succeeded" => {
@@ -47,15 +55,16 @@ pub async fn mark_completion(
                     None,
                 )
                 .await
-                .map_err(|e| ServerError::Internal(e.to_string()).to_http_response(req_id.clone()))?;
+                .map_err(|e| {
+                    ServerError::Internal(e.to_string()).to_http_response(req_id.clone())
+                })?;
 
             let event = StepflowCommandAdapter::build_success_event(&run, &result_value);
             enqueue_event(&outbox_service, &run, event, &req_id).await?;
         }
         "failed" => {
-            let error_value = payload
-                .error
-                .unwrap_or_else(|| json!({ "message": "Run reported failure" }));
+            let error_value =
+                payload.error.unwrap_or_else(|| json!({ "message": "Run reported failure" }));
             run_service
                 .update_status(
                     &run.run_id,
@@ -65,15 +74,16 @@ pub async fn mark_completion(
                     Some(error_value.clone()),
                 )
                 .await
-                .map_err(|e| ServerError::Internal(e.to_string()).to_http_response(req_id.clone()))?;
+                .map_err(|e| {
+                    ServerError::Internal(e.to_string()).to_http_response(req_id.clone())
+                })?;
 
             let event = StepflowCommandAdapter::build_failure_event(&run, &error_value);
             enqueue_event(&outbox_service, &run, event, &req_id).await?;
         }
         "cancelled" => {
-            let error_value = payload
-                .error
-                .unwrap_or_else(|| json!({ "message": "Run cancelled" }));
+            let error_value =
+                payload.error.unwrap_or_else(|| json!({ "message": "Run cancelled" }));
             run_service
                 .update_status(
                     &run.run_id,
@@ -83,7 +93,9 @@ pub async fn mark_completion(
                     Some(error_value.clone()),
                 )
                 .await
-                .map_err(|e| ServerError::Internal(e.to_string()).to_http_response(req_id.clone()))?;
+                .map_err(|e| {
+                    ServerError::Internal(e.to_string()).to_http_response(req_id.clone())
+                })?;
 
             let event = StepflowCommandAdapter::build_failure_event(&run, &error_value);
             enqueue_event(&outbox_service, &run, event, &req_id).await?;
@@ -113,6 +125,8 @@ async fn enqueue_event(
             last_error: None,
         })
         .await
-        .map_err(|e| ServerError::Internal(e.to_string()).to_http_response(request_id.to_string()))?;
+        .map_err(|e| {
+            ServerError::Internal(e.to_string()).to_http_response(request_id.to_string())
+        })?;
     Ok(())
 }

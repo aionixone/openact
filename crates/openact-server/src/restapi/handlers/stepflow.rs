@@ -10,21 +10,32 @@ use crate::{
 };
 use aionix_protocol::parse_command_envelope;
 use axum::{
-    extract::{Extension, State},
+    extract::{Extension, Path, State},
+    http::StatusCode,
     Json,
 };
 use chrono::Utc;
-use openact_core::orchestration::OrchestratorOutboxInsert;
-use openact_core::orchestration::OrchestratorRunStatus;
+use openact_core::orchestration::{OrchestratorOutboxInsert, OrchestratorRunStatus};
 use openact_core::types::{ActionTrn, ToolName, Trn};
 use openact_mcp::GovernanceConfig;
 use openact_registry::ExecutionContext;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::convert::TryFrom;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 
-const SUPPORTED_SCHEMA_PREFIX: &str = "1.";
+const SUPPORTED_SCHEMA_PREFIX: &str = "0.";
+
+#[derive(Deserialize)]
+pub struct CancelCommandPayload {
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default, rename = "requestedBy")]
+    pub requested_by: Option<String>,
+    #[serde(default, rename = "traceId")]
+    pub trace_id: Option<String>,
+}
 
 /// Handle Stepflow command envelopes via REST
 pub async fn execute_command(
@@ -268,4 +279,101 @@ pub async fn execute_command(
     };
 
     Ok(Json(response))
+}
+
+/// Cancel an in-flight Stepflow command run
+pub async fn cancel_command(
+    State((app_state, governance)): State<(AppState, GovernanceConfig)>,
+    Extension(request_id): Extension<RequestId>,
+    Path(run_id): Path<String>,
+    Json(payload): Json<CancelCommandPayload>,
+) -> Result<
+    (StatusCode, Json<crate::dto::CancelCommandResponse>),
+    (StatusCode, Json<crate::error::ErrorResponse>),
+> {
+    let req_id = request_id.0.clone();
+    let run_service = app_state.run_service.clone();
+    let outbox_service = app_state.outbox_service.clone();
+
+    let run = run_service
+        .get(&run_id)
+        .await
+        .map_err(|e| ServerError::Internal(e.to_string()).to_http_response(req_id.clone()))?
+        .ok_or_else(|| {
+            ServerError::NotFound(format!("run {} not found", run_id))
+                .to_http_response(req_id.clone())
+        })?;
+
+    if matches!(
+        run.status,
+        OrchestratorRunStatus::Cancelled
+            | OrchestratorRunStatus::Failed
+            | OrchestratorRunStatus::Succeeded
+            | OrchestratorRunStatus::TimedOut
+    ) {
+        let err = ServerError::InvalidInput("run already finished".into());
+        return Err(err.to_http_response(req_id));
+    }
+
+    let tool_name = ToolName::normalize_action_ref(run.action_trn.as_str())
+        .map(|t| t.to_dot_string())
+        .ok_or_else(|| {
+            let err = ServerError::InvalidInput("unable to derive tool name from TRN".into());
+            err.to_http_response(req_id.clone())
+        })?;
+
+    if !governance.is_tool_allowed(&tool_name) {
+        let err = ServerError::Forbidden(format!("tool not allowed: {}", tool_name));
+        return Err(err.to_http_response(req_id.clone()));
+    }
+
+    let mut cancel_details = serde_json::Map::new();
+    if let Some(reason) = payload.reason.as_ref() {
+        cancel_details.insert("reason".into(), Value::String(reason.clone()));
+    }
+    if let Some(requested_by) = payload.requested_by.as_ref() {
+        cancel_details.insert("requestedBy".into(), Value::String(requested_by.clone()));
+    }
+    if let Some(trace_id) = payload.trace_id.as_ref() {
+        cancel_details.insert("traceId".into(), Value::String(trace_id.clone()));
+    }
+
+    let error_value = if cancel_details.is_empty() {
+        None
+    } else {
+        Some(Value::Object(cancel_details.clone()))
+    };
+    let cancel_payload = error_value.clone().unwrap_or(Value::Null);
+
+    run_service
+        .update_status(
+            &run.run_id,
+            OrchestratorRunStatus::Cancelled,
+            Some("cancelled".to_string()),
+            None,
+            error_value.clone(),
+        )
+        .await
+        .map_err(|e| ServerError::Internal(e.to_string()).to_http_response(req_id.clone()))?;
+
+    let event = StepflowCommandAdapter::build_cancelled_event(&run, &cancel_payload);
+    outbox_service
+        .enqueue(OrchestratorOutboxInsert {
+            run_id: Some(run.run_id.clone()),
+            protocol: "aionix.event.stepflow".into(),
+            payload: event,
+            next_attempt_at: chrono::Utc::now(),
+            attempts: 0,
+            last_error: None,
+        })
+        .await
+        .map_err(|e| ServerError::Internal(e.to_string()).to_http_response(req_id.clone()))?;
+
+    let response = crate::dto::CancelCommandResponse {
+        accepted: true,
+        phase: Some("cancelled".to_string()),
+        request_id: Some(req_id.clone()),
+    };
+
+    Ok((StatusCode::ACCEPTED, Json(response)))
 }

@@ -32,6 +32,10 @@ pub fn create_router() -> Router<(AppState, GovernanceConfig)> {
             axum::routing::post(super::handlers::stepflow::execute_command),
         )
         .route(
+            "/api/v1/stepflow/commands/:run_id/cancel",
+            axum::routing::post(super::handlers::stepflow::cancel_command),
+        )
+        .route(
             "/api/v1/orchestrator/runs/:run_id/completion",
             axum::routing::post(super::handlers::orchestrator::callback::mark_completion),
         )
