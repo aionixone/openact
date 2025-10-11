@@ -197,6 +197,8 @@ impl TestContext {
         let app_state = AppState {
             store: store.clone(),
             registry: Arc::new(registry),
+            orchestrator_runs: store.clone(),
+            orchestrator_outbox: store.clone(),
             #[cfg(feature = "authflow")]
             flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
         };

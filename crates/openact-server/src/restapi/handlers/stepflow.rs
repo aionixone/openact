@@ -5,6 +5,7 @@ use crate::{
     dto::StepflowCommandResponse,
     error::ServerError,
     middleware::{request_id::RequestId, tenant::Tenant},
+    orchestration::RunService,
     AppState,
 };
 use aionix_protocol::parse_command_envelope;
@@ -12,13 +13,15 @@ use axum::{
     extract::{Extension, State},
     Json,
 };
+use openact_core::orchestration::OrchestratorRunStatus;
 use openact_core::types::{ActionTrn, ToolName, Trn};
 use openact_mcp::GovernanceConfig;
 use openact_registry::ExecutionContext;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::convert::TryFrom;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
+use uuid::Uuid;
 
 const SUPPORTED_SCHEMA_PREFIX: &str = "1.";
 
@@ -33,6 +36,7 @@ pub async fn execute_command(
     (axum::http::StatusCode, Json<crate::error::ErrorResponse>),
 > {
     let req_id = request_id.0.clone();
+    let run_service = RunService::new(app_state.orchestrator_runs.clone());
 
     let envelope = parse_command_envelope(&raw).map_err(|err| {
         let server_err = ServerError::InvalidInput(format!("invalid command envelope: {}", err));
@@ -119,6 +123,9 @@ pub async fn execute_command(
         .unwrap_or(governance.timeout);
 
     let registry = app_state.registry.clone();
+    let run_id = Uuid::new_v4().to_string();
+
+    // TODO: integrate with orchestrator runtime for asynchronous flows
     let execution_start = Instant::now();
     let action_trn_str = target_trn.as_str().to_string();
 
@@ -133,8 +140,35 @@ pub async fn execute_command(
     };
 
     let output = match timeout(effective_timeout, fut).await {
-        Ok(res) => res.map_err(|err| err.to_http_response(req_id.clone()))?,
+        Ok(Ok(out)) => out,
+        Ok(Err(server_err)) => {
+            if let Err(update_err) = run_service
+                .update_status(
+                    &run_id,
+                    OrchestratorRunStatus::Failed,
+                    Some("failed".to_string()),
+                    None,
+                    Some(json!({ "message": server_err.to_string() })),
+                )
+                .await
+            {
+                tracing::error!(error = %update_err, run_id = %run_id, "failed to mark run as failed");
+            }
+            return Err(server_err.to_http_response(req_id.clone()));
+        }
         Err(_) => {
+            if let Err(update_err) = run_service
+                .update_status(
+                    &run_id,
+                    OrchestratorRunStatus::TimedOut,
+                    Some("timed_out".to_string()),
+                    None,
+                    Some(json!({ "message": "execution timed out" })),
+                )
+                .await
+            {
+                tracing::error!(error = %update_err, run_id = %run_id, "failed to mark run as timed out");
+            }
             let err = ServerError::Timeout;
             return Err(err.to_http_response(req_id.clone()));
         }
@@ -148,10 +182,23 @@ pub async fn execute_command(
         "stepflow command executed"
     );
 
+    if let Err(update_err) = run_service
+        .update_status(
+            &run_id,
+            OrchestratorRunStatus::Succeeded,
+            Some("succeeded".to_string()),
+            Some(output.clone()),
+            None,
+        )
+        .await
+    {
+        tracing::error!(error = %update_err, run_id = %run_id, "failed to mark run as succeeded");
+    }
+
     let response = StepflowCommandResponse {
         status: "succeeded".to_string(),
         result: Some(output),
-        run_id: None,
+        run_id: Some(run_id),
         phase: None,
         heartbeat_timeout: None,
         status_ttl: None,

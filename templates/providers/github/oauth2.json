@@ -105,7 +105,7 @@
         "refresh_token": "{% $oauth.refresh_token %}",
         "expires_in": "{% $oauth.expires_in %}"
       },
-      "output": {
+      "assign": {
         "auth_ref": "{% result.auth_ref %}",
         "connection_ref": "{% result.connection_ref %}"
       },

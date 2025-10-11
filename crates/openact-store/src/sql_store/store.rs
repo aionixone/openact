@@ -3,7 +3,12 @@ use crate::encryption::Crypto;
 use crate::error::{StoreError, StoreResult};
 use crate::sql_store::migrations::MigrationRunner;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use openact_core::{
+    orchestration::{
+        OrchestratorOutboxInsert, OrchestratorOutboxRecord, OrchestratorOutboxStore,
+        OrchestratorRunRecord, OrchestratorRunStatus, OrchestratorRunStore,
+    },
     store::{
         ActionListFilter, ActionListOptions, ActionListResult, ActionRepository, ActionSortField,
         AuthConnectionStore, ConnectionStore, RunStore,
@@ -11,8 +16,9 @@ use openact_core::{
     ActionRecord, AuthConnection, Checkpoint, ConnectionRecord, CoreResult, Trn,
 };
 use serde_json::Value as JsonValue;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
+use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -1240,6 +1246,371 @@ impl AuthConnectionStore for SqlStore {
 
         Ok(row.get::<i64, _>("count") as u64)
     }
+}
+
+#[async_trait]
+impl OrchestratorRunStore for SqlStore {
+    async fn insert_run(&self, run: &OrchestratorRunRecord) -> CoreResult<()> {
+        let result_json = serialize_optional_json(run.result.as_ref())?;
+        let error_json = serialize_optional_json(run.error.as_ref())?;
+        let metadata_json = serialize_optional_json(run.metadata.as_ref())?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO orchestrator_runs (
+                run_id, command_id, tenant, action_trn, status, phase, trace_id, correlation_id,
+                heartbeat_at, deadline_at, status_ttl_seconds, next_poll_at, poll_attempts,
+                external_ref, result_json, error_json, metadata_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&run.run_id)
+        .bind(&run.command_id)
+        .bind(&run.tenant)
+        .bind(run.action_trn.as_str())
+        .bind(run.status.as_str())
+        .bind(&run.phase)
+        .bind(&run.trace_id)
+        .bind(&run.correlation_id)
+        .bind(run.heartbeat_at)
+        .bind(run.deadline_at)
+        .bind(run.status_ttl_seconds)
+        .bind(run.next_poll_at)
+        .bind(run.poll_attempts)
+        .bind(&run.external_ref)
+        .bind(result_json)
+        .bind(error_json)
+        .bind(metadata_json)
+        .bind(run.created_at)
+        .bind(run.updated_at)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        Ok(())
+    }
+
+    async fn get_run(&self, run_id: &str) -> CoreResult<Option<OrchestratorRunRecord>> {
+        let row = sqlx::query(
+            r#"
+            SELECT *
+            FROM orchestrator_runs
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(run_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        if let Some(row) = row {
+            let record = map_run_row(&row)?;
+            Ok(Some(record))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn update_status(
+        &self,
+        run_id: &str,
+        status: OrchestratorRunStatus,
+        phase: Option<String>,
+        result: Option<JsonValue>,
+        error: Option<JsonValue>,
+    ) -> CoreResult<()> {
+        let result_json = serialize_optional_json(result.as_ref())?;
+        let error_json = serialize_optional_json(error.as_ref())?;
+
+        sqlx::query(
+            r#"
+            UPDATE orchestrator_runs
+            SET status = ?, phase = ?, result_json = ?, error_json = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(status.as_str())
+        .bind(&phase)
+        .bind(result_json)
+        .bind(error_json)
+        .bind(run_id)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        Ok(())
+    }
+
+    async fn refresh_heartbeat(
+        &self,
+        run_id: &str,
+        heartbeat_at: DateTime<Utc>,
+        deadline_at: Option<DateTime<Utc>>,
+    ) -> CoreResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE orchestrator_runs
+            SET heartbeat_at = ?, deadline_at = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(heartbeat_at)
+        .bind(deadline_at)
+        .bind(run_id)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        Ok(())
+    }
+
+    async fn update_poll_schedule(
+        &self,
+        run_id: &str,
+        next_poll_at: Option<DateTime<Utc>>,
+        poll_attempts: i32,
+    ) -> CoreResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE orchestrator_runs
+            SET next_poll_at = ?, poll_attempts = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(next_poll_at)
+        .bind(poll_attempts)
+        .bind(run_id)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        Ok(())
+    }
+
+    async fn list_for_timeout(
+        &self,
+        heartbeat_cutoff: DateTime<Utc>,
+        limit: usize,
+    ) -> CoreResult<Vec<OrchestratorRunRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT *
+            FROM orchestrator_runs
+            WHERE status = 'running'
+              AND (heartbeat_at <= ? OR (deadline_at IS NOT NULL AND deadline_at <= ?))
+            ORDER BY heartbeat_at ASC
+            LIMIT ?
+            "#,
+        )
+        .bind(heartbeat_cutoff)
+        .bind(heartbeat_cutoff)
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        let records = rows
+            .into_iter()
+            .map(|row| map_run_row(&row))
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        Ok(records)
+    }
+
+    async fn list_due_for_poll(
+        &self,
+        as_of: DateTime<Utc>,
+        limit: usize,
+    ) -> CoreResult<Vec<OrchestratorRunRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT *
+            FROM orchestrator_runs
+            WHERE status = 'running'
+              AND next_poll_at IS NOT NULL
+              AND next_poll_at <= ?
+            ORDER BY next_poll_at ASC
+            LIMIT ?
+            "#,
+        )
+        .bind(as_of)
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        let records = rows
+            .into_iter()
+            .map(|row| map_run_row(&row))
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        Ok(records)
+    }
+}
+
+#[async_trait]
+impl OrchestratorOutboxStore for SqlStore {
+    async fn enqueue(&self, insert: OrchestratorOutboxInsert) -> CoreResult<i64> {
+        let payload_json =
+            serde_json::to_string(&insert.payload).map_err(StoreError::Serialization)?;
+
+        let result = sqlx::query(
+            r#"
+            INSERT INTO orchestrator_outbox (
+                run_id, protocol, payload_json, attempts, next_attempt_at, last_error,
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            "#,
+        )
+        .bind(&insert.run_id)
+        .bind(&insert.protocol)
+        .bind(payload_json)
+        .bind(insert.attempts)
+        .bind(insert.next_attempt_at)
+        .bind(&insert.last_error)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    async fn fetch_ready(
+        &self,
+        as_of: DateTime<Utc>,
+        limit: usize,
+    ) -> CoreResult<Vec<OrchestratorOutboxRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT *
+            FROM orchestrator_outbox
+            WHERE delivered_at IS NULL
+              AND next_attempt_at <= ?
+            ORDER BY next_attempt_at ASC, id ASC
+            LIMIT ?
+            "#,
+        )
+        .bind(as_of)
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        let records = rows
+            .into_iter()
+            .map(|row| map_outbox_row(&row))
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        Ok(records)
+    }
+
+    async fn mark_delivered(&self, id: i64, delivered_at: DateTime<Utc>) -> CoreResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE orchestrator_outbox
+            SET delivered_at = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(delivered_at)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        Ok(())
+    }
+
+    async fn mark_retry(
+        &self,
+        id: i64,
+        next_attempt_at: DateTime<Utc>,
+        attempts: i32,
+        last_error: Option<String>,
+    ) -> CoreResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE orchestrator_outbox
+            SET next_attempt_at = ?, attempts = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(next_attempt_at)
+        .bind(attempts)
+        .bind(last_error)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        Ok(())
+    }
+}
+
+fn serialize_optional_json(value: Option<&JsonValue>) -> Result<Option<String>, StoreError> {
+    value.map(|v| serde_json::to_string(v).map_err(StoreError::Serialization)).transpose()
+}
+
+fn deserialize_optional_json(value: Option<String>) -> Result<Option<JsonValue>, StoreError> {
+    value.map(|json| serde_json::from_str(&json).map_err(StoreError::Serialization)).transpose()
+}
+
+fn map_run_row(row: &SqliteRow) -> Result<OrchestratorRunRecord, StoreError> {
+    let status_str: String = row.get("status");
+    let status = OrchestratorRunStatus::from_str(&status_str).map_err(|_| {
+        StoreError::Validation(format!("unknown orchestrator run status: {}", status_str))
+    })?;
+
+    let poll_attempts_i64: i64 = row.get("poll_attempts");
+    let poll_attempts = i32::try_from(poll_attempts_i64)
+        .map_err(|_| StoreError::Validation("poll_attempts exceeds i32 range".into()))?;
+
+    let result = deserialize_optional_json(row.get::<Option<String>, _>("result_json"))?;
+    let error = deserialize_optional_json(row.get::<Option<String>, _>("error_json"))?;
+    let metadata = deserialize_optional_json(row.get::<Option<String>, _>("metadata_json"))?;
+
+    Ok(OrchestratorRunRecord {
+        command_id: row.get::<String, _>("command_id"),
+        run_id: row.get::<String, _>("run_id"),
+        tenant: row.get::<String, _>("tenant"),
+        action_trn: Trn::new(row.get::<String, _>("action_trn")),
+        status,
+        phase: row.get::<Option<String>, _>("phase"),
+        trace_id: row.get::<String, _>("trace_id"),
+        correlation_id: row.get::<Option<String>, _>("correlation_id"),
+        heartbeat_at: row.get::<DateTime<Utc>, _>("heartbeat_at"),
+        deadline_at: row.get::<Option<DateTime<Utc>>, _>("deadline_at"),
+        status_ttl_seconds: row.get::<Option<i64>, _>("status_ttl_seconds"),
+        next_poll_at: row.get::<Option<DateTime<Utc>>, _>("next_poll_at"),
+        poll_attempts,
+        external_ref: row.get::<Option<String>, _>("external_ref"),
+        result,
+        error,
+        metadata,
+        created_at: row.get::<DateTime<Utc>, _>("created_at"),
+        updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
+    })
+}
+
+fn map_outbox_row(row: &SqliteRow) -> Result<OrchestratorOutboxRecord, StoreError> {
+    let attempts_i64: i64 = row.get("attempts");
+    let attempts = i32::try_from(attempts_i64)
+        .map_err(|_| StoreError::Validation("attempts exceeds i32 range".into()))?;
+
+    let payload_json: String = row.get("payload_json");
+    let payload = serde_json::from_str(&payload_json).map_err(StoreError::Serialization)?;
+
+    Ok(OrchestratorOutboxRecord {
+        id: row.get::<i64, _>("id"),
+        run_id: row.get::<Option<String>, _>("run_id"),
+        protocol: row.get::<String, _>("protocol"),
+        payload,
+        attempts,
+        next_attempt_at: row.get::<DateTime<Utc>, _>("next_attempt_at"),
+        last_error: row.get::<Option<String>, _>("last_error"),
+        created_at: row.get::<DateTime<Utc>, _>("created_at"),
+        updated_at: row.get::<DateTime<Utc>, _>("updated_at"),
+        delivered_at: row.get::<Option<DateTime<Utc>>, _>("delivered_at"),
+    })
 }
 
 #[cfg(test)]

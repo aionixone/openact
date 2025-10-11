@@ -1,4 +1,5 @@
 pub mod error;
+pub mod orchestration;
 pub mod policy;
 pub mod resolve;
 pub mod sanitization;
@@ -14,6 +15,11 @@ pub use sanitization::{
 pub use types::{
     ActionRecord, ActionTrnComponents, AuthConnection, Checkpoint, ConnectionRecord,
     ConnectionTrnComponents, ConnectorKind, McpOverrides, Trn, TrnComponents,
+};
+
+pub use orchestration::{
+    OrchestratorOutboxInsert, OrchestratorOutboxRecord, OrchestratorOutboxStore,
+    OrchestratorRunRecord, OrchestratorRunStatus, OrchestratorRunStore,
 };
 
 // Re-export MCP types

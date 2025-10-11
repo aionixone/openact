@@ -22,6 +22,8 @@ async fn make_router() -> Router {
     let app_state = AppState {
         store: store.clone(),
         registry: Arc::new(registry),
+        orchestrator_runs: store.clone(),
+        orchestrator_outbox: store.clone(),
         #[cfg(feature = "authflow")]
         flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
     };
@@ -208,6 +210,8 @@ async fn make_router_with_gov(allow: Vec<&str>, deny: Vec<&str>, seed: bool) -> 
     let app_state = AppState {
         store: store.clone(),
         registry: Arc::new(registry),
+        orchestrator_runs: store.clone(),
+        orchestrator_outbox: store.clone(),
         #[cfg(feature = "authflow")]
         flow_manager: Arc::new(openact_server::flow_runner::FlowRunManager::new(store.clone())),
     };

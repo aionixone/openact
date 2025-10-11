@@ -52,6 +52,17 @@ impl MigrationRunner {
                 .await?;
         }
 
+        if !applied_versions.contains(&3) {
+            println!("applying migration 003");
+            self.run_migration_003().await?;
+
+            sqlx::query(
+                "INSERT INTO _migrations (version, name) VALUES (3, '003_orchestrator_runtime')",
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+
         Ok(())
     }
 
@@ -134,6 +145,66 @@ impl MigrationRunner {
             if !line.is_empty() && !line.starts_with("--") && line.ends_with(';') {
                 sqlx::query(line).execute(&mut *tx).await?;
             }
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn run_migration_003(&self) -> StoreResult<()> {
+        let migration_sql = include_str!("../../migrations/003_orchestrator_runtime.sql");
+        let mut tx = self.pool.begin().await?;
+
+        let mut buffer = String::new();
+        let mut inside_trigger = false;
+
+        for raw_line in migration_sql.lines() {
+            let line = raw_line.trim_end();
+
+            buffer.push_str(line);
+            buffer.push('\n');
+
+            let upper = line.trim_start().to_uppercase();
+            if upper.starts_with("CREATE TRIGGER") {
+                inside_trigger = true;
+            }
+
+            let ends_with_semicolon = line.trim_end().ends_with(';');
+            let is_end_of_trigger = inside_trigger && upper.ends_with("END;");
+
+            if (ends_with_semicolon && !inside_trigger) || is_end_of_trigger {
+                let mut lines: Vec<&str> = buffer.lines().collect();
+                while let Some(first) = lines.first() {
+                    let trimmed = first.trim_start();
+                    if trimmed.is_empty() || trimmed.starts_with("--") {
+                        lines.remove(0);
+                    } else {
+                        break;
+                    }
+                }
+                let statement = lines.join("\n").trim().trim_end_matches(';').trim().to_string();
+                if !statement.is_empty() {
+                    sqlx::query(&statement).execute(&mut *tx).await?;
+                }
+                buffer.clear();
+                if is_end_of_trigger {
+                    inside_trigger = false;
+                }
+            }
+        }
+
+        let mut trailing_lines: Vec<&str> = buffer.lines().collect();
+        while let Some(first) = trailing_lines.first() {
+            let trimmed = first.trim_start();
+            if trimmed.is_empty() || trimmed.starts_with("--") {
+                trailing_lines.remove(0);
+            } else {
+                break;
+            }
+        }
+        let trailing_stmt = trailing_lines.join("\n").trim().to_string();
+        if !trailing_stmt.is_empty() {
+            sqlx::query(&trailing_stmt).execute(&mut *tx).await?;
         }
 
         tx.commit().await?;
