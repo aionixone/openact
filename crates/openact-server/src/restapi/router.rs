@@ -27,6 +27,10 @@ pub fn create_router() -> Router<(AppState, GovernanceConfig)> {
             axum::routing::post(super::handlers::actions::execute_inline),
         )
         .route("/api/v1/execute", axum::routing::post(super::handlers::actions::execute_by_trn))
+        .route(
+            "/api/v1/stepflow/commands",
+            axum::routing::post(super::handlers::stepflow::execute_command),
+        )
         .route("/api/v1/health", get(super::handlers::health::health_check))
         .layer(ServiceBuilder::new().layer(TenantLayer).layer(RequestIdLayer));
 

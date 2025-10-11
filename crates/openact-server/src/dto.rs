@@ -123,6 +123,27 @@ pub struct ExecuteResponse {
     pub result: Value,
 }
 
+/// Stepflow command execution response payload
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepflowCommandResponse {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heartbeat_timeout: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_ttl: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
 // Inline execution DTOs
 #[derive(Deserialize)]
 pub struct ExecuteInlineRequest {

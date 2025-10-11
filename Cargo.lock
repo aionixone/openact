@@ -76,6 +76,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aionix-protocol"
+version = "0.1.0"
+dependencies = [
+ "jsonschema",
+ "once_cell",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2661,6 +2671,7 @@ dependencies = [
 name = "openact-server"
 version = "0.1.0"
 dependencies = [
+ "aionix-protocol",
  "anyhow",
  "async-stream",
  "async-trait",

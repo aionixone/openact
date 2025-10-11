@@ -189,7 +189,8 @@ impl FlowRunHandle {
             }
         };
 
-        let auth_ref = extract_string_field(&final_context, self.auth_ref_ptr.as_deref(), "auth_ref");
+        let auth_ref =
+            extract_string_field(&final_context, self.auth_ref_ptr.as_deref(), "auth_ref");
         let connection_ref = extract_string_field(
             &final_context,
             self.connection_ref_ptr.as_deref(),
@@ -300,7 +301,9 @@ fn extract_string_field(context: &Value, pointer: Option<&str>, field: &str) -> 
     if let Some(states) = context.get("states").and_then(|v| v.as_object()) {
         for state in states.values() {
             if let Some(result) = state.get("result") {
-                if let Some(val) = result.as_object().and_then(|obj| obj.get(field)).and_then(|v| v.as_str()) {
+                if let Some(val) =
+                    result.as_object().and_then(|obj| obj.get(field)).and_then(|v| v.as_str())
+                {
                     return Some(val.to_string());
                 }
             }

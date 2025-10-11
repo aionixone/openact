@@ -500,10 +500,7 @@ mod tests {
                     states.insert(
                         "Start".to_string(),
                         stepflow_dsl::State::Succeed(stepflow_dsl::SucceedState {
-                            base: stepflow_dsl::BaseState {
-                                end: Some(true),
-                                ..Default::default()
-                            },
+                            base: stepflow_dsl::BaseState { end: Some(true), ..Default::default() },
                             output: None,
                         }),
                     );

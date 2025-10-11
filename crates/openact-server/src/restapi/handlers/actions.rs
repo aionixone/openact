@@ -1014,7 +1014,7 @@ pub async fn execute_by_trn(
     Ok(Json(response))
 }
 
-fn map_registry_error(err: openact_registry::RegistryError) -> ServerError {
+pub(super) fn map_registry_error(err: openact_registry::RegistryError) -> ServerError {
     match err {
         RegistryError::ActionNotFound(trn) => {
             ServerError::NotFound(format!("Action not found: {}", trn))
