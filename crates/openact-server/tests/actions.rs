@@ -113,6 +113,7 @@ impl TestContext {
             String::new(),
             OutboxDispatcherConfig::default(),
             None,
+            None,
         ));
         let heartbeat_supervisor = Arc::new(HeartbeatSupervisor::new(
             run_service.clone(),

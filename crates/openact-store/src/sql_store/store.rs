@@ -21,11 +21,16 @@ use sqlx::{Row, SqlitePool};
 use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
+use super::dedup::create_sqlite_dedup_store;
 /// SQLite-based store implementation
-#[derive(Debug, Clone)]
+use aionix_contracts::idempotency::DedupStore;
+
+#[derive(Clone)]
 pub struct SqlStore {
     pool: SqlitePool,
+    dedup: Arc<dyn DedupStore>,
 }
 
 impl SqlStore {
@@ -64,7 +69,8 @@ impl SqlStore {
         sqlx::query("PRAGMA journal_mode = WAL;").execute(&pool).await?;
         sqlx::query("PRAGMA synchronous = NORMAL;").execute(&pool).await?;
 
-        let store = Self { pool };
+        let dedup = create_sqlite_dedup_store(&pool);
+        let store = Self { pool, dedup };
 
         // Run migrations
         let migration_runner = MigrationRunner::new(store.pool.clone());
@@ -75,13 +81,18 @@ impl SqlStore {
 
     /// Create SqlStore from existing pool (for testing)
     pub fn from_pool(pool: SqlitePool) -> Self {
-        Self { pool }
+        let dedup = create_sqlite_dedup_store(&pool);
+        Self { pool, dedup }
     }
 
     /// Run migrations manually
     pub async fn migrate(&self) -> StoreResult<()> {
         let migration_runner = MigrationRunner::new(self.pool.clone());
         migration_runner.migrate().await
+    }
+
+    pub fn dedup_store(&self) -> Arc<dyn DedupStore> {
+        self.dedup.clone()
     }
 }
 
@@ -733,7 +744,10 @@ impl ActionRepository for SqlStore {
         let total: i64 = row.get("cnt");
 
         // Records query with sort and pagination
-        let mut sql = format!("SELECT trn, connector, name, connection_trn, config_json, mcp_enabled, mcp_overrides_json, created_at, updated_at, version FROM actions{}", where_sql);
+        let mut sql = format!(
+            "SELECT trn, connector, name, connection_trn, config_json, mcp_enabled, mcp_overrides_json, created_at, updated_at, version FROM actions{}",
+            where_sql
+        );
         sql.push_str(" ORDER BY ");
         match opts.sort_field.unwrap_or(ActionSortField::CreatedAt) {
             ActionSortField::CreatedAt => sql.push_str("created_at"),

@@ -3,13 +3,16 @@ use axum::{body::Body, http::Request};
 use chrono::{Duration as ChronoDuration, Utc};
 use httpmock::{Method::GET, MockServer};
 use serde_json::{json, Map, Value};
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tower::ServiceExt;
 use urlencoding::encode;
 
+use aionix_contracts::idempotency::DedupStore;
 use openact_core::orchestration::{
-    OrchestratorOutboxStore, OrchestratorRunStatus, OrchestratorRunStore,
+    OrchestratorOutboxInsert, OrchestratorOutboxStore, OrchestratorRunStatus, OrchestratorRunStore,
 };
 use openact_core::types::Trn;
 use openact_server::orchestration::{
@@ -21,10 +24,7 @@ use openact_store::SqlStore;
 use tokio::time::{sleep, Duration as TokioDuration};
 use uuid::Uuid;
 
-fn sample_envelope(
-    target: &Trn,
-    tenant: &str,
-) -> (CommandEnvelope, String, String) {
+fn sample_envelope(target: &Trn, tenant: &str) -> (CommandEnvelope, String, String) {
     let run_uuid = Uuid::new_v4().to_string();
     let run_id = format!("trn:stepflow:{}:execution/demo/{}@v1", tenant, run_uuid);
     let state_name = "SampleState".to_string();
@@ -64,6 +64,36 @@ fn sample_envelope(
     (envelope, run_id, state_name)
 }
 
+#[derive(Default)]
+struct RecordingDedupStore {
+    seen: Mutex<HashSet<String>>,
+    duplicates: AtomicUsize,
+}
+
+impl RecordingDedupStore {
+    fn duplicate_count(&self) -> usize {
+        self.duplicates.load(Ordering::SeqCst)
+    }
+}
+
+impl DedupStore for RecordingDedupStore {
+    fn check_and_record(&self, key: &str) -> bool {
+        let mut guard = self.seen.lock().expect("dedup mutex poisoned");
+        if guard.insert(key.to_string()) {
+            false
+        } else {
+            self.duplicates.fetch_add(1, Ordering::SeqCst);
+            true
+        }
+    }
+
+    fn remove(&self, key: &str) {
+        if let Ok(mut guard) = self.seen.lock() {
+            guard.remove(key);
+        }
+    }
+}
+
 fn expected_task_trn(run_id: &str, state: &str) -> String {
     let parsed = ContractTrn::parse(run_id).unwrap();
     let run_path = parsed.resource_path().unwrap_or("");
@@ -85,6 +115,7 @@ async fn build_app_state(store: Arc<SqlStore>) -> AppState {
         run_service.clone(),
         String::new(),
         OutboxDispatcherConfig::default(),
+        None,
         None,
     ));
     let heartbeat_supervisor = Arc::new(HeartbeatSupervisor::new(
@@ -160,6 +191,8 @@ async fn orchestrator_callback_marks_success() {
     assert_eq!(payload["resourceTrn"], Value::String(expected_task_trn(&run_id, &expected_state)));
     assert_eq!(payload["data"]["stateName"], Value::String(expected_state.clone()));
     assert_eq!(payload["runId"], Value::String(run_id));
+    assert!(payload.get("taskRunId").and_then(|v| v.as_str()).is_some());
+    assert!(payload.get("outboxMessageId").and_then(|v| v.as_str()).is_some());
 }
 
 #[tokio::test]
@@ -293,6 +326,84 @@ async fn async_task_manager_http_poll_success() {
     let outbox =
         app_state.outbox_service.fetch_due(Utc::now(), 10).await.expect("fetch due outbox");
     assert_eq!(outbox.len(), 1, "expected success event enqueued");
+}
+
+#[tokio::test]
+async fn outbox_dispatcher_skips_duplicate_events() {
+    let store = Arc::new(SqlStore::new("sqlite::memory:").await.unwrap());
+    let dedup_store = Arc::new(RecordingDedupStore::default());
+    let dedup_arc: Arc<dyn DedupStore> = dedup_store.clone();
+
+    let orchestrator_runs: Arc<dyn OrchestratorRunStore> = store.clone();
+    let orchestrator_outbox: Arc<dyn OrchestratorOutboxStore> = store.clone();
+    let run_service = RunService::new(orchestrator_runs.clone());
+    let outbox_service = OutboxService::new(orchestrator_outbox.clone());
+
+    let tenant = "acme";
+    let target_trn = Trn::new("trn:openact:acme:action/http/test".to_string());
+    let (envelope, _, _) = sample_envelope(&target_trn, tenant);
+    let (run_record, _) = StepflowCommandAdapter::prepare_run(
+        &envelope,
+        tenant,
+        &target_trn,
+        Duration::from_secs(30),
+    );
+    run_service.create_run(run_record.clone()).await.expect("persist run");
+
+    let success_event =
+        StepflowCommandAdapter::build_success_event(&run_record, &json!({"ok": true}));
+    let payload_value = serde_json::to_value(&success_event).expect("event to value");
+
+    outbox_service
+        .enqueue(OrchestratorOutboxInsert {
+            run_id: Some(run_record.run_id.clone()),
+            protocol: "aionix.event.stepflow".to_string(),
+            payload: payload_value.clone(),
+            next_attempt_at: Utc::now(),
+            attempts: 0,
+            last_error: None,
+        })
+        .await
+        .expect("enqueue event");
+
+    let due = outbox_service
+        .fetch_due(Utc::now() + ChronoDuration::seconds(1), 10)
+        .await
+        .expect("fetch due");
+    assert_eq!(due.len(), 1);
+
+    let dispatcher = OutboxDispatcher::with_client(
+        outbox_service.clone(),
+        run_service.clone(),
+        String::new(),
+        OutboxDispatcherConfig::default(),
+        None,
+        Some(dedup_arc.clone()),
+    );
+
+    dispatcher.process_batch_once().await.expect("dispatch event");
+    assert_eq!(dedup_store.duplicate_count(), 0);
+
+    outbox_service
+        .enqueue(OrchestratorOutboxInsert {
+            run_id: Some(run_record.run_id.clone()),
+            protocol: "aionix.event.stepflow".to_string(),
+            payload: payload_value,
+            next_attempt_at: Utc::now(),
+            attempts: 0,
+            last_error: None,
+        })
+        .await
+        .expect("enqueue duplicate");
+
+    let second_due = outbox_service
+        .fetch_due(Utc::now() + ChronoDuration::seconds(1), 10)
+        .await
+        .expect("fetch duplicate due");
+    assert_eq!(second_due.len(), 1);
+
+    dispatcher.process_batch_once().await.expect("dedup skip");
+    assert_eq!(dedup_store.duplicate_count(), 1);
 }
 
 #[tokio::test]

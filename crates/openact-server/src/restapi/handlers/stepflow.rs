@@ -8,7 +8,10 @@ use crate::{
     orchestration::StepflowCommandAdapter,
     AppState,
 };
-use aionix_contracts::parse_command_envelope;
+use aionix_contracts::{
+    parse_command_envelope,
+    status::{display_label, to_event_status, ServiceStatus},
+};
 use axum::{
     extract::{Extension, Path, State},
     http::StatusCode,
@@ -240,7 +243,7 @@ pub async fn execute_command(
                 .update_status(
                     &run_id,
                     OrchestratorRunStatus::Failed,
-                    Some("failed".to_string()),
+                    Some(display_label(ServiceStatus::Failed).into_owned()),
                     None,
                     Some(json!({ "message": server_err.to_string() })),
                 )
@@ -251,11 +254,13 @@ pub async fn execute_command(
             let failure_payload = json!({ "message": server_err.to_string() });
             let failure_event =
                 StepflowCommandAdapter::build_failure_event(&run_snapshot, &failure_payload);
+            let failure_value =
+                serde_json::to_value(&failure_event).expect("serialize failure event envelope");
             if let Err(err) = outbox_service
                 .enqueue(OrchestratorOutboxInsert {
                     run_id: Some(run_id.clone()),
                     protocol: "aionix.event.stepflow".to_string(),
-                    payload: failure_event,
+                    payload: failure_value,
                     next_attempt_at: Utc::now(),
                     attempts: 0,
                     last_error: None,
@@ -271,7 +276,7 @@ pub async fn execute_command(
                 .update_status(
                     &run_id,
                     OrchestratorRunStatus::TimedOut,
-                    Some("timed_out".to_string()),
+                    Some(display_label(ServiceStatus::TimedOut).into_owned()),
                     None,
                     Some(json!({ "message": "execution timed out" })),
                 )
@@ -280,11 +285,13 @@ pub async fn execute_command(
                 tracing::error!(error = %update_err, run_id = %run_id, "failed to mark run as timed out");
             }
             let timeout_event = StepflowCommandAdapter::build_timeout_event(&run_snapshot);
+            let timeout_value =
+                serde_json::to_value(&timeout_event).expect("serialize timeout event envelope");
             if let Err(err) = outbox_service
                 .enqueue(OrchestratorOutboxInsert {
                     run_id: Some(run_id.clone()),
                     protocol: "aionix.event.stepflow".to_string(),
-                    payload: timeout_event,
+                    payload: timeout_value,
                     next_attempt_at: Utc::now(),
                     attempts: 0,
                     last_error: None,
@@ -305,8 +312,9 @@ pub async fn execute_command(
         .map(|value| value.to_ascii_lowercase());
 
     if let Some(status) = status_value.as_deref() {
+        let running_status = to_event_status(ServiceStatus::Running);
         match status {
-            "running" | "accepted" => {
+            s if s == running_status || s == "accepted" => {
                 let heartbeat_timeout = output
                     .as_object()
                     .and_then(|map| map.get("heartbeatTimeout"))
@@ -322,7 +330,7 @@ pub async fn execute_command(
                     .and_then(|value| value.as_str())
                     .map(|value| value.to_string())
                     .or_else(|| {
-                        if status == "running" {
+                        if status == running_status {
                             Some("async_waiting".to_string())
                         } else {
                             Some("fire_forget".to_string())
@@ -353,7 +361,7 @@ pub async fn execute_command(
 
                 let handle_value = output.as_object().and_then(|map| map.get("handle").cloned());
 
-                if status == "running" {
+                if status == running_status {
                     match handle_value.clone() {
                         Some(handle) => {
                             if let Err(err) =
@@ -438,7 +446,7 @@ pub async fn execute_command(
         .update_status(
             &run_id,
             OrchestratorRunStatus::Succeeded,
-            Some("succeeded".to_string()),
+            Some(display_label(ServiceStatus::Succeeded).into_owned()),
             Some(output.clone()),
             None,
         )
@@ -448,11 +456,13 @@ pub async fn execute_command(
     }
 
     let success_event = StepflowCommandAdapter::build_success_event(&run_snapshot, &output);
+    let success_value =
+        serde_json::to_value(&success_event).expect("serialize success event envelope");
     if let Err(err) = outbox_service
         .enqueue(OrchestratorOutboxInsert {
             run_id: Some(run_id.clone()),
             protocol: "aionix.event.stepflow".to_string(),
-            payload: success_event,
+            payload: success_value,
             next_attempt_at: Utc::now(),
             attempts: 0,
             last_error: None,
@@ -463,7 +473,7 @@ pub async fn execute_command(
     }
 
     let response = StepflowCommandResponse {
-        status: "succeeded".to_string(),
+        status: display_label(ServiceStatus::Succeeded).into_owned(),
         result: Some(output),
         run_id: Some(run_id),
         phase: None,
@@ -555,7 +565,7 @@ pub async fn cancel_command(
         .update_status(
             &run.run_id,
             OrchestratorRunStatus::Cancelled,
-            Some("cancelled".to_string()),
+            Some(display_label(ServiceStatus::Cancelled).into_owned()),
             None,
             error_value.clone(),
         )
@@ -563,11 +573,12 @@ pub async fn cancel_command(
         .map_err(|e| ServerError::Internal(e.to_string()).to_http_response(req_id.clone()))?;
 
     let event = StepflowCommandAdapter::build_cancelled_event(&run, &cancel_payload);
+    let event_value = serde_json::to_value(&event).expect("serialize cancelled event envelope");
     outbox_service
         .enqueue(OrchestratorOutboxInsert {
             run_id: Some(run.run_id.clone()),
             protocol: "aionix.event.stepflow".into(),
-            payload: event,
+            payload: event_value,
             next_attempt_at: chrono::Utc::now(),
             attempts: 0,
             last_error: None,
@@ -577,7 +588,7 @@ pub async fn cancel_command(
 
     let response = crate::dto::CancelCommandResponse {
         accepted: true,
-        phase: Some("cancelled".to_string()),
+        phase: Some(display_label(ServiceStatus::Cancelled).into_owned()),
         request_id: Some(req_id.clone()),
     };
 

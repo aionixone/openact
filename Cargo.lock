@@ -2721,10 +2721,12 @@ name = "openact-store"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "aionix-contracts",
  "anyhow",
  "async-trait",
  "base64 0.22.1",
  "chrono",
+ "log",
  "openact-core",
  "rand 0.8.5",
  "serde",

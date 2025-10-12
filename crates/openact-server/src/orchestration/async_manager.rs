@@ -1,3 +1,7 @@
+use aionix_contracts::{
+    headers::OutboundHeaders,
+    status::{display_label, ServiceStatus},
+};
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use jsonpath_lib::Compiled as JsonPathCompiled;
@@ -74,7 +78,24 @@ impl AsyncTaskManager {
         let url = render_template(&plan.url_template, &ctx);
         let mut request = self.http_client.request(plan.method.clone(), url);
 
+        let standard_headers = OutboundHeaders {
+            tenant: run.tenant.as_str(),
+            trace_id: run.trace_id.as_str(),
+            request_id: run.run_id.as_str(),
+            idempotency_key: Some(run.run_id.as_str()),
+        };
+        for (name, value) in standard_headers.as_pairs() {
+            request = request.header(name, value);
+        }
+
         for (key, value) in &plan.headers {
+            let key_lower = key.to_ascii_lowercase();
+            if matches!(
+                key_lower.as_str(),
+                "x-tenant" | "x-trace-id" | "x-request-id" | "x-idempotency-key"
+            ) {
+                continue;
+            }
             request = request.header(key, render_template(value, &ctx));
         }
 
@@ -178,7 +199,7 @@ impl AsyncTaskManager {
             .update_status(
                 &run.run_id,
                 OrchestratorRunStatus::Succeeded,
-                Some("succeeded".to_string()),
+                Some(display_label(ServiceStatus::Succeeded).into_owned()),
                 Some(result.clone()),
                 None,
             )
@@ -186,11 +207,12 @@ impl AsyncTaskManager {
             .context("failed to mark run succeeded")?;
 
         let event = StepflowCommandAdapter::build_success_event(run, &result);
+        let event_value = serde_json::to_value(&event).expect("serialize success event envelope");
         self.outbox_service
             .enqueue(OrchestratorOutboxInsert {
                 run_id: Some(run.run_id.clone()),
                 protocol: "aionix.event.stepflow".to_string(),
-                payload: event,
+                payload: event_value,
                 next_attempt_at: Utc::now(),
                 attempts: 0,
                 last_error: None,
@@ -205,7 +227,7 @@ impl AsyncTaskManager {
             .update_status(
                 &run.run_id,
                 OrchestratorRunStatus::Failed,
-                Some("failed".to_string()),
+                Some(display_label(ServiceStatus::Failed).into_owned()),
                 None,
                 Some(error.clone()),
             )
@@ -213,11 +235,12 @@ impl AsyncTaskManager {
             .context("failed to mark run failed")?;
 
         let event = StepflowCommandAdapter::build_failure_event(run, &error);
+        let event_value = serde_json::to_value(&event).expect("serialize failure event envelope");
         self.outbox_service
             .enqueue(OrchestratorOutboxInsert {
                 run_id: Some(run.run_id.clone()),
                 protocol: "aionix.event.stepflow".to_string(),
-                payload: event,
+                payload: event_value,
                 next_attempt_at: Utc::now(),
                 attempts: 0,
                 last_error: None,
@@ -245,7 +268,7 @@ impl AsyncTaskManager {
 
         loop {
             attempts += 1;
-            match self.execute_http_poll_request(&plan, &ext_id).await {
+            match self.execute_http_poll_request(&plan, &run, &ext_id).await {
                 Ok((status, body)) => {
                     let code = status.as_u16();
                     let body_snapshot = body.clone();
@@ -296,13 +319,31 @@ impl AsyncTaskManager {
     async fn execute_http_poll_request(
         &self,
         plan: &HttpPollingPlan,
+        run: &OrchestratorRunRecord,
         external_run_id: &str,
     ) -> Result<(StatusCode, Value)> {
         let ctx = TemplateContext { external_run_id, reason: None };
         let url = render_template(&plan.url_template, &ctx);
         let mut request = self.http_client.request(plan.method.clone(), url);
 
+        let standard_headers = OutboundHeaders {
+            tenant: run.tenant.as_str(),
+            trace_id: run.trace_id.as_str(),
+            request_id: run.run_id.as_str(),
+            idempotency_key: Some(run.run_id.as_str()),
+        };
+        for (name, value) in standard_headers.as_pairs() {
+            request = request.header(name, value);
+        }
+
         for (key, value) in &plan.headers {
+            let key_lower = key.to_ascii_lowercase();
+            if matches!(
+                key_lower.as_str(),
+                "x-tenant" | "x-trace-id" | "x-request-id" | "x-idempotency-key"
+            ) {
+                continue;
+            }
             request = request.header(key, render_template(value, &ctx));
         }
 

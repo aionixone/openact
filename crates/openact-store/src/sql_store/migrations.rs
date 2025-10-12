@@ -62,6 +62,14 @@ impl MigrationRunner {
             .await?;
         }
 
+        if !applied_versions.contains(&4) {
+            self.run_migration_004().await?;
+
+            sqlx::query("INSERT INTO _migrations (version, name) VALUES (4, '004_outbox_dedup')")
+                .execute(&self.pool)
+                .await?;
+        }
+
         Ok(())
     }
 
@@ -204,6 +212,45 @@ impl MigrationRunner {
         let trailing_stmt = trailing_lines.join("\n").trim().to_string();
         if !trailing_stmt.is_empty() {
             sqlx::query(&trailing_stmt).execute(&mut *tx).await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn run_migration_004(&self) -> StoreResult<()> {
+        let migration_sql = include_str!("../../migrations/004_outbox_dedup.sql");
+        let mut tx = self.pool.begin().await?;
+
+        let mut buffer = String::new();
+
+        for raw_line in migration_sql.lines() {
+            let line = raw_line.trim_end();
+            if line.trim_start().starts_with("--") {
+                continue;
+            }
+
+            buffer.push_str(line);
+            buffer.push('\n');
+
+            if line.trim_end().ends_with(';') {
+                let statement = buffer.trim();
+                if !statement.is_empty() {
+                    let statement = statement.trim_end_matches(';').trim();
+                    if !statement.is_empty() {
+                        sqlx::query(statement).execute(&mut *tx).await?;
+                    }
+                }
+                buffer.clear();
+            }
+        }
+
+        let trailing = buffer.trim();
+        if !trailing.is_empty() {
+            let trailing = trailing.trim_end_matches(';').trim();
+            if !trailing.is_empty() {
+                sqlx::query(trailing).execute(&mut *tx).await?;
+            }
         }
 
         tx.commit().await?;

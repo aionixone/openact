@@ -58,11 +58,13 @@ impl AppState {
         let heartbeat_cfg = load_heartbeat_config();
         let stepflow_endpoint = std::env::var("OPENACT_STEPFLOW_EVENT_ENDPOINT")
             .unwrap_or_else(|_| "http://localhost:8080/api/v1/stepflow/events".to_string());
+        let dedup_store = store.dedup_store();
         let outbox_dispatcher = Arc::new(OutboxDispatcher::new(
             outbox_service.clone(),
             run_service.clone(),
             stepflow_endpoint,
             dispatcher_cfg,
+            Some(dedup_store.clone()),
         ));
         let heartbeat_supervisor = Arc::new(HeartbeatSupervisor::new(
             run_service.clone(),

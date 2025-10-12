@@ -1,5 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
+use aionix_contracts::{
+    cloudevents::CloudEventExtensions,
+    headers::OutboundHeaders,
+    idempotency::DedupStore,
+    status::{display_label, ServiceStatus},
+    EventEnvelope,
+};
 use anyhow::Context;
 use chrono::{Duration as ChronoDuration, Utc};
 use openact_core::orchestration::{
@@ -41,6 +48,7 @@ pub struct OutboxDispatcher {
     pub endpoint: String,
     pub config: OutboxDispatcherConfig,
     pub http_client: Option<reqwest::Client>,
+    dedup: Option<Arc<dyn DedupStore>>,
 }
 
 impl OutboxDispatcher {
@@ -49,8 +57,9 @@ impl OutboxDispatcher {
         runs: RunService,
         endpoint: String,
         config: OutboxDispatcherConfig,
+        dedup: Option<Arc<dyn DedupStore>>,
     ) -> Self {
-        Self::with_client(outbox, runs, endpoint, config, Some(reqwest::Client::new()))
+        Self::with_client(outbox, runs, endpoint, config, Some(reqwest::Client::new()), dedup)
     }
 
     pub fn with_client(
@@ -59,8 +68,9 @@ impl OutboxDispatcher {
         endpoint: String,
         config: OutboxDispatcherConfig,
         http_client: Option<reqwest::Client>,
+        dedup: Option<Arc<dyn DedupStore>>,
     ) -> Self {
-        Self { outbox, runs, endpoint, config, http_client }
+        Self { outbox, runs, endpoint, config, http_client, dedup }
     }
 
     pub async fn run_loop(self: Arc<Self>) {
@@ -95,6 +105,30 @@ impl OutboxDispatcher {
     }
 
     async fn process_record(&self, record: OrchestratorOutboxRecord) -> anyhow::Result<()> {
+        let payload = record.payload.clone();
+        let envelope = serde_json::from_value::<EventEnvelope>(payload.clone()).ok();
+        let mut dedup_guard: Option<(Arc<dyn DedupStore>, String)> = None;
+
+        if let (Some(store_arc), Some(env)) = (self.dedup.as_ref(), envelope.as_ref()) {
+            let extensions = CloudEventExtensions::from_event(env);
+            let key = extensions
+                .outbox_message_id
+                .or(extensions.task_run_id)
+                .unwrap_or_else(|| env.id.as_str())
+                .to_string();
+            if store_arc.check_and_record(&key) {
+                info!(
+                    id = record.id,
+                    run_id = %record.run_id.clone().unwrap_or_default(),
+                    dedup_key = %key,
+                    "outbox event already processed; skipping"
+                );
+                self.outbox.mark_delivered(record.id, Utc::now()).await?;
+                return Ok(());
+            }
+            dedup_guard = Some((Arc::clone(store_arc), key));
+        }
+
         let client = match &self.http_client {
             Some(client) => client,
             None => {
@@ -103,17 +137,51 @@ impl OutboxDispatcher {
                 return Ok(());
             }
         };
-        let payload = record.payload.clone();
-        let response = client
-            .post(&self.endpoint)
-            .json(&payload)
-            .send()
-            .await
-            .context("send event to orchestrator")?;
+
+        let mut request = client.post(&self.endpoint).json(&payload);
+        if let Some(env) = envelope.as_ref() {
+            let extensions = CloudEventExtensions::from_event(env);
+            let idempotency = extensions
+                .outbox_message_id
+                .or(extensions.task_run_id)
+                .unwrap_or_else(|| env.id.as_str());
+            let headers = OutboundHeaders {
+                tenant: env.tenant.as_str(),
+                trace_id: env.trace_id.as_str(),
+                request_id: env.id.as_str(),
+                idempotency_key: Some(idempotency),
+            };
+            for (name, value) in headers.as_pairs() {
+                request = request.header(name, value);
+            }
+        } else {
+            warn!(
+                id = record.id,
+                "failed to parse outbox payload as EventEnvelope; sending without standard headers"
+            );
+        }
+
+        let response = match request.send().await {
+            Ok(res) => res,
+            Err(err) => {
+                if let Some((store, key)) = dedup_guard {
+                    store.remove(&key);
+                }
+                return Err(err).context("send event to orchestrator");
+            }
+        };
 
         if response.status().is_success() {
             info!(id = record.id, run_id = %record.run_id.clone().unwrap_or_default(), "outbox event delivered");
             self.outbox.mark_delivered(record.id, Utc::now()).await?;
+            if let Some(env) = envelope.as_ref() {
+                let extensions = CloudEventExtensions::from_event(env);
+                let key = extensions
+                    .outbox_message_id
+                    .or(extensions.task_run_id)
+                    .unwrap_or_else(|| env.id.as_str());
+                debug!(id = record.id, idempotency_key = %key, "event delivered with idempotency key");
+            }
         } else {
             let err_body = response.text().await.unwrap_or_else(|_| "<no body>".into());
             let current_attempt = record.attempts + 1;
@@ -135,6 +203,9 @@ impl OutboxDispatcher {
                     backoff_ms = backoff.num_milliseconds(),
                     "outbox delivery failed; scheduling retry"
                 );
+                if let Some((store, key)) = dedup_guard {
+                    store.remove(&key);
+                }
                 self.outbox
                     .mark_retry(record.id, next_attempt, current_attempt, Some(err_body))
                     .await?;
@@ -207,7 +278,7 @@ impl HeartbeatSupervisor {
                 .update_status(
                     &run.run_id,
                     OrchestratorRunStatus::TimedOut,
-                    Some("timed_out".to_string()),
+                    Some(display_label(ServiceStatus::TimedOut).into_owned()),
                     None,
                     Some(Value::String("heartbeat expired".into())),
                 )
@@ -220,11 +291,12 @@ impl HeartbeatSupervisor {
 
     async fn enqueue_timeout_event(&self, run: &OrchestratorRunRecord) -> anyhow::Result<()> {
         let event = StepflowCommandAdapter::build_timeout_event(run);
+        let payload = serde_json::to_value(&event).expect("serialize timeout event envelope");
         self.outbox
             .enqueue(OrchestratorOutboxInsert {
                 run_id: Some(run.run_id.clone()),
                 protocol: "aionix.event.stepflow".into(),
-                payload: event,
+                payload,
                 next_attempt_at: Utc::now(),
                 attempts: 0,
                 last_error: None,

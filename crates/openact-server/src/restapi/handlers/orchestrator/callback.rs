@@ -1,3 +1,7 @@
+use aionix_contracts::{
+    status::{display_label, from_openact_status, ServiceStatus},
+    EventEnvelope,
+};
 use axum::{
     extract::{Path, State},
     Extension, Json,
@@ -43,14 +47,23 @@ pub async fn mark_completion(
                 .to_http_response(req_id.clone())
         })?;
 
-    match payload.status.to_ascii_lowercase().as_str() {
-        "succeeded" => {
+    let status = match from_openact_status(&payload.status) {
+        Some(status) => status,
+        None => {
+            let err =
+                ServerError::InvalidInput(format!("unsupported status '{}'.", payload.status));
+            return Err(err.to_http_response(req_id.clone()));
+        }
+    };
+
+    match status {
+        ServiceStatus::Succeeded => {
             let result_value = payload.result.unwrap_or(Value::Null);
             run_service
                 .update_status(
                     &run.run_id,
                     OrchestratorRunStatus::Succeeded,
-                    Some("succeeded".to_string()),
+                    Some(display_label(ServiceStatus::Succeeded).into_owned()),
                     Some(result_value.clone()),
                     None,
                 )
@@ -62,14 +75,14 @@ pub async fn mark_completion(
             let event = StepflowCommandAdapter::build_success_event(&run, &result_value);
             enqueue_event(&outbox_service, &run, event, &req_id).await?;
         }
-        "failed" => {
+        ServiceStatus::Failed => {
             let error_value =
                 payload.error.unwrap_or_else(|| json!({ "message": "Run reported failure" }));
             run_service
                 .update_status(
                     &run.run_id,
                     OrchestratorRunStatus::Failed,
-                    Some("failed".to_string()),
+                    Some(display_label(ServiceStatus::Failed).into_owned()),
                     None,
                     Some(error_value.clone()),
                 )
@@ -81,14 +94,14 @@ pub async fn mark_completion(
             let event = StepflowCommandAdapter::build_failure_event(&run, &error_value);
             enqueue_event(&outbox_service, &run, event, &req_id).await?;
         }
-        "cancelled" => {
+        ServiceStatus::Cancelled => {
             let error_value =
                 payload.error.unwrap_or_else(|| json!({ "message": "Run cancelled" }));
             run_service
                 .update_status(
                     &run.run_id,
                     OrchestratorRunStatus::Cancelled,
-                    Some("cancelled".to_string()),
+                    Some(display_label(ServiceStatus::Cancelled).into_owned()),
                     None,
                     Some(error_value.clone()),
                 )
@@ -97,11 +110,14 @@ pub async fn mark_completion(
                     ServerError::Internal(e.to_string()).to_http_response(req_id.clone())
                 })?;
 
-            let event = StepflowCommandAdapter::build_failure_event(&run, &error_value);
+            let event = StepflowCommandAdapter::build_cancelled_event(&run, &error_value);
             enqueue_event(&outbox_service, &run, event, &req_id).await?;
         }
         other => {
-            let err = ServerError::InvalidInput(format!("unsupported status '{}'.", other));
+            let err = ServerError::InvalidInput(format!(
+                "status '{}' cannot be reported via completion endpoint.",
+                display_label(other)
+            ));
             return Err(err.to_http_response(req_id));
         }
     }
@@ -112,9 +128,11 @@ pub async fn mark_completion(
 async fn enqueue_event(
     outbox: &OutboxService,
     run: &OrchestratorRunRecord,
-    payload: Value,
+    envelope: EventEnvelope,
     request_id: &str,
 ) -> Result<(), (axum::http::StatusCode, Json<crate::error::ErrorResponse>)> {
+    let payload =
+        serde_json::to_value(&envelope).expect("serialize orchestrator callback event envelope");
     outbox
         .enqueue(OrchestratorOutboxInsert {
             run_id: Some(run.run_id.clone()),

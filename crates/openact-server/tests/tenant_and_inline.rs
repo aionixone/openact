@@ -37,6 +37,7 @@ async fn make_router() -> Router {
         String::new(),
         OutboxDispatcherConfig::default(),
         None,
+        None,
     ));
     let heartbeat_supervisor = Arc::new(HeartbeatSupervisor::new(
         run_service.clone(),
@@ -130,10 +131,9 @@ async fn execute_inline_validation_success() {
     let body_bytes = body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     let warnings = body_json["metadata"]["warnings"].as_array().cloned().unwrap_or_default();
-    assert!(warnings.iter().any(|w| w
-        .as_str()
-        .map(|s| s.starts_with("input_schema_digest=sha256:"))
-        .unwrap_or(false)));
+    assert!(warnings.iter().any(|w| {
+        w.as_str().map(|s| s.starts_with("input_schema_digest=sha256:")).unwrap_or(false)
+    }));
     assert!(warnings.iter().any(|w| w.as_str() == Some("validated=true")));
     assert_eq!(body_json["metadata"]["tenant"], serde_json::Value::String("acme".into()));
     assert_eq!(
@@ -248,6 +248,7 @@ async fn make_router_with_gov(allow: Vec<&str>, deny: Vec<&str>, seed: bool) -> 
         run_service.clone(),
         "http://localhost:8080/api/v1/stepflow/events".to_string(),
         OutboxDispatcherConfig::default(),
+        None,
         None,
     ));
     let heartbeat_supervisor = Arc::new(HeartbeatSupervisor::new(
