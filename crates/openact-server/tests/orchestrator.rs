@@ -1,4 +1,4 @@
-use aionix_protocol::Trn as ProtocolTrn;
+use aionix_contracts::{CommandEnvelope, Trn as ContractTrn};
 use axum::{body::Body, http::Request};
 use chrono::{Duration as ChronoDuration, Utc};
 use httpmock::{Method::GET, MockServer};
@@ -24,7 +24,7 @@ use uuid::Uuid;
 fn sample_envelope(
     target: &Trn,
     tenant: &str,
-) -> (aionix_protocol::CommandEnvelope, String, String) {
+) -> (CommandEnvelope, String, String) {
     let run_uuid = Uuid::new_v4().to_string();
     let run_id = format!("trn:stepflow:{}:execution/demo/{}@v1", tenant, run_uuid);
     let state_name = "SampleState".to_string();
@@ -37,13 +37,13 @@ fn sample_envelope(
     extensions.insert("runTrn".to_string(), Value::String(run_id.clone()));
     extensions.insert("stateName".to_string(), Value::String(state_name.clone()));
 
-    let envelope = aionix_protocol::CommandEnvelope {
+    let envelope = CommandEnvelope {
         schema_version: "1.1.0".to_string(),
         id: Uuid::new_v4().to_string(),
         timestamp: Utc::now().to_rfc3339(),
         command: "openact.test.execute".to_string(),
-        source: ProtocolTrn::parse(&format!("trn:stepflow:{}:engine", tenant)).unwrap(),
-        target: ProtocolTrn::parse(target.as_str()).unwrap(),
+        source: ContractTrn::parse(&format!("trn:stepflow:{}:engine", tenant)).unwrap(),
+        target: ContractTrn::parse(target.as_str()).unwrap(),
         tenant: tenant.to_string(),
         trace_id: Uuid::new_v4().to_string(),
         parameters,
@@ -65,7 +65,7 @@ fn sample_envelope(
 }
 
 fn expected_task_trn(run_id: &str, state: &str) -> String {
-    let parsed = ProtocolTrn::parse(run_id).unwrap();
+    let parsed = ContractTrn::parse(run_id).unwrap();
     let run_path = parsed.resource_path().unwrap_or("");
     let version = parsed.version().unwrap_or("v1");
     format!("trn:stepflow:{}:task/{}/{}@{}", parsed.tenant(), run_path, state, version)

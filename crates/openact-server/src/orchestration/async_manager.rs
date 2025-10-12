@@ -26,7 +26,11 @@ pub struct AsyncTaskManager {
 
 impl AsyncTaskManager {
     pub fn new(run_service: RunService, outbox_service: OutboxService) -> Self {
-        Self { run_service, outbox_service, http_client: Client::new() }
+        let http_client = Client::builder()
+            .no_proxy()
+            .build()
+            .expect("failed to construct async manager HTTP client");
+        Self { run_service, outbox_service, http_client }
     }
 
     pub fn submit(&self, run: OrchestratorRunRecord, handle: Value) -> Result<()> {
@@ -610,7 +614,12 @@ struct HttpCondition {
 
 impl HttpCondition {
     fn matches(&self, body: &Value) -> bool {
-        match body.pointer(&self.pointer) {
+        let target = if self.pointer.is_empty() || self.pointer == "/" {
+            Some(body)
+        } else {
+            body.pointer(&self.pointer)
+        };
+        match target {
             Some(value) => self.operator.compare(value),
             None => self.operator.compare_missing(body),
         }

@@ -1,7 +1,8 @@
 # OpenAct Integration Guide (Command → Event)
 
 This document describes how the OpenAct service integrates with Stepflow using the
-`aionix-protocol` envelopes. Stepflow already accepts these envelopes on both the command
+shared `aionix-contracts` envelopes (which wrap the lower-level `aionix-protocol`
+schemas). Stepflow already accepts these envelopes on both the command
 and event paths, so OpenAct only needs to adopt the same payload shapes.
 
 ## 1. Overview
@@ -20,7 +21,7 @@ Stepflow Runtime ──(CommandEnvelope)────► OpenAct Action
   * **async** acknowledgement + later emits an `EventEnvelope` to Stepflow’s
     `/stepflow/events` endpoint (waiter behaviour).
 * All request/response payloads should be validated with the
-  [`aionix-protocol`](https://github.com/aionixone/aionix-protocol) crate (Rust) or the
+  [`aionix-contracts`](https://github.com/aionixone/aionix-contracts) crate (Rust) or the
   generated SDKs for other languages.
 
 ## 2. Command Handling
@@ -43,7 +44,7 @@ OpenAct must expose a task execution endpoint (e.g. `POST /actions/{trn}/execute
 
 ### Command Validation Checklist
 
-1. Parse with `aionix_protocol::parse_command_envelope` (Rust) or the generated validator.
+1. Parse with `aionix_contracts::parse_command_envelope` (Rust) or the generated validator.
 2. Ensure the `target` TRN belongs to OpenAct and resolve it to an internal action.
 3. Authorise using `tenant`, `actorTrn`, `authzScopes` if provided.
 4. Derive execution context:
@@ -154,7 +155,7 @@ Content-Type: application/json
 Body: EventEnvelope
 ```
 
-Use `aionix_protocol::parse_event_envelope` to validate before sending. On HTTP errors
+Use `aionix_contracts::parse_event_envelope` (or `validate_event_envelope`) to validate before sending. On HTTP errors
 replay with exponential backoff; Stepflow’s endpoint is idempotent (by `id`).
 
 ### EventEnvelope Mapping
@@ -296,6 +297,7 @@ the orchestrator is notified.
 
 ## 7. References
 
+* Contracts crate: <https://github.com/aionixone/aionix-contracts>
 * Protocol schemas: <https://github.com/aionixone/aionix-protocol>
 * Stepflow event handler: `crates/stepflow-http-server/src/handlers/events.rs`
 * Runtime ingestion: `crates/stepflow-runtime/src/services/events.rs`

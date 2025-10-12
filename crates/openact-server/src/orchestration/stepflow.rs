@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use aionix_protocol::{CommandEnvelope, Trn as ProtocolTrn};
+use aionix_contracts::{CommandEnvelope, Trn as ContractTrn};
 use chrono::{DateTime, Utc};
 use openact_core::orchestration::{OrchestratorRunRecord, OrchestratorRunStatus};
 use openact_core::Trn;
@@ -218,19 +218,19 @@ impl StepflowCommandAdapter {
         }
     }
 
-    fn normalise_execution_trn(raw: &str, tenant_hint: &str) -> Option<ProtocolTrn> {
-        if let Ok(trn) = ProtocolTrn::parse(raw) {
+    fn normalise_execution_trn(raw: &str, tenant_hint: &str) -> Option<ContractTrn> {
+        if let Ok(trn) = ContractTrn::parse(raw) {
             return Some(trn);
         }
         if let Some(converted) = Self::convert_legacy_execution_trn(raw) {
-            if let Ok(trn) = ProtocolTrn::parse(&converted) {
+            if let Ok(trn) = ContractTrn::parse(&converted) {
                 return Some(trn);
             }
         }
         // Fallback: if caller only supplied short run_id, synthesise with tenant hint
         if !raw.contains(':') {
             let synthetic = format!("trn:stepflow:{}:execution/default/{}@v1", tenant_hint, raw);
-            if let Ok(trn) = ProtocolTrn::parse(&synthetic) {
+            if let Ok(trn) = ContractTrn::parse(&synthetic) {
                 return Some(trn);
             }
         }

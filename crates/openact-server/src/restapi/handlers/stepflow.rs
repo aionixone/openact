@@ -8,7 +8,7 @@ use crate::{
     orchestration::StepflowCommandAdapter,
     AppState,
 };
-use aionix_protocol::parse_command_envelope;
+use aionix_contracts::parse_command_envelope;
 use axum::{
     extract::{Extension, Path, State},
     http::StatusCode,

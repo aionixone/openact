@@ -76,6 +76,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "aionix-contracts"
+version = "0.1.0"
+dependencies = [
+ "aionix-protocol",
+ "jsonschema",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "aionix-protocol"
 version = "0.1.0"
 dependencies = [
@@ -2673,7 +2685,7 @@ dependencies = [
 name = "openact-server"
 version = "0.1.0"
 dependencies = [
- "aionix-protocol",
+ "aionix-contracts",
  "anyhow",
  "async-stream",
  "async-trait",

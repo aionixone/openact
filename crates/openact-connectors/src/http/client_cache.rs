@@ -58,7 +58,8 @@ impl ClientConfig {
         timeout_manager.validate()?;
         
         // Apply timeouts to client builder (connection timeout only)
-        let mut builder = timeout_manager.apply_to_client_builder(Client::builder());
+        let mut builder =
+            timeout_manager.apply_to_client_builder(Client::builder().no_proxy());
 
         // Apply proxy configuration
         if let Some(proxy_url) = &self.proxy_url {
