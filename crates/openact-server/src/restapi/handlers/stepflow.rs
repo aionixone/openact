@@ -156,11 +156,8 @@ pub async fn execute_command(
     let action_trn_str = target_trn.as_str().to_string();
 
     // Check if this is a fire-forget execution
-    let is_fire_forget = envelope
-        .parameters
-        .get("mode")
-        .and_then(|v| v.as_str())
-        == Some("fire-forget");
+    let is_fire_forget =
+        envelope.parameters.get("mode").and_then(|v| v.as_str()) == Some("fire-forget");
 
     if is_fire_forget {
         // Fire-forget mode: execute in background and return immediately
@@ -176,18 +173,22 @@ pub async fn execute_command(
         tokio::spawn(async move {
             let _permit = concurrency_permit;
             let ctx = ExecutionContext::new();
-            let result = registry_clone
-                .execute(&target_trn_clone, input_clone, Some(ctx))
-                .await;
+            let result = registry_clone.execute(&target_trn_clone, input_clone, Some(ctx)).await;
 
             // Update run status based on result (best effort, don't fail if this fails)
             let status = match result {
                 Ok(_) => OrchestratorRunStatus::Succeeded,
                 Err(_) => OrchestratorRunStatus::Failed,
             };
-            
+
             let _ = run_service_clone
-                .update_status(&run_id_clone, status, Some("fire_forget_completed".to_string()), None, None)
+                .update_status(
+                    &run_id_clone,
+                    status,
+                    Some("fire_forget_completed".to_string()),
+                    None,
+                    None,
+                )
                 .await;
 
             tracing::info!(

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use aionix_protocol::CommandEnvelope;
+use aionix_protocol::{CommandEnvelope, Trn as ProtocolTrn};
 use chrono::{DateTime, Utc};
 use openact_core::orchestration::{OrchestratorRunRecord, OrchestratorRunStatus};
 use openact_core::Trn;
@@ -17,13 +17,18 @@ impl StepflowCommandAdapter {
         target_trn: &Trn,
         effective_timeout: Duration,
     ) -> (OrchestratorRunRecord, Option<u64>) {
-        let run_id = envelope
+        let raw_run_id = envelope
             .parameters
             .get("runId")
             .and_then(|value| value.as_str())
             .or_else(|| envelope.extensions.get("runTrn").and_then(|value| value.as_str()))
             .map(|value| value.to_string())
             .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let canonical_run_trn = Self::normalise_execution_trn(&raw_run_id, tenant);
+        let run_id = canonical_run_trn
+            .as_ref()
+            .map(|trn| trn.to_string())
+            .unwrap_or_else(|| raw_run_id.clone());
         let state_name = envelope
             .parameters
             .get("stateName")
@@ -34,7 +39,9 @@ impl StepflowCommandAdapter {
             .extensions
             .get("runTrn")
             .and_then(|value| value.as_str())
-            .map(|value| value.to_string());
+            .and_then(|raw| Self::normalise_execution_trn(raw, tenant))
+            .or_else(|| canonical_run_trn.clone())
+            .map(|trn| trn.to_string());
         let now = Utc::now();
         let deadline_at: Option<DateTime<Utc>> =
             chrono::Duration::from_std(effective_timeout).ok().map(|delta| now + delta);
@@ -44,8 +51,8 @@ impl StepflowCommandAdapter {
         let mut metadata = Map::new();
         metadata.insert("schemaVersion".into(), Value::String(envelope.schema_version.clone()));
         metadata.insert("command".into(), Value::String(envelope.command.clone()));
-        metadata.insert("source".into(), Value::String(envelope.source.clone()));
-        metadata.insert("target".into(), Value::String(envelope.target.clone()));
+        metadata.insert("source".into(), Value::String(envelope.source.to_string()));
+        metadata.insert("target".into(), Value::String(envelope.target.to_string()));
         if let Some(state) = state_name.clone() {
             metadata.insert("stateName".into(), Value::String(state));
         }
@@ -134,7 +141,8 @@ impl StepflowCommandAdapter {
         let correlation = run.correlation_id.clone().unwrap_or_else(|| run.command_id.clone());
 
         // Extract workflow-level runId from metadata (if available)
-        let workflow_run_id = run.metadata
+        let workflow_run_id = run
+            .metadata
             .as_ref()
             .and_then(|m| m.get("runTrn"))
             .and_then(|v| v.as_str())
@@ -186,11 +194,72 @@ impl StepflowCommandAdapter {
     }
 
     fn build_resource_trn(run: &OrchestratorRunRecord, state_name: Option<&str>) -> String {
-        let run_segment = Self::metadata_field(run, "runTrn").unwrap_or_else(|| run.run_id.clone());
-        if let Some(state) = state_name {
-            format!("trn:stepflow:{}:task/{}/{}", run.tenant, run_segment, state)
-        } else {
-            format!("trn:stepflow:{}:task/{}", run.tenant, run_segment)
+        let raw = Self::metadata_field(run, "runTrn").unwrap_or_else(|| run.run_id.clone());
+        if let Some(exec_trn) = Self::normalise_execution_trn(&raw, &run.tenant) {
+            let tenant = exec_trn.tenant().to_string();
+            let version = exec_trn.version().unwrap_or("v1");
+            let mut path = exec_trn
+                .resource_path()
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| run.run_id.clone());
+            if let Some(state) = state_name {
+                if !path.is_empty() {
+                    path.push('/');
+                }
+                path.push_str(state);
+            }
+            return format!("trn:stepflow:{}:task/{}@{}", tenant, path, version);
         }
+
+        if let Some(state) = state_name {
+            format!("trn:stepflow:{}:task/{}/{}", run.tenant, raw, state)
+        } else {
+            format!("trn:stepflow:{}:task/{}", run.tenant, raw)
+        }
+    }
+
+    fn normalise_execution_trn(raw: &str, tenant_hint: &str) -> Option<ProtocolTrn> {
+        if let Ok(trn) = ProtocolTrn::parse(raw) {
+            return Some(trn);
+        }
+        if let Some(converted) = Self::convert_legacy_execution_trn(raw) {
+            if let Ok(trn) = ProtocolTrn::parse(&converted) {
+                return Some(trn);
+            }
+        }
+        // Fallback: if caller only supplied short run_id, synthesise with tenant hint
+        if !raw.contains(':') {
+            let synthetic = format!("trn:stepflow:{}:execution/default/{}@v1", tenant_hint, raw);
+            if let Ok(trn) = ProtocolTrn::parse(&synthetic) {
+                return Some(trn);
+            }
+        }
+        None
+    }
+
+    fn convert_legacy_execution_trn(raw: &str) -> Option<String> {
+        let trimmed = raw.strip_prefix("trn:stepflow:")?;
+        let mut parts = trimmed.splitn(4, ':');
+        let tenant = parts.next()?;
+        let resource_type = parts.next()?;
+        if resource_type != "execution" {
+            return None;
+        }
+        let workflow = parts.next()?;
+        let remainder = parts.next().unwrap_or("");
+        if workflow.is_empty() || remainder.is_empty() {
+            return None;
+        }
+        let (run_part, version) = remainder
+            .split_once('@')
+            .map(|(run, ver)| (run, ver.trim_start_matches('@')))
+            .unwrap_or((remainder, "v1"));
+        Some(format!(
+            "trn:stepflow:{}:execution/{}/{}@{}",
+            tenant,
+            workflow,
+            run_part,
+            if version.is_empty() { "v1" } else { version }
+        ))
     }
 }

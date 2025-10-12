@@ -1,3 +1,4 @@
+use aionix_protocol::Trn as ProtocolTrn;
 use axum::{body::Body, http::Request};
 use chrono::{Duration as ChronoDuration, Utc};
 use httpmock::{Method::GET, MockServer};
@@ -25,7 +26,7 @@ fn sample_envelope(
     tenant: &str,
 ) -> (aionix_protocol::CommandEnvelope, String, String) {
     let run_uuid = Uuid::new_v4().to_string();
-    let run_id = format!("trn:stepflow:{}:execution/demo:{}", tenant, run_uuid);
+    let run_id = format!("trn:stepflow:{}:execution/demo/{}@v1", tenant, run_uuid);
     let state_name = "SampleState".to_string();
 
     let mut parameters = Map::new();
@@ -41,8 +42,8 @@ fn sample_envelope(
         id: Uuid::new_v4().to_string(),
         timestamp: Utc::now().to_rfc3339(),
         command: "openact.test.execute".to_string(),
-        source: format!("trn:stepflow:{}:engine", tenant),
-        target: target.as_str().to_string(),
+        source: ProtocolTrn::parse(&format!("trn:stepflow:{}:engine", tenant)).unwrap(),
+        target: ProtocolTrn::parse(target.as_str()).unwrap(),
         tenant: tenant.to_string(),
         trace_id: Uuid::new_v4().to_string(),
         parameters,
@@ -61,6 +62,13 @@ fn sample_envelope(
     };
 
     (envelope, run_id, state_name)
+}
+
+fn expected_task_trn(run_id: &str, state: &str) -> String {
+    let parsed = ProtocolTrn::parse(run_id).unwrap();
+    let run_path = parsed.resource_path().unwrap_or("");
+    let version = parsed.version().unwrap_or("v1");
+    format!("trn:stepflow:{}:task/{}/{}@{}", parsed.tenant(), run_path, state, version)
 }
 
 async fn build_app_state(store: Arc<SqlStore>) -> AppState {
@@ -149,10 +157,7 @@ async fn orchestrator_callback_marks_success() {
     let payload = &due[0].payload;
     assert_eq!(payload["data"]["status"], "succeeded");
     assert_eq!(payload["type"], "aionix.stepflow.task.succeeded");
-    assert_eq!(
-        payload["resourceTrn"],
-        Value::String(format!("trn:stepflow:{}:task/{}/{}", tenant, run_id, expected_state))
-    );
+    assert_eq!(payload["resourceTrn"], Value::String(expected_task_trn(&run_id, &expected_state)));
     assert_eq!(payload["data"]["stateName"], Value::String(expected_state.clone()));
     assert_eq!(payload["runId"], Value::String(run_id));
 }
@@ -381,10 +386,7 @@ async fn orchestrator_callback_marks_failure() {
     assert_eq!(payload["type"], "aionix.stepflow.task.failed");
     assert_eq!(payload["data"]["stateName"], Value::String(expected_state.clone()));
     assert_eq!(payload["runId"], Value::String(run_id.clone()));
-    assert_eq!(
-        payload["resourceTrn"],
-        Value::String(format!("trn:stepflow:{}:task/{}/{}", tenant, run_id, expected_state))
-    );
+    assert_eq!(payload["resourceTrn"], Value::String(expected_task_trn(&run_id, &expected_state)));
 }
 
 #[tokio::test]
@@ -434,10 +436,7 @@ async fn orchestrator_cancel_marks_cancelled() {
     assert_eq!(payload["data"]["status"], "cancelled");
     assert_eq!(payload["type"], "aionix.stepflow.task.cancelled");
     assert_eq!(payload["runId"], Value::String(run_id.clone()));
-    assert_eq!(
-        payload["resourceTrn"],
-        Value::String(format!("trn:stepflow:{}:task/{}/{}", tenant, run_id, expected_state))
-    );
+    assert_eq!(payload["resourceTrn"], Value::String(expected_task_trn(&run_id, &expected_state)));
 }
 
 #[tokio::test]
@@ -477,8 +476,5 @@ async fn heartbeat_supervisor_marks_timeout_and_enqueues_event() {
     assert_eq!(payload["type"], "aionix.stepflow.task.timed_out");
     assert_eq!(payload["data"]["stateName"], Value::String(expected_state.clone()));
     assert_eq!(payload["runId"], Value::String(run_id.clone()));
-    assert_eq!(
-        payload["resourceTrn"],
-        Value::String(format!("trn:stepflow:{}:task/{}/{}", tenant, run_id, expected_state))
-    );
+    assert_eq!(payload["resourceTrn"], Value::String(expected_task_trn(&run_id, &expected_state)));
 }
