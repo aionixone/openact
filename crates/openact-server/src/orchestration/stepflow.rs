@@ -133,8 +133,16 @@ impl StepflowCommandAdapter {
         let tenant = run.tenant.clone();
         let correlation = run.correlation_id.clone().unwrap_or_else(|| run.command_id.clone());
 
+        // Extract workflow-level runId from metadata (if available)
+        let workflow_run_id = run.metadata
+            .as_ref()
+            .and_then(|m| m.get("runTrn"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| run.run_id.clone());
+
         if !data.contains_key("runId") {
-            data.insert("runId".to_string(), Value::String(run.run_id.clone()));
+            data.insert("runId".to_string(), Value::String(workflow_run_id.clone()));
         }
 
         let state_name = if let Some(existing) = data.get("stateName").and_then(|v| v.as_str()) {
@@ -161,8 +169,11 @@ impl StepflowCommandAdapter {
             "tenant": tenant,
             "traceId": run.trace_id,
             "resourceTrn": resource_trn,
-            "runId": run.run_id,
+            "runId": workflow_run_id,
             "correlationId": correlation,
+            "extensions": {
+                "taskRunId": run.run_id
+            }
         })
     }
 

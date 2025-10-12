@@ -155,6 +155,73 @@ pub async fn execute_command(
     let execution_start = Instant::now();
     let action_trn_str = target_trn.as_str().to_string();
 
+    // Check if this is a fire-forget execution
+    let is_fire_forget = envelope
+        .parameters
+        .get("mode")
+        .and_then(|v| v.as_str())
+        == Some("fire-forget");
+
+    if is_fire_forget {
+        // Fire-forget mode: execute in background and return immediately
+        let registry_clone = registry.clone();
+        let target_trn_clone = target_trn.clone();
+        let input_clone = input_payload.clone();
+        let run_service_clone = run_service.clone();
+        let run_id_clone = run_id.clone();
+        let req_id_clone = req_id.clone();
+        let envelope_id = envelope.id.clone();
+        let action_trn_bg = action_trn_str.clone();
+
+        tokio::spawn(async move {
+            let _permit = concurrency_permit;
+            let ctx = ExecutionContext::new();
+            let result = registry_clone
+                .execute(&target_trn_clone, input_clone, Some(ctx))
+                .await;
+
+            // Update run status based on result (best effort, don't fail if this fails)
+            let status = match result {
+                Ok(_) => OrchestratorRunStatus::Succeeded,
+                Err(_) => OrchestratorRunStatus::Failed,
+            };
+            
+            let _ = run_service_clone
+                .update_status(&run_id_clone, status, Some("fire_forget_completed".to_string()), None, None)
+                .await;
+
+            tracing::info!(
+                request_id = %req_id_clone,
+                command_id = %envelope_id,
+                action = %action_trn_bg,
+                run_id = %run_id_clone,
+                "fire-forget task completed in background"
+            );
+        });
+
+        tracing::info!(
+            request_id = %req_id,
+            command_id = %envelope.id,
+            action = %action_trn_str,
+            run_id = %run_id,
+            "fire-forget task accepted and spawned"
+        );
+
+        // Return immediately with accepted status
+        let response = StepflowCommandResponse {
+            status: "accepted".to_string(),
+            result: None,
+            run_id: Some(run_id),
+            phase: Some("fire_forget".to_string()),
+            heartbeat_timeout: None,
+            status_ttl: None,
+            correlation_id: envelope.correlation_id.clone(),
+            request_id: Some(req_id),
+        };
+
+        return Ok(Json(response));
+    }
+
     let fut = async move {
         let _permit = concurrency_permit;
         let ctx = ExecutionContext::new();
